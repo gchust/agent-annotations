@@ -172,13 +172,15 @@ export class FileTaskStore {
   }
 
   close(token: string): Promise<void> {
-    return this.#writes.then(() => {
-      try {
-        const session = readJson(this.sessionPath) as { token?: unknown };
-        if (session.token === token) rmSync(this.sessionPath, { force: true });
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      }
-    });
+    return this.#writes.then(() => this.closeSession(token));
+  }
+
+  closeSession(token: string): void {
+    try {
+      const session = readJson(this.sessionPath) as { token?: unknown };
+      if (session.token === token) rmSync(this.sessionPath, { force: true });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
   }
 }

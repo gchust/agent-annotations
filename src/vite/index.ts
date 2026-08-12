@@ -169,7 +169,16 @@ export default function agentFeedback(
       else httpServer?.once("listening", listening);
       if (httpServer && !closeInstalled) {
         closeInstalled = true;
-        httpServer.once("close", () => void store.close(token));
+        const signals = ["SIGINT", "SIGTERM"] as const;
+        const onSignal = (signal: NodeJS.Signals) => {
+          store.closeSession(token);
+          process.kill(process.pid, signal);
+        };
+        for (const signal of signals) process.once(signal, onSignal);
+        httpServer.once("close", () => {
+          for (const signal of signals) process.off(signal, onSignal);
+          void store.close(token);
+        });
       }
       server.middlewares.use(async (request, response, next) => {
         const url = new URL(request.url ?? "/", "http://agent-feedback.local");

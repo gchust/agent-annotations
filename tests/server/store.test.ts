@@ -25,7 +25,7 @@ describe("file task store", () => {
     expect(JSON.parse(readFileSync(store.sessionPath, "utf8"))).toEqual(session);
     await store.close("wrong");
     expect(statSync(store.sessionPath).isFile()).toBe(true);
-    await store.close("secret");
+    store.closeSession("secret");
     expect(() => statSync(store.sessionPath)).toThrow();
   });
 
