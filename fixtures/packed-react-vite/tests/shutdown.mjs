@@ -24,7 +24,7 @@ const port = await new Promise((resolve, reject) => {
   });
 });
 
-rmSync(runtimeRoot, { recursive: true, force: true });
+rmSync(sessionPath, { force: true });
 const child = spawn(process.execPath, [vite, "--host", "127.0.0.1", "--port", String(port), "--strictPort"], {
   stdio: ["ignore", "pipe", "pipe"],
 });
