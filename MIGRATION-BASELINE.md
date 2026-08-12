@@ -42,6 +42,7 @@ All 44 `src/studio/**` files are TypeScript or TSX. The five public Studio scrip
 Fresh `rg` inspection found these direct boundaries in the embedded implementation:
 
 - `src/studio/toolbar.tsx` imports `@nocobase/portal-sdk/i18n`.
+- `src/studio/redact.ts` imports the NocoBase error-boundary redactor from `@/extensions/nocobase-error-boundary/error-diagnostics`.
 - `src/studio/endpoint.ts`, `inspection/normalize.ts`, `inspection/region.ts`, and `inspection/nocobase-context.ts` recognize `data-ai-page-element` and `data-nb-*`.
 - `vite.config.ts` reads `NOCOBASE_*` values and directly registers `portalStudioPlugin` from `src/studio/vite.ts`.
 - `src/studio/vite.ts` and the public scripts use Portal Studio names, `/__portal-studio/*`, `x-portal-studio-token`, and `.portal-studio`.
