@@ -87,8 +87,20 @@ describe("agent-feedback.task.v1 schema", () => {
       )
     ).toMatchObject({ ok: false, issue: { code: "limit_exceeded" } });
     expect(
-      validateAgentFeedbackTask(withExtension({ text: "x".repeat(MAX_EXTENSION_BYTES) }))
-    ).toMatchObject({ ok: false, issue: { code: "limit_exceeded" } });
+      validateAgentFeedbackTask(
+        withExtension({
+          first: "x".repeat(7_000),
+          second: "y".repeat(7_000),
+          third: "z".repeat(3_000),
+        })
+      )
+    ).toMatchObject({
+      ok: false,
+      issue: {
+        code: "limit_exceeded",
+        message: `Extension data is limited to ${MAX_EXTENSION_BYTES} bytes`,
+      },
+    });
   });
 
   it("rejects over-limit task data", () => {
