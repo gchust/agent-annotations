@@ -59,6 +59,27 @@ describe("client runtime", () => {
     mounted.unmount();
   });
 
+  it("applies subscribed file revisions and disposes the transport poll", async () => {
+    vi.useFakeTimers();
+    const task = await new MemoryTaskTransport().read();
+    let publish!: (task: AgentFeedbackTask) => void;
+    const unsubscribe = vi.fn();
+    const transport: TaskTransport = {
+      read: async () => task,
+      mutate: async () => task,
+      subscribe(listener) {
+        publish = listener;
+        return unsubscribe;
+      },
+    };
+    const mounted = await mountAgentFeedback({ transport });
+    publish({ ...task, taskRevision: 1 });
+    await vi.runAllTimersAsync();
+    expect(mounted.api.getSnapshot().task.taskRevision).toBe(1);
+    mounted.unmount();
+    expect(unsubscribe).toHaveBeenCalledOnce();
+  });
+
   it("does not inspect capture events from inside the ignored shadow host", async () => {
     const pageTarget = document.createElement("button");
     document.body.append(pageTarget);

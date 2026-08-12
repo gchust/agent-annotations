@@ -7,6 +7,7 @@ import type {
 } from "../types/index.js";
 import {
   MAX_ANNOTATIONS,
+  MAX_EVIDENCE_REFERENCES,
   setAnnotationExtension,
   validateAgentFeedbackAnnotation,
   validateAgentFeedbackTask,
@@ -111,6 +112,21 @@ const applyOperation = (
         ok: true,
         task: { ...task, annotations: next, status: nextStatus(next, task.status) },
       };
+    }
+    case "addEvidence": {
+      const index = findAnnotation(annotations, operation.annotationId);
+      if (index === -1) return { ok: false, error: "annotation_not_found" };
+      if ((annotations[index].evidence?.length ?? 0) >= MAX_EVIDENCE_REFERENCES) {
+        return { ok: false, error: "invalid_annotation" };
+      }
+      const next = annotations.map((annotation, current) =>
+        current === index
+          ? { ...annotation, evidence: [...(annotation.evidence ?? []), operation.evidence] }
+          : annotation
+      );
+      return validateAgentFeedbackAnnotation(next[index]).ok
+        ? { ok: true, task: { ...task, annotations: next } }
+        : { ok: false, error: "invalid_annotation" };
     }
     case "reopen": {
       const index = findAnnotation(annotations, operation.annotationId);

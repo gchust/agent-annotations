@@ -136,6 +136,11 @@ export type AgentFeedbackMutationOperation =
       annotationId: string;
       evidence?: Omit<AgentFeedbackCompletionEvidence, "completedAt">;
     }
+  | {
+      op: "addEvidence";
+      annotationId: string;
+      evidence: AgentFeedbackEvidenceReference;
+    }
   | { op: "reopen"; annotationId: string }
   | { op: "remove"; annotationId: string }
   | { op: "removeCompleted" };
@@ -242,6 +247,7 @@ export type AgentFeedbackPlatform = "mac" | "other";
 export interface TaskTransport {
   read(): Promise<AgentFeedbackTask>;
   mutate(request: AgentFeedbackMutationRequest): Promise<AgentFeedbackTask>;
+  subscribe?(listener: (task: AgentFeedbackTask) => void): () => void;
 }
 
 export type AgentFeedbackDiagnosticsEntry = {
@@ -329,6 +335,16 @@ export type MountAgentFeedbackOptions = {
   redactors?: FeedbackRedactor[];
   exporters?: FeedbackExporter[];
 };
+
+export interface AgentFeedbackClientExtension {
+  id: string;
+  apiVersion: 1;
+  setup?(context: { transport: TaskTransport }): void | (() => void);
+  host?: HostIntegration;
+  targetEnrichers?: TargetEnricher[];
+  redactors?: FeedbackRedactor[];
+  exporters?: FeedbackExporter[];
+}
 
 export type MountedAgentFeedback = {
   api: StudioPublicApi;

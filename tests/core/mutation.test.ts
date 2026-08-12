@@ -37,6 +37,11 @@ describe("revision-aware mutations", () => {
             annotationId: "ann-1",
             evidence: { verified: true, summary: "Checked", source: "test" },
           },
+          {
+            op: "addEvidence",
+            annotationId: "ann-2",
+            evidence: { kind: "screenshot", ref: "evidence/shot.png", mediaType: "image/png" },
+          },
         ],
       },
       "2026-08-12T12:02:00.000Z"
@@ -47,6 +52,9 @@ describe("revision-aware mutations", () => {
       completedAt: "2026-08-12T12:02:00.000Z",
       completionEvidence: { completedAt: "2026-08-12T12:02:00.000Z" },
     });
+    expect(completed.task.annotations[1].evidence).toEqual([
+      { kind: "screenshot", ref: "evidence/shot.png", mediaType: "image/png" },
+    ]);
 
     const reopened = applyAgentFeedbackMutation(
       completed.task,

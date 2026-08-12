@@ -159,6 +159,16 @@ export async function mountAgentFeedback(
     timers.clear();
     frames.clear();
   });
+  if (options.transport.subscribe) {
+    cleanups.push(options.transport.subscribe((next) => {
+      if (destroyed || next.taskRevision === task.taskRevision) return;
+      task = next;
+      scheduleFrame(() => {
+        render();
+        emit();
+      });
+    }));
+  }
 
   const hostElement = document.createElement("div");
   hostElement.id = HOST_ID;
