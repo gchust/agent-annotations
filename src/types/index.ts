@@ -238,3 +238,99 @@ export type AgentFeedbackShortcutInput = {
 };
 
 export type AgentFeedbackPlatform = "mac" | "other";
+
+export interface TaskTransport {
+  read(): Promise<AgentFeedbackTask>;
+  mutate(request: AgentFeedbackMutationRequest): Promise<AgentFeedbackTask>;
+}
+
+export type AgentFeedbackDiagnosticsEntry = {
+  source: "console" | "window" | "promise";
+  message: string;
+  timestamp: string;
+};
+
+export type AgentFeedbackLocaleMessages = Record<string, string>;
+
+export interface HostIntegration {
+  locale?(): string;
+  routeKey?(): string;
+  messages?: AgentFeedbackLocaleMessages;
+  identity?(element: Element): Record<string, string>;
+}
+
+export interface TargetEnricher {
+  id: string;
+  enrich(context: {
+    element: Element;
+    inspection: AgentFeedbackInspection;
+  }): AgentFeedbackJsonObject | null | Promise<AgentFeedbackJsonObject | null>;
+}
+
+export interface FeedbackRedactor {
+  id: string;
+  redact(
+    task: AgentFeedbackTask
+  ): AgentFeedbackTask | null | Promise<AgentFeedbackTask | null>;
+}
+
+export interface FeedbackExporter {
+  id: string;
+  export(context: {
+    task: AgentFeedbackTask;
+    annotations: AgentFeedbackAnnotationFilter;
+  }): string | Promise<string>;
+}
+
+export type AgentFeedbackCaptureMode = "idle" | "pick" | "multi" | "area";
+
+export type StudioPublicSnapshot = {
+  task: AgentFeedbackTask;
+  captureMode: AgentFeedbackCaptureMode;
+  collapsed: boolean;
+  markersVisible: boolean;
+  openPanel: "list" | "help" | null;
+  diagnostics: readonly AgentFeedbackDiagnosticsEntry[];
+};
+
+export interface StudioPublicApi {
+  getSnapshot(): StudioPublicSnapshot;
+  subscribe(listener: (snapshot: StudioPublicSnapshot) => void): () => void;
+  commands: {
+    capture: {
+      startPick(): void;
+      startMulti(): void;
+      startArea(): void;
+      cancel(): void;
+    };
+    annotations: {
+      copyOpen(): Promise<void>;
+      complete(id: string): Promise<void>;
+      reopen(id: string): Promise<void>;
+      remove(id: string): Promise<void>;
+      removeCompleted(): Promise<void>;
+    };
+    markers: {
+      show(): void;
+      hide(): void;
+      focus(annotationId: string): void;
+    };
+    panels: {
+      open(id: string): void;
+      close(id?: string): void;
+    };
+  };
+}
+
+export type MountAgentFeedbackOptions = {
+  transport: TaskTransport;
+  host?: HostIntegration;
+  targetEnrichers?: TargetEnricher[];
+  redactors?: FeedbackRedactor[];
+  exporters?: FeedbackExporter[];
+};
+
+export type MountedAgentFeedback = {
+  api: StudioPublicApi;
+  unmount(): void;
+};
