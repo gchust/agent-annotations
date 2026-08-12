@@ -4,7 +4,7 @@ import {
   formatAgentFeedbackTask,
   formatAgentFeedbackTaskMarkdown,
 } from "../../src/core/index.js";
-import { annotationFixture, targetFixture, taskFixture } from "./fixtures.js";
+import { annotationFixture, targetFixture, taskFixture } from "./test-data.js";
 
 describe("shared formatter", () => {
   const task = taskFixture({

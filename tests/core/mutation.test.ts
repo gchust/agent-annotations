@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { applyAgentFeedbackMutation } from "../../src/core/index.js";
-import { annotationFixture, taskFixture } from "./fixtures.js";
+import { annotationFixture, taskFixture } from "./test-data.js";
 
 const updatedAt = "2026-08-12T12:01:00.000Z";
 

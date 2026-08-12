@@ -14,7 +14,7 @@ export const DEFAULT_REDACTION_STRING_LIMIT = 2_000;
 const SECRET_KEY_PATTERN =
   /(?:^|[-_.])(?:authorization|cookie|token|secret|password|api[-_.]?key|input[-_.]?value|value)(?:$|[-_.])/i;
 const AUTHORIZATION_PATTERN =
-  /\bAuthorization\s*:\s*(?:Bearer\s+)?[^\s,;]+/gi;
+  /\bAuthorization\s*:\s*[^\r\n]+/gi;
 const BEARER_PATTERN = /\bBearer\s+[A-Za-z0-9._~+/=-]+/gi;
 const JWT_PATTERN =
   /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g;

@@ -4,13 +4,14 @@ import {
   redactAgentFeedbackTask,
   redactAgentFeedbackText,
 } from "../../src/core/index.js";
-import { annotationFixture, targetFixture, taskFixture } from "./fixtures.js";
+import { annotationFixture, targetFixture, taskFixture } from "./test-data.js";
 
 describe("generic redaction", () => {
   it("redacts auth, bearer/JWT, cookie, token, password, input value and URL secrets", () => {
     const jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.signature";
     const values = [
       "Authorization: Bearer auth-secret",
+      "Authorization: Basic basic-secret",
       "Bearer bearer-secret",
       jwt,
       "Cookie: session=cookie-secret",

@@ -11,7 +11,7 @@ import {
   setAnnotationExtension,
   validateAgentFeedbackTask,
 } from "../../src/core/index.js";
-import { annotationFixture, targetFixture, taskFixture } from "./fixtures.js";
+import { annotationFixture, targetFixture, taskFixture } from "./test-data.js";
 
 describe("agent-feedback.task.v1 schema", () => {
   it("uses the frozen schema constants and creates a valid task", () => {
