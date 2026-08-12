@@ -141,24 +141,28 @@ export default function agentFeedback(
         .map((specifier, index) => `import * as extension${index} from ${JSON.stringify(specifier)};`)
         .join("\n");
       const values = extensions.map((_, index) => `extension${index}.default ?? extension${index}`).join(", ");
-      return `${imports}\nexport const config = ${JSON.stringify({ endpoint, token })};\nexport const extensions = [${values}];`;
+      return [
+        `import { mountAgentFeedback } from "@gchust/agent-feedback";`,
+        `import { HttpTaskTransport } from "@gchust/agent-feedback/vite/client";`,
+        imports,
+        `const config = ${JSON.stringify({ endpoint, token })};`,
+        `const extensions = [${values}];`,
+        "const key = Symbol.for('agent-feedback.mount');",
+        "if (!window[key]) {",
+        "  const transport = new HttpTaskTransport(config);",
+        "  const cleanups = extensions.flatMap((extension) => extension.setup ? [extension.setup({ transport })].filter(Boolean) : []);",
+        "  const mounted = await mountAgentFeedback({ transport, host: extensions.find((extension) => extension.host)?.host, targetEnrichers: extensions.flatMap((extension) => extension.targetEnrichers ?? []), redactors: extensions.flatMap((extension) => extension.redactors ?? []), exporters: extensions.flatMap((extension) => extension.exporters ?? []) });",
+        "  window[key] = () => { mounted.unmount(); cleanups.forEach((cleanup) => cleanup()); delete window[key]; };",
+        "}",
+      ].filter(Boolean).join("\n");
     },
     transformIndexHtml() {
       return [{
         tag: "script",
-        attrs: { type: "module" },
-        children: [
-          `import { config, extensions } from ${JSON.stringify(`/@id/${VIRTUAL_ID}`)};`,
-          `import { mountAgentFeedback } from ${JSON.stringify("/@id/@gchust/agent-feedback")};`,
-          `import { HttpTaskTransport } from ${JSON.stringify("/@id/@gchust/agent-feedback/vite/client")};`,
-          "const key = Symbol.for('agent-feedback.mount');",
-          "if (!window[key]) {",
-          "  const transport = new HttpTaskTransport(config);",
-          "  const cleanups = extensions.flatMap((extension) => extension.setup ? [extension.setup({ transport })].filter(Boolean) : []);",
-          "  const mounted = await mountAgentFeedback({ transport, host: extensions.find((extension) => extension.host)?.host, targetEnrichers: extensions.flatMap((extension) => extension.targetEnrichers ?? []), redactors: extensions.flatMap((extension) => extension.redactors ?? []), exporters: extensions.flatMap((extension) => extension.exporters ?? []) });",
-          "  window[key] = () => { mounted.unmount(); cleanups.forEach((cleanup) => cleanup()); delete window[key]; };",
-          "}",
-        ].join("\n"),
+        attrs: {
+          type: "module",
+          src: "/@id/__x00__virtual:agent-feedback/client",
+        },
         injectTo: "head",
       }];
     },
@@ -170,12 +174,15 @@ export default function agentFeedback(
       if (httpServer && !closeInstalled) {
         closeInstalled = true;
         const signals = ["SIGINT", "SIGTERM"] as const;
+        const onExit = () => store.closeSync(token);
         const onSignal = (signal: NodeJS.Signals) => {
-          store.closeSession(token);
+          store.closeSync(token);
           process.kill(process.pid, signal);
         };
+        process.once("exit", onExit);
         for (const signal of signals) process.once(signal, onSignal);
         httpServer.once("close", () => {
+          process.off("exit", onExit);
           for (const signal of signals) process.off(signal, onSignal);
           void store.close(token);
         });

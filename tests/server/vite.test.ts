@@ -11,7 +11,19 @@ describe("serve-only Vite plugin", () => {
     expect(resolveId.call({} as never, "virtual:agent-feedback/client", undefined, {} as never)).toBe("\0virtual:agent-feedback/client");
     const loaded = load.call({} as never, "\0virtual:agent-feedback/client", {} as never);
     expect(String(loaded)).toContain("/tmp/demo/extension.ts");
-    expect(plugin.transformIndexHtml).toBeTypeOf("function");
+    expect(String(loaded)).toContain('from "@gchust/agent-feedback"');
+    expect(String(loaded)).toContain('from "@gchust/agent-feedback/vite/client"');
+    expect(String(loaded)).toContain("mountAgentFeedback");
+    const tags = (plugin.transformIndexHtml as Function).call({} as never, "", {} as never);
+    expect(tags).toEqual([{
+      tag: "script",
+      attrs: {
+        type: "module",
+        src: "/@id/__x00__virtual:agent-feedback/client",
+      },
+      injectTo: "head",
+    }]);
+    expect(tags[0]).not.toHaveProperty("children");
     const source = createSourcePathService("/tmp/demo");
     expect(source.canonicalize("src/App.tsx")).toBe("src/App.tsx");
     expect(source.canonicalize("../outside.ts")).toBeNull();

@@ -1,0 +1,22 @@
+{
+  "name": "agent-feedback-packed-react-vite",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --strictPort",
+    "build": "vite build",
+    "test:e2e": "playwright test && node tests/shutdown.mjs"
+  },
+  "devDependencies": {
+    "@gchust/agent-feedback": "file:./gchust-agent-feedback.tgz",
+    "@playwright/test": "1.62.1",
+    "@vitejs/plugin-react": "4.4.1",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "vite": "6.3.5"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild"]
+  }
+}

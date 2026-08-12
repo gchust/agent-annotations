@@ -172,10 +172,10 @@ export class FileTaskStore {
   }
 
   close(token: string): Promise<void> {
-    return this.#writes.then(() => this.closeSession(token));
+    return this.#writes.then(() => this.closeSync(token));
   }
 
-  closeSession(token: string): void {
+  closeSync(token: string): void {
     try {
       const session = readJson(this.sessionPath) as { token?: unknown };
       if (session.token === token) rmSync(this.sessionPath, { force: true });
