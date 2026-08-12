@@ -46,6 +46,7 @@
   "scripts": {
     "build": "tsdown",
     "typecheck": "tsc --noEmit",
+    "pretest": "pnpm build",
     "test": "vitest run",
     "check:package": "publint && attw --pack . --profile esm-only"
   },
