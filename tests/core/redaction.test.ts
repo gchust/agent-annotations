@@ -18,6 +18,8 @@ describe("generic redaction", () => {
       "token=token-secret",
       "password=password-secret",
       "input_value=input-secret",
+      '<input value="input-secret">',
+      '{"token":"json-secret"}',
       "https://example.test/path?api_key=url-secret&ok=1",
     ];
     for (const value of values) {
@@ -26,6 +28,11 @@ describe("generic redaction", () => {
       expect(result).not.toContain("secret");
       expect(result).not.toContain(jwt);
     }
+    expect(
+      redactAgentFeedbackText(
+        "https://example.test/callback?client_secret=client-value&ok=1"
+      )
+    ).not.toContain("client-value");
   });
 
   it("runs only the matching extension redactor and preserves namespaces", () => {
@@ -55,7 +62,10 @@ describe("generic redaction", () => {
     const result = redactAgentFeedbackTask(task, [
       {
         extensionId: "first.context",
-        redact: (data) => ({ ...data, host: "filtered" }),
+        redact: (data) => ({
+          ...data,
+          host: '<input value="host-secret">',
+        }),
       },
     ]);
     expect(result.task.annotations[0].comment).not.toContain("comment-secret");
@@ -64,7 +74,10 @@ describe("generic redaction", () => {
       title: "safe",
     });
     expect(result.task.annotations[0].extensions).toEqual({
-      "first.context": { keep: "first", host: "filtered" },
+      "first.context": {
+        keep: "first",
+        host: '<input value="[REDACTED]">',
+      },
       "second.context": { keep: "second" },
     });
     expect(result.manifest.droppedKeys).toEqual(["password", "value"]);

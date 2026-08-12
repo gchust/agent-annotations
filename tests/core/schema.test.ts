@@ -103,6 +103,37 @@ describe("agent-feedback.task.v1 schema", () => {
     });
   });
 
+  it("rejects values that cannot round-trip through the JSON task contract", () => {
+    const sourceStack = new Array(1);
+    expect(
+      validateAgentFeedbackTask(
+        taskFixture({
+          annotations: [
+            annotationFixture({
+              targets: [
+                targetFixture({
+                  inspection: { ...targetFixture().inspection, sourceStack },
+                }),
+              ],
+            }),
+          ],
+        })
+      )
+    ).toMatchObject({
+      ok: false,
+      issue: { path: "task.annotations[0].targets[0].inspection.sourceStack[0]" },
+    });
+    expect(
+      validateAgentFeedbackTask({
+        ...taskFixture(),
+        taskRevision: Number.MAX_SAFE_INTEGER + 1,
+      })
+    ).toMatchObject({
+      ok: false,
+      issue: { path: "task.taskRevision", code: "invalid_value" },
+    });
+  });
+
   it("rejects over-limit task data", () => {
     const repeatedTarget = targetFixture({
       inspection: {

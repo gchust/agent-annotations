@@ -20,7 +20,7 @@ const JWT_PATTERN =
   /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g;
 const COOKIE_PATTERN = /\b(?:Set-)?Cookie\s*:\s*[^\r\n]+/gi;
 const ASSIGNMENT_PATTERN =
-  /(^|[?&\s;,])((?:access_?|refresh_?)?token|secret|password|api[_-]?key|input[_-]?value|value)\s*[:=]\s*[^\s&;,"']+/gi;
+  /(^|[?&\s;,<{])(["']?)((?:access_?|refresh_?)?token|(?:client[_-]?)?secret|password|api[_-]?key|input[_-]?value|value)\2(\s*[:=]\s*)(?:(["])([^"]*)"|(['])([^']*)'|([^\s&;,"'>}]+))/gi;
 
 type RedactionRecorder = {
   droppedKeys: Set<string>;
@@ -58,7 +58,10 @@ function redactText(
     .replace(COOKIE_PATTERN, `Cookie: ${REDACTED_VALUE}`)
     .replace(BEARER_PATTERN, `Bearer ${REDACTED_VALUE}`)
     .replace(JWT_PATTERN, REDACTED_VALUE)
-    .replace(ASSIGNMENT_PATTERN, `$1$2=${REDACTED_VALUE}`);
+    .replace(
+      ASSIGNMENT_PATTERN,
+      `$1$2$3$2$4$5$7${REDACTED_VALUE}$5$7`
+    );
   const truncated =
     redacted.length > limit
       ? `${redacted.slice(0, limit)}…[truncated]`

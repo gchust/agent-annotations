@@ -90,8 +90,8 @@ const finiteNumberIssue = (
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return issue(path, "invalid_type", "Expected a finite number");
   }
-  if (options.integer && !Number.isInteger(value)) {
-    return issue(path, "invalid_value", "Expected an integer");
+  if (options.integer && !Number.isSafeInteger(value)) {
+    return issue(path, "invalid_value", "Expected a safe integer");
   }
   if (options.min !== undefined && value < options.min) {
     return issue(path, "invalid_value", `Expected a value >= ${options.min}`);
@@ -216,11 +216,14 @@ const inspectionIssue = (
       stringIssue(attribute, `${path}.attributes.${key}`, 500, true),
     null
   );
-  const stackIssue = value.sourceStack.reduce<AgentFeedbackValidationIssue | null>(
-    (found, frame, index) =>
-      found ?? sourceLocationIssue(frame, `${path}.sourceStack[${index}]`),
-    null
-  );
+  let stackIssue: AgentFeedbackValidationIssue | null = null;
+  for (let index = 0; index < value.sourceStack.length; index += 1) {
+    stackIssue = sourceLocationIssue(
+      value.sourceStack[index],
+      `${path}.sourceStack[${index}]`
+    );
+    if (stackIssue) break;
+  }
   return (
     stringIssue(value.tagName, `${path}.tagName`, 100) ??
     stringIssue(value.role, `${path}.role`, 100, true) ??

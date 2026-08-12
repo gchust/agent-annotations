@@ -89,18 +89,54 @@ describe("shared formatter", () => {
   });
 
   it("goldens all mode with single target and extension context", () => {
-    const all = formatAgentFeedbackTaskMarkdown(task, { annotations: "all" });
-    expect(all).toContain(`## Annotations (3)
+    const completedAt = "2026-08-12T12:02:00.000Z";
+    const single = taskFixture({
+      status: "completed",
+      updatedAt: completedAt,
+      annotations: [
+        annotationFixture({
+          status: "completed",
+          completedAt,
+          extensions: { "demo.context": { ticket: "AF-2" } },
+        }),
+      ],
+    });
+    expect(
+      formatAgentFeedbackTaskMarkdown(single, { annotations: "all" })
+    ).toMatchInlineSnapshot(`
+      "# Agent Feedback Task task-1
 
-### Annotation 1: [element] ann-1`);
-    expect(all).toContain(`#### Target
+      - schema: agent-feedback.task.v1
+      - schemaVersion: 1
+      - revision: 0
+      - status: completed
+      - createdAt: 2026-08-12T12:00:00.000Z
+      - updatedAt: 2026-08-12T12:02:00.000Z
 
-- selector: main > button`);
-    expect(all).toContain(`#### Extension context
+      ## Annotations (1)
 
-- demo.context: {"ticket":"AF-2"}`);
-    expect(all).toContain("### Annotation 2: [multi] ann-2");
-    expect(all).toContain("### Annotation 3: [region] ann-3");
+      ### Annotation 1: [element] ann-1
+
+      Comment: Make this clearer
+
+      - status: completed @ 2026-08-12T12:02:00.000Z
+      - page: /settings (Settings)
+
+      #### Target
+
+      - selector: main > button
+      - bounds: 10,20 120x32
+      - element: <button>
+      - component: SaveButton
+      - source: src/pages/settings.tsx:12:4 (SaveButton)
+      - source stack:
+        - src/pages/settings.tsx:12:4 (SaveButton)
+
+      #### Extension context
+
+      - demo.context: {\"ticket\":\"AF-2\"}
+      "
+    `);
   });
 
   it("supports the JSON public formatter", () => {
