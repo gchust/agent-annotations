@@ -82,6 +82,15 @@ PASS — both timed-out files reran in isolation: 2 files, 11 tests passed, exit
 
 The overlapping-suite timeout is retained as baseline evidence rather than rewritten as a clean full-suite result. The focused rerun demonstrates that the two named failures were timing-sensitive, not assertion failures.
 
+Independent review reran the complete focused command serially on 2026-08-12:
+
+```text
+pnpm exec vitest run tests/logic/portal-studio tests/components/portal-studio --reporter=verbose
+PASS — 37 files, 646 tests passed, exit 0.
+```
+
+The passing run emitted React duplicate-key warnings in the existing `G02-07b` 409 refresh/retry component test. Goal 01 records the warning but does not change embedded Studio behavior.
+
 ## Known bugs and migration risks at this baseline
 
 These are current-code findings carried into later Goals; Goal 01 intentionally does not fix them:
@@ -93,6 +102,7 @@ These are current-code findings carried into later Goals; Goal 01 intentionally 
 - marker observation currently lives in the monolithic toolbar path; later migration must ensure observation only runs for genuinely visible markers.
 - the prior React Grab public-contract Goal recorded the raw nested SVG-path hit mismatch; the current embedded adapter includes semantic ancestor promotion. This extraction must preserve the observed Portal behavior without adding a second perception engine.
 - focused Studio tests can exceed the default 5-second timeout under concurrent CPU-heavy validation, as demonstrated above.
+- the focused component suite's existing 409 refresh/retry case emits duplicate React-key warnings despite passing; investigate during runtime migration rather than changing embedded behavior in Goal 01.
 
 ## Goal 01 boundary
 
