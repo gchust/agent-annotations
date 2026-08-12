@@ -3,6 +3,7 @@ import {
   formatAgentFeedbackShortcut,
   formatAgentFeedbackTask,
   matchesAgentFeedbackShortcut,
+  redactAgentFeedbackText,
   toAgentFeedbackDocumentRegion,
 } from "../core/index.js";
 import type {
@@ -124,10 +125,40 @@ export async function mountAgentFeedback(
   let listFilter: "open" | "all" = "open";
   let status = "";
   let copyFallback = "";
+  let dockPosition: { left: number; top: number } | null = null;
   let destroyed = false;
   const listeners = new Set<(snapshot: StudioPublicSnapshot) => void>();
   const diagnostics: AgentFeedbackDiagnosticsEntry[] = [];
   const cleanups: Array<() => void> = [];
+  const timers = new Set<number>();
+  const frames = new Set<number>();
+
+  const scheduleTimer = (callback: () => void, delay: number): number => {
+    const timer = window.setTimeout(() => {
+      timers.delete(timer);
+      if (!destroyed) callback();
+    }, delay);
+    timers.add(timer);
+    return timer;
+  };
+  const cancelTimer = (timer: number): void => {
+    window.clearTimeout(timer);
+    timers.delete(timer);
+  };
+  const scheduleFrame = (callback: () => void): number => {
+    const frame = window.requestAnimationFrame(() => {
+      frames.delete(frame);
+      if (!destroyed) callback();
+    });
+    frames.add(frame);
+    return frame;
+  };
+  cleanups.push(() => {
+    for (const timer of timers) window.clearTimeout(timer);
+    for (const frame of frames) window.cancelAnimationFrame(frame);
+    timers.clear();
+    frames.clear();
+  });
 
   const hostElement = document.createElement("div");
   hostElement.id = HOST_ID;
@@ -153,26 +184,30 @@ export async function mountAgentFeedback(
     diagnostics: [...diagnostics],
   });
   const emit = () => {
+    if (destroyed) return;
     const value = snapshot();
     for (const listener of listeners) listener(value);
   };
   const setStatus = (message: string) => {
+    if (destroyed) return;
     status = message;
     render();
-    const timer = window.setTimeout(() => {
+    scheduleTimer(() => {
       if (status === message) {
         status = "";
         render();
       }
     }, 1800);
-    cleanups.push(() => clearTimeout(timer));
   };
   const mutate = async (operations: AgentFeedbackMutationOperation[]) => {
-    task = await options.transport.mutate({
+    if (destroyed) return;
+    const next = await options.transport.mutate({
       taskId: task.taskId,
       expectedRevision: task.taskRevision,
       operations,
     });
+    if (destroyed) return;
+    task = next;
     render();
     emit();
   };
@@ -194,12 +229,15 @@ export async function mountAgentFeedback(
   };
   const copyOpen = async (): Promise<void> => {
     const output = await exportTask("open");
+    if (destroyed) return;
     try {
       if (!navigator.clipboard?.writeText) throw new Error("clipboard unavailable");
       await navigator.clipboard.writeText(output);
+      if (destroyed) return;
       copyFallback = "";
       setStatus("Copied open annotations");
     } catch {
+      if (destroyed) return;
       copyFallback = output;
       render();
     }
@@ -225,10 +263,11 @@ export async function mountAgentFeedback(
     emit();
   };
   const focusAnnotation = (id: string) => {
+    if (destroyed) return;
     editingId = id;
     openPanel = null;
     render();
-    requestAnimationFrame(() => root.querySelector<HTMLElement>(".af-editor textarea")?.focus());
+    scheduleFrame(() => root.querySelector<HTMLElement>(".af-editor textarea")?.focus());
   };
 
   const api: StudioPublicApi = {
@@ -289,14 +328,16 @@ export async function mountAgentFeedback(
     return node;
   };
 
-  let tooltipTimer = 0;
+  let tooltipTimer: number | null = null;
   const hideTooltip = () => {
-    clearTimeout(tooltipTimer);
+    if (tooltipTimer !== null) cancelTimer(tooltipTimer);
+    tooltipTimer = null;
     root.querySelector(".af-tooltip")?.remove();
   };
   const showTooltip = (trigger: HTMLElement) => {
     hideTooltip();
-    tooltipTimer = window.setTimeout(() => {
+    tooltipTimer = scheduleTimer(() => {
+      tooltipTimer = null;
       const tooltip = document.createElement("div");
       tooltip.className = "af-tooltip";
       tooltip.role = "tooltip";
@@ -307,7 +348,6 @@ export async function mountAgentFeedback(
       root.append(tooltip);
     }, 300);
   };
-  cleanups.push(() => clearTimeout(tooltipTimer));
 
   const addOutline = (rect: AgentFeedbackRect, region = false) => {
     const node = document.createElement("div");
@@ -396,7 +436,9 @@ export async function mountAgentFeedback(
               options.host,
               options.targetEnrichers ?? []
             );
+        if (destroyed) return;
         await mutate([{ op: "add", annotation }]);
+        if (destroyed) return;
         cancelCapture();
         setStatus("Annotation saved");
       } catch (error) {
@@ -405,7 +447,7 @@ export async function mountAgentFeedback(
       }
     });
     root.append(surface);
-    requestAnimationFrame(() => textarea.focus());
+    scheduleFrame(() => textarea.focus());
   };
 
   const renderEditor = () => {
@@ -428,6 +470,7 @@ export async function mountAgentFeedback(
     statusButton.className = "af-button";
     const remove = nativeButton("Delete", async () => {
       await mutate([{ op: "remove", annotationId: annotation.annotationId }]);
+      if (destroyed) return;
       editingId = null;
       render();
     });
@@ -439,6 +482,7 @@ export async function mountAgentFeedback(
     surface.addEventListener("submit", async (event) => {
       event.preventDefault();
       await mutate([{ op: "update", annotationId: annotation.annotationId, comment: textarea.value }]);
+      if (destroyed) return;
       setStatus("Comment saved");
     });
     root.append(surface);
@@ -500,6 +544,13 @@ export async function mountAgentFeedback(
     const dock = document.createElement("div");
     dock.className = "af-dock";
     dock.dataset.collapsed = String(collapsed);
+    if (dockPosition) {
+      Object.assign(dock.style, {
+        left: `${dockPosition.left}px`,
+        top: `${dockPosition.top}px`,
+        bottom: "auto",
+      });
+    }
     const grip = document.createElement("button");
     grip.type = "button";
     grip.className = "af-grip";
@@ -533,8 +584,12 @@ export async function mountAgentFeedback(
     });
     grip.addEventListener("pointermove", (event) => {
       if (!drag) return;
-      dock.style.left = `${Math.max(0, Math.min(innerWidth - dock.offsetWidth, drag.left + event.clientX - drag.x))}px`;
-      dock.style.top = `${Math.max(0, Math.min(innerHeight - dock.offsetHeight, drag.top + event.clientY - drag.y))}px`;
+      dockPosition = {
+        left: Math.max(0, Math.min(innerWidth - dock.offsetWidth, drag.left + event.clientX - drag.x)),
+        top: Math.max(0, Math.min(innerHeight - dock.offsetHeight, drag.top + event.clientY - drag.y)),
+      };
+      dock.style.left = `${dockPosition.left}px`;
+      dock.style.top = `${dockPosition.top}px`;
       dock.style.bottom = "auto";
     });
     grip.addEventListener("pointerup", () => { drag = null; });
@@ -564,7 +619,7 @@ export async function mountAgentFeedback(
       close.className = "af-button";
       fallback.append(textarea, close);
       root.append(fallback);
-      requestAnimationFrame(() => textarea.select());
+      scheduleFrame(() => textarea.select());
     }
     if (status) {
       const toast = document.createElement("div");
@@ -575,8 +630,11 @@ export async function mountAgentFeedback(
     }
   };
 
+  const isHostEvent = (event: Event): boolean =>
+    event.composedPath().includes(hostElement);
+
   const onPointerMove = (event: PointerEvent) => {
-    if (captureMode === "idle" || composer) return;
+    if (captureMode === "idle" || composer || isHostEvent(event)) return;
     if (captureMode === "area" && areaStart) {
       areaRect = {
         x: Math.min(areaStart.x, event.clientX),
@@ -591,7 +649,7 @@ export async function mountAgentFeedback(
     render();
   };
   const onPointerDown = (event: PointerEvent) => {
-    if (captureMode !== "area" || composer || event.composedPath().includes(hostElement)) return;
+    if (captureMode !== "area" || composer || isHostEvent(event)) return;
     event.preventDefault();
     event.stopPropagation();
     areaStart = { x: event.clientX, y: event.clientY };
@@ -599,6 +657,11 @@ export async function mountAgentFeedback(
   };
   const onPointerUp = (event: PointerEvent) => {
     if (captureMode !== "area" || !areaStart || !areaRect) return;
+    if (isHostEvent(event)) {
+      areaStart = null;
+      areaRect = null;
+      return render();
+    }
     event.preventDefault();
     event.stopPropagation();
     const rect = areaRect;
@@ -610,7 +673,7 @@ export async function mountAgentFeedback(
     render();
   };
   const onClick = (event: MouseEvent) => {
-    if ((captureMode !== "pick" && captureMode !== "multi") || composer) return;
+    if ((captureMode !== "pick" && captureMode !== "multi") || composer || isHostEvent(event)) return;
     const target = targetAtPoint(event.clientX, event.clientY);
     if (!target) return;
     event.preventDefault();
@@ -629,6 +692,7 @@ export async function mountAgentFeedback(
     render();
   };
   const onKeyDown = (event: KeyboardEvent) => {
+    if (isHostEvent(event)) return;
     if (event.key === "Escape" && captureMode !== "idle") {
       event.preventDefault();
       return cancelCapture();
@@ -663,12 +727,26 @@ export async function mountAgentFeedback(
     emit();
   };
   const record = (source: AgentFeedbackDiagnosticsEntry["source"], value: unknown) => {
-    diagnostics.push({ source, message: String(value).slice(0, 500), timestamp: now() });
+    if (destroyed) return;
+    diagnostics.push({
+      source,
+      message: redactAgentFeedbackText(String(value), { maxLength: 500 }),
+      timestamp: now(),
+    });
     if (diagnostics.length > 20) diagnostics.shift();
     emit();
   };
   const onError = (event: ErrorEvent) => record("window", event.message);
   const onRejection = (event: PromiseRejectionEvent) => record("promise", event.reason);
+  const originalConsoleError = console.error;
+  const onConsoleError = (...values: unknown[]) => {
+    originalConsoleError.apply(console, values);
+    record("console", values.map(String).join(" "));
+  };
+  console.error = onConsoleError;
+  cleanups.push(() => {
+    if (console.error === onConsoleError) console.error = originalConsoleError;
+  });
 
   for (const [type, listener, target] of [
     ["pointermove", onPointerMove, document], ["pointerdown", onPointerDown, document],

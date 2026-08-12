@@ -113,6 +113,10 @@ test("host ignore, hotkeys, drag, tooltip, Help, and fixture targets", async ({ 
   await expect(page.locator("#agent-feedback-root")).toHaveAttribute("data-react-grab-ignore", "");
   await page.keyboard.press("Control+Alt+KeyP");
   await expect.poll(() => page.evaluate(() => window.__agentFeedback?.api.getSnapshot().captureMode)).toBe("pick");
+  await shadow(page, 'button[aria-label^="Annotations"]').click();
+  await expect(shadow(page, '[aria-label="Annotation list"]')).toBeVisible();
+  await expect.poll(() => page.evaluate(() => window.__agentFeedback?.api.getSnapshot().captureMode)).toBe("pick");
+  await shadow(page, 'button[aria-label^="Annotations"]').click();
   await page.keyboard.press("Escape");
   const pick = shadow(page, 'button[aria-label^="Pick"]');
   await pick.hover();
@@ -125,6 +129,10 @@ test("host ignore, hotkeys, drag, tooltip, Help, and fixture targets", async ({ 
   await grip.dragTo(page.locator("header h1"));
   const after = await shadow(page, ".af-dock").boundingBox();
   expect(after?.x).not.toBe(before?.x);
+  await shadow(page, 'button[aria-label^="Shortcut help"]').click();
+  const afterRender = await shadow(page, ".af-dock").boundingBox();
+  expect(afterRender?.x).toBeCloseTo(after!.x, 0);
+  expect(afterRender?.y).toBeCloseTo(after!.y, 0);
 
   await expect(page.locator("#memo-card")).toBeVisible();
   await expect(page.locator("#forward-button")).toBeVisible();
