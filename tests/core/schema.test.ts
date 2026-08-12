@@ -6,6 +6,7 @@ import {
   createAgentFeedbackTask,
   MAX_EXTENSION_BYTES,
   MAX_EXTENSION_KEYS,
+  MAX_EXTENSION_NAMESPACES,
   MAX_TASK_BYTES,
   parseAgentFeedbackTask,
   setAnnotationExtension,
@@ -126,5 +127,19 @@ describe("agent-feedback.task.v1 schema", () => {
       "second.context": { added: true },
     });
     expect(annotation.extensions).toEqual({ "first.context": { keep: true } });
+  });
+
+  it("bounds the extension namespace count", () => {
+    const extensions = Object.fromEntries(
+      Array.from({ length: MAX_EXTENSION_NAMESPACES + 1 }, (_, index) => [
+        `extension.${index}`,
+        {},
+      ])
+    );
+    expect(
+      validateAgentFeedbackTask(
+        taskFixture({ annotations: [annotationFixture({ extensions })] })
+      )
+    ).toMatchObject({ ok: false, issue: { code: "limit_exceeded" } });
   });
 });

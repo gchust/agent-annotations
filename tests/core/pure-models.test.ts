@@ -1,19 +1,46 @@
 import { describe, expect, it } from "vitest";
 
+import type { AgentFeedbackAnnotation } from "../../src/types/index.js";
+
 import {
   AGENT_FEEDBACK_SHORTCUTS,
   agentFeedbackAnchorRect,
+  agentFeedbackAnnotationDisplayNumber,
+  countOpenAgentFeedbackAnnotations,
+  createAgentFeedbackId,
   emptyAgentFeedbackSelection,
   formatAgentFeedbackShortcut,
   matchesAgentFeedbackShortcut,
   normalizeAgentFeedbackRegion,
   replaceAgentFeedbackSelection,
   resolveAgentFeedbackPlacement,
+  selectAgentFeedbackAnnotations,
   toAgentFeedbackDocumentRegion,
   toggleAgentFeedbackSelection,
 } from "../../src/core/index.js";
 
 describe("plain-data selection, placement and shortcut definitions", () => {
+  it("creates stable-shape IDs", () => {
+    const first = createAgentFeedbackId();
+    const second = createAgentFeedbackId();
+    expect(first).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+    );
+    expect(second).not.toBe(first);
+  });
+
+  it("selects open annotations while preserving full-order display numbers", () => {
+    const annotations = [
+      { annotationId: "one", status: "completed" },
+      { annotationId: "two", status: "open" },
+    ] as AgentFeedbackAnnotation[];
+    expect(selectAgentFeedbackAnnotations(annotations)).toEqual([
+      annotations[1],
+    ]);
+    expect(countOpenAgentFeedbackAnnotations(annotations)).toBe(1);
+    expect(agentFeedbackAnnotationDisplayNumber(annotations, "two")).toBe(2);
+  });
+
   it("handles selection without live DOM values", () => {
     let state = emptyAgentFeedbackSelection<string>();
     state = replaceAgentFeedbackSelection("one");
