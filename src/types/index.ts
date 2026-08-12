@@ -258,6 +258,15 @@ export type AgentFeedbackDiagnosticsEntry = {
 
 export type AgentFeedbackLocaleMessages = Record<string, string>;
 
+export type AgentFeedbackLocalizedText =
+  | string
+  | Readonly<Record<string, string>>;
+
+export type AgentFeedbackIconProps = {
+  className?: string;
+  size?: number;
+};
+
 export interface HostIntegration {
   locale?(): string;
   routeKey?(): string;
@@ -290,12 +299,17 @@ export interface FeedbackExporter {
 
 export type AgentFeedbackCaptureMode = "idle" | "pick" | "multi" | "area";
 
+export type AgentFeedbackToolbarShortcut = Omit<
+  AgentFeedbackShortcutDefinition,
+  "id"
+>;
+
 export type StudioPublicSnapshot = {
   task: AgentFeedbackTask;
   captureMode: AgentFeedbackCaptureMode;
   collapsed: boolean;
   markersVisible: boolean;
-  openPanel: "list" | "help" | null;
+  openPanel: string | null;
   diagnostics: readonly AgentFeedbackDiagnosticsEntry[];
 };
 
@@ -328,6 +342,41 @@ export interface StudioPublicApi {
   };
 }
 
+export type AgentFeedbackExtensionContext = {
+  readonly transport: TaskTransport;
+  readonly studio: StudioPublicApi;
+};
+
+export type ToolbarCommandContext = AgentFeedbackExtensionContext & {
+  extensionId: string;
+};
+
+export interface ToolbarContribution {
+  id: string;
+  group: "capture" | "handoff" | "view" | "host";
+  order?: number;
+  label: AgentFeedbackLocalizedText;
+  icon: import("react").ComponentType<AgentFeedbackIconProps>;
+  shortcut?: AgentFeedbackToolbarShortcut;
+  kind: "action" | "toggle" | "panel";
+  isVisible?(snapshot: StudioPublicSnapshot): boolean;
+  isEnabled?(snapshot: StudioPublicSnapshot): boolean;
+  isPressed?(snapshot: StudioPublicSnapshot): boolean;
+  execute?(context: ToolbarCommandContext): void | Promise<void>;
+  panelId?: string;
+}
+
+export interface PanelContribution {
+  id: string;
+  title: AgentFeedbackLocalizedText;
+  render: import("react").ComponentType<{
+    studio: StudioPublicApi;
+    close(): void;
+  }>;
+  placement?: "above" | "below" | "auto";
+  exclusiveGroup?: string;
+}
+
 export type MountAgentFeedbackOptions = {
   transport: TaskTransport;
   host?: HostIntegration;
@@ -339,11 +388,14 @@ export type MountAgentFeedbackOptions = {
 export interface AgentFeedbackClientExtension {
   id: string;
   apiVersion: 1;
-  setup?(context: { transport: TaskTransport }): void | (() => void);
+  setup?(context: AgentFeedbackExtensionContext): void | (() => void);
+  toolbar?: readonly ToolbarContribution[];
+  panels?: readonly PanelContribution[];
   host?: HostIntegration;
-  targetEnrichers?: TargetEnricher[];
-  redactors?: FeedbackRedactor[];
-  exporters?: FeedbackExporter[];
+  targetEnrichers?: readonly TargetEnricher[];
+  redactors?: readonly FeedbackRedactor[];
+  exporters?: readonly FeedbackExporter[];
+  messages?: AgentFeedbackLocaleMessages;
 }
 
 export type MountedAgentFeedback = {
