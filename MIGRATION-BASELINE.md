@@ -47,7 +47,7 @@ Fresh `rg` inspection found these direct boundaries in the embedded implementati
 - `src/studio/vite.ts` and the public scripts use Portal Studio names, `/__portal-studio/*`, `x-portal-studio-token`, and `.portal-studio`.
 - `src/studio/inspection/react-grab-engine.ts` is the sole current `react-grab/primitives` importer.
 
-The new package skeleton contains no `@nocobase/*`, `data-nb-*`, `data-ai-page-element`, `NOCOBASE_*`, PortalStudio, `portal-studio`, or `.portal-studio` string.
+The new package runtime source, package metadata, tests, and Playground source contain no `@nocobase/*`, `data-nb-*`, `data-ai-page-element`, `NOCOBASE_*`, PortalStudio, `portal-studio`, or `.portal-studio` string. This baseline necessarily names those legacy boundaries, but it is repository-only evidence and is excluded from the publish tarball.
 
 ## Current public scripts
 
