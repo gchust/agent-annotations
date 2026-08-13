@@ -996,6 +996,8 @@ export async function mountAgentFeedback(
   let markerResizeObserver: ResizeObserver | null = null;
   let markerFrameCleanups: Array<() => void> = [];
   let markerFrames = new WeakSet<Element>();
+  let markerDocuments = new WeakSet<Document>();
+  let trackedMarkerTargets = new WeakSet<Element>();
   let markerFrame: number | null = null;
   let markerRefreshes = 0;
   const stopMarkerTracking = () => {
@@ -1003,6 +1005,8 @@ export async function mountAgentFeedback(
     markerResizeObserver?.disconnect();
     for (const cleanup of markerFrameCleanups.splice(0)) cleanup();
     markerFrames = new WeakSet<Element>();
+    markerDocuments = new WeakSet<Document>();
+    trackedMarkerTargets = new WeakSet<Element>();
     markerObserver = null;
     markerResizeObserver = null;
     if (markerFrame !== null) {
@@ -1035,19 +1039,28 @@ export async function mountAgentFeedback(
       }
       markerRefreshes += 1;
       hostElement.dataset.markerRefreshes = String(markerRefreshes);
-      if (!markerObserver && resolved.length > 0) syncMarkerTracking(resolved);
+      if (resolved.some((target) => !trackedMarkerTargets.has(target))) {
+        syncMarkerTracking(resolved);
+      }
     });
   };
   const appRoot = document.getElementById("root") ?? document.querySelector("main") ?? document.body;
-  const watchMarkerFrames = (scope: ParentNode): void => {
+  const watchMarkerFrames = (scope: ParentNode, observeSetup: boolean): void => {
     for (const frame of scope.querySelectorAll("iframe")) {
       if (markerFrames.has(frame)) continue;
       markerFrames.add(frame);
       const refresh = () => {
         scheduleMarkerRefresh();
         try {
-          if (frame.contentDocument) {
-            watchMarkerFrames(frame.contentDocument);
+          const frameDocument = frame.contentDocument;
+          if (frameDocument) {
+            if (observeSetup && !markerDocuments.has(frameDocument)) {
+              markerDocuments.add(frameDocument);
+              const observer = new MutationObserver(refresh);
+              observer.observe(frameDocument, { childList: true, subtree: true });
+              markerFrameCleanups.push(() => observer.disconnect());
+            }
+            watchMarkerFrames(frameDocument, observeSetup);
             scheduleFrame(scheduleMarkerRefresh);
           }
         } catch {
@@ -1056,24 +1069,22 @@ export async function mountAgentFeedback(
       };
       frame.addEventListener("load", refresh);
       markerFrameCleanups.push(() => frame.removeEventListener("load", refresh));
-      try {
-        if (frame.contentDocument) {
-          watchMarkerFrames(frame.contentDocument);
-          scheduleFrame(scheduleMarkerRefresh);
-        }
-      } catch {
-        // Cross-origin frames are explicitly unsupported and remain unresolved.
-      }
+      refresh();
     }
   };
   const hasPersistedFrameTarget = (): boolean => task.annotations.some((annotation) =>
     annotation.targets?.some(({ selector }) => selector.includes(">>iframe>>"))
   );
+  const hasUnresolvedFrameTarget = (): boolean => task.annotations.some((annotation) => {
+    const selector = annotation.status === "open" ? annotation.targets?.[0]?.selector : undefined;
+    return !!selector?.includes(">>iframe>>") && !resolveTarget(selector);
+  });
   function syncMarkerTracking(targets: Element[]): void {
     stopMarkerTracking();
     const watchFrames = markersVisible && hasPersistedFrameTarget();
+    trackedMarkerTargets = new WeakSet(targets);
     if ((!markersVisible || targets.length === 0) && !editingId && !watchFrames) return;
-    if (watchFrames) watchMarkerFrames(appRoot);
+    if (watchFrames) watchMarkerFrames(appRoot, hasUnresolvedFrameTarget());
     if (targets.length === 0 && !editingId) return;
     markerObserver = new MutationObserver(scheduleMarkerRefresh);
     const mutationOptions = { childList: true, subtree: true };

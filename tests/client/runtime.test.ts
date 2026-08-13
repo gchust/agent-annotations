@@ -32,7 +32,7 @@ import { mountAgentFeedback } from "../../src/client/index.js";
 import { defineClientExtension } from "../../src/extension/index.js";
 import { MemoryTaskTransport } from "../../src/testing/index.js";
 import type { AgentFeedbackTask, TaskTransport } from "../../src/types/index.js";
-import { taskFixture } from "../core/test-data.js";
+import { annotationFixture, targetFixture, taskFixture } from "../core/test-data.js";
 
 afterEach(() => {
   document.getElementById("agent-feedback-root")?.remove();
@@ -91,6 +91,41 @@ describe("client runtime", () => {
     expect(Resize).not.toHaveBeenCalled();
     empty.unmount();
     vi.unstubAllGlobals();
+  });
+
+  it("recovers an unresolved nested iframe marker after the outer document is populated", async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML = '<div id="root"><iframe id="outer"></iframe></div>';
+    const mounted = await mountAgentFeedback({
+      transport: new MemoryTaskTransport(taskFixture({
+        annotations: [annotationFixture({
+          targets: [targetFixture({
+            selector: "#outer >>iframe>> #inner >>iframe>> #target",
+          })],
+        })],
+      })),
+    });
+    try {
+      const marker = document.getElementById("agent-feedback-root")!
+        .shadowRoot!.querySelector<HTMLButtonElement>(".af-marker")!;
+      expect(marker.hidden).toBe(true);
+      await vi.runAllTimersAsync();
+
+      const outer = document.querySelector<HTMLIFrameElement>("#outer")!;
+      outer.contentDocument!.body.innerHTML = '<iframe id="inner"></iframe>';
+      await vi.runAllTimersAsync();
+      expect(marker.hidden).toBe(true);
+
+      const inner = outer.contentDocument!.querySelector<HTMLIFrameElement>("#inner")!;
+      inner.contentDocument!.body.innerHTML = '<button id="target">Target</button>';
+      inner.dispatchEvent(new Event("load"));
+
+      await vi.runAllTimersAsync();
+      expect(marker.hidden).toBe(false);
+    } finally {
+      mounted.unmount();
+      document.body.innerHTML = "";
+    }
   });
 
   it("exposes snapshot subscriptions and commands without React setters", async () => {
