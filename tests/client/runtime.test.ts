@@ -224,10 +224,11 @@ describe("client runtime", () => {
     expect(execute).toHaveBeenCalledTimes(2);
     expect(setup).toHaveBeenCalledOnce();
     expect(mounted.api.getSnapshot().exporters).toContainEqual({ id: "json", extensionId: "runtime-test" });
+    expect(await mounted.api.commands.exporters.format()).toContain("# Agent Feedback Task");
     expect(await mounted.api.commands.exporters.format("json")).toContain('"schema":"agent-feedback.task.v1"');
     mounted.api.commands.panels.open("runtime-panel");
     vi.runAllTimers();
-    expect(shadow.activeElement?.querySelector("button")).toBe(shadow.querySelector(".af-panel button"));
+    expect(shadow.activeElement).toBe(shadow.querySelector(".af-panel button"));
     shadow.querySelector<HTMLButtonElement>(".af-panel button")!.click();
     expect(mounted.api.getSnapshot().openPanel).toBeNull();
     mounted.unmount();

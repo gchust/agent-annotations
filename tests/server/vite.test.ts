@@ -16,6 +16,7 @@ describe("serve-only Vite plugin", () => {
     expect(String(loaded)).toContain("mountAgentFeedback");
     expect(String(loaded)).toContain("mountAgentFeedback({ transport, extensions })");
     expect(String(loaded)).toContain("window[key]?.()");
+    expect(String(loaded)).toContain("import.meta.hot.accept()");
     expect(String(loaded)).toContain("import.meta.hot.dispose");
     expect(String(loaded)).not.toContain("extension.setup");
     const tags = (plugin.transformIndexHtml as Function).call({} as never, "", {} as never);

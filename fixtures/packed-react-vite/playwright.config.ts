@@ -14,7 +14,7 @@ export default defineConfig({
   use: {
     baseURL: "http://127.0.0.1:4179",
     screenshot: "only-on-failure",
-    trace: "retain-on-failure",
+    trace: "on",
   },
   webServer: {
     command: "node -e \"require('node:fs').rmSync('.agent-feedback',{recursive:true,force:true})\" && pnpm dev --port 4179",

@@ -152,7 +152,10 @@ export default function agentFeedback(
         "const transport = new HttpTaskTransport(config);",
         "const mounted = await mountAgentFeedback({ transport, extensions });",
         "window[key] = () => { mounted.unmount(); delete window[key]; };",
-        "if (import.meta.hot) import.meta.hot.dispose(() => window[key]?.());",
+        "if (import.meta.hot) {",
+        "  import.meta.hot.accept();",
+        "  import.meta.hot.dispose(() => window[key]?.());",
+        "}",
       ].filter(Boolean).join("\n");
     },
     transformIndexHtml() {

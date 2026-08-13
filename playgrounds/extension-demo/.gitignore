@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.agent-feedback/
+playwright-report/
+test-results/
+*.png
+*.zip
+*.log

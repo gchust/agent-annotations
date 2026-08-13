@@ -292,7 +292,7 @@ export async function mountAgentFeedback(
     ).task;
     const exporter = exporterId
       ? exporters.find(({ id }) => id === exporterId)
-      : exporters[0];
+      : undefined;
     if (exporterId && !exporter) {
       throw new TypeError(`Unknown exporter ID: ${exporterId}`);
     }
@@ -665,13 +665,13 @@ export async function mountAgentFeedback(
     );
     if (focusPanel) {
       focusPanel = false;
-      scheduleFrame(() =>
-        panel
-          .querySelector<HTMLElement>(
-            "button,[href],input,select,textarea,[tabindex]:not([tabindex='-1'])"
-          )
-          ?.focus() ?? panel.focus()
-      );
+      scheduleFrame(() => {
+        const target = panel.querySelector<HTMLElement>(
+          "button,[href],input,select,textarea,[tabindex]:not([tabindex='-1'])"
+        );
+        if (target && target.isConnected) target.focus();
+        else if (panel.isConnected) panel.focus();
+      });
     }
   };
 

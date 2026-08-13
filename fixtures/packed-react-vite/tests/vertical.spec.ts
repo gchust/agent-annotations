@@ -6,6 +6,7 @@ import { expect, test } from "@playwright/test";
 
 const runtimeRoot = path.resolve(".agent-feedback");
 const evidenceRoot = process.env.AGENT_FEEDBACK_EVIDENCE;
+const extensionSource = path.resolve("src/demo-extension.ts");
 const cli = (...args: string[]) => execFileSync("pnpm", ["exec", "agent-feedback", ...args], {
   encoding: "utf8",
   env: { ...process.env, AGENT_FEEDBACK_DIR: runtimeRoot },
@@ -13,10 +14,12 @@ const cli = (...args: string[]) => execFileSync("pnpm", ["exec", "agent-feedback
 const shadow = (page: import("@playwright/test").Page, selector: string) =>
   page.locator(`#agent-feedback-root >> ${selector}`);
 
-test("packed browser to file to CLI to browser loop, HMR and session security", async ({ page }) => {
+test("packed browser to file to CLI to browser loop, HMR and session security", async ({ page, context }) => {
   await page.goto("/");
   await expect(page.locator("#agent-feedback-root")).toHaveCount(1);
   await expect(shadow(page, ".af-dock")).toBeVisible();
+  await expect(shadow(page, '[data-action-id="demo-copy-json"]')).toHaveCount(1);
+  expect(await page.evaluate(() => window.__demoExtension?.setupCount)).toBe(1);
   expect(statSync(path.join(runtimeRoot, "session.json")).mode & 0o777).toBe(0o600);
   const session = JSON.parse(readFileSync(path.join(runtimeRoot, "session.json"), "utf8"));
   expect(session.token).toMatch(/^[0-9a-f]{64}$/);
@@ -29,6 +32,16 @@ test("packed browser to file to CLI to browser loop, HMR and session security", 
   await expect.poll(() => JSON.parse(readFileSync(taskPath, "utf8")).annotations.length).toBe(1);
   const task = JSON.parse(readFileSync(taskPath, "utf8"));
   const id = task.annotations[0].annotationId;
+  expect(task.annotations[0].extensions).toEqual({
+    "demo.extension": {
+      "target-context": { demoKind: "packed", kept: "visible" },
+    },
+  });
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.keyboard.press("Control+Alt+KeyJ");
+  await expect.poll(() => page.evaluate(() => window.__demoExtension?.actionCount)).toBe(1);
+  expect(JSON.parse(await page.evaluate(() => navigator.clipboard.readText())))
+    .toMatchObject({ format: "demo-json" });
   expect(cli("list")).toContain(id);
   expect(cli("print", "--markdown")).toContain("Make target purple");
   expect(cli("complete", id, "--verified", "--summary", "Playwright verified")).toContain("taskRevision 2");
@@ -48,11 +61,20 @@ test("packed browser to file to CLI to browser loop, HMR and session security", 
   await page.reload();
   await expect(page.locator("#agent-feedback-root")).toHaveCount(1);
   expect(JSON.parse(readFileSync(path.join(runtimeRoot, "session.json"), "utf8")).token).toBe(token);
-  const source = path.resolve("src/main.tsx");
+  const source = extensionSource;
   const before = readFileSync(source, "utf8");
   try {
-    writeFileSync(source, before.replace("Target button", "Target button HMR"));
-    await expect(page.locator("#target")).toHaveText("Target button HMR");
+    writeFileSync(source, `${before}\n`);
+    await expect.poll(() => page.evaluate(() => ({
+      setup: window.__demoExtension?.setupCount,
+      dispose: window.__demoExtension?.disposeCount,
+      buttons: document.getElementById("agent-feedback-root")?.shadowRoot
+        ?.querySelectorAll('[data-action-id="demo-copy-json"]').length,
+    }))).toEqual({ setup: 2, dispose: 1, buttons: 1 });
+    const beforeAction = await page.evaluate(() => window.__demoExtension?.actionCount);
+    await page.keyboard.press("Control+Alt+KeyJ");
+    await expect.poll(() => page.evaluate(() => window.__demoExtension?.actionCount))
+      .toBe((beforeAction ?? 0) + 1);
   } finally {
     writeFileSync(source, before);
   }
