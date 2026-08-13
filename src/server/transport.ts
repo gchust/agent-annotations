@@ -48,6 +48,24 @@ export class HttpTaskTransport implements TaskTransport {
     return this.#request({ method: "POST", body: JSON.stringify(request) });
   }
 
+  async writeEvidence(input: {
+    taskId: string;
+    expectedRevision: number;
+    annotationId: string;
+    png: string;
+    width: number;
+    height: number;
+  }): Promise<AgentFeedbackTask> {
+    const response = await fetch(`${this.endpoint}/evidence`, {
+      method: "POST",
+      headers: { [TOKEN_HEADER]: this.token, "content-type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    const payload = await response.json() as { error?: string; task?: AgentFeedbackTask };
+    if (!response.ok || !payload.task) throw new Error(payload.error ?? "request_failed");
+    return payload.task;
+  }
+
   subscribe(listener: (task: AgentFeedbackTask) => void): () => void {
     let revision: number | undefined;
     const poll = async () => {

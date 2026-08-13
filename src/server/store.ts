@@ -146,7 +146,7 @@ export class FileTaskStore {
 
   async writeEvidence(
     request: AgentFeedbackMutationRequest,
-    input: { annotationId: string; bytes: Buffer; mediaType: "image/png" }
+    input: { annotationId: string; bytes: Buffer; mediaType: "image/png"; width?: number; height?: number }
   ): Promise<AgentFeedbackTask> {
     if (!input.bytes.subarray(0, 8).equals(Buffer.from("89504e470d0a1a0a", "hex"))) {
       throw new Error("invalid_png");
@@ -166,6 +166,8 @@ export class FileTaskStore {
             kind: "screenshot",
             ref: file,
             mediaType: input.mediaType,
+            ...(input.width ? { width: input.width } : {}),
+            ...(input.height ? { height: input.height } : {}),
             capturedAt: new Date().toISOString(),
           },
         }],

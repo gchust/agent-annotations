@@ -44,13 +44,14 @@ test("packed browser to file to CLI to browser loop, HMR and session security", 
     .toMatchObject({ format: "demo-json" });
   expect(cli("list")).toContain(id);
   expect(cli("print", "--markdown")).toContain("Make target purple");
-  expect(cli("complete", id, "--verified", "--summary", "Playwright verified")).toContain("taskRevision 2");
+  const beforeComplete = JSON.parse(cli("verify")).taskRevision;
+  expect(cli("complete", id, "--verified", "--summary", "Playwright verified")).toContain(`taskRevision ${beforeComplete + 1}`);
   await expect.poll(() => page.evaluate(() =>
     document.getElementById("agent-feedback-root")?.shadowRoot
       ?.querySelector('[aria-label="Annotation 1: edit"]')?.getAttribute("data-status")
   )).toBe("completed");
-  expect(JSON.parse(cli("verify"))).toMatchObject({ ok: true, taskRevision: 2 });
-  expect(cli("reopen", id)).toContain("taskRevision 3");
+  expect(JSON.parse(cli("verify"))).toMatchObject({ ok: true, taskRevision: beforeComplete + 1 });
+  expect(cli("reopen", id)).toContain(`taskRevision ${beforeComplete + 2}`);
   await expect.poll(() => page.evaluate(() =>
     document.getElementById("agent-feedback-root")?.shadowRoot
       ?.querySelector('[aria-label="Annotation 1: edit"]')?.getAttribute("data-status")

@@ -247,6 +247,14 @@ export type AgentFeedbackPlatform = "mac" | "other";
 export interface TaskTransport {
   read(): Promise<AgentFeedbackTask>;
   mutate(request: AgentFeedbackMutationRequest): Promise<AgentFeedbackTask>;
+  writeEvidence?(input: {
+    taskId: string;
+    expectedRevision: number;
+    annotationId: string;
+    png: string;
+    width: number;
+    height: number;
+  }): Promise<AgentFeedbackTask>;
   subscribe?(listener: (task: AgentFeedbackTask) => void): () => void;
 }
 

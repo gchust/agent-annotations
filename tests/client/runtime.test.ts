@@ -3,11 +3,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 
 const primitives = vi.hoisted(() => ({
+  freeze: vi.fn(),
   getElementAtPoint: vi.fn((): Element | null => null),
+  unfreeze: vi.fn(),
 }));
 
 vi.mock("react-grab/primitives", () => ({
   disposeBaselineStyles: vi.fn(),
+  freeze: primitives.freeze,
   getElementAtPoint: primitives.getElementAtPoint,
   getElementBounds: vi.fn(() => ({ x: 0, y: 0, width: 1, height: 1 })),
   getElementContext: vi.fn(() => ({
@@ -22,6 +25,7 @@ vi.mock("react-grab/primitives", () => ({
   getElementSelector: vi.fn(() => "button"),
   getElementsAtPoint: vi.fn(() => []),
   isElementGrabbable: vi.fn(() => true),
+  unfreeze: primitives.unfreeze,
 }));
 
 import { mountAgentFeedback } from "../../src/client/index.js";
@@ -33,6 +37,8 @@ afterEach(() => {
   document.getElementById("agent-feedback-root")?.remove();
   primitives.getElementAtPoint.mockReset();
   primitives.getElementAtPoint.mockReturnValue(null);
+  primitives.freeze.mockClear();
+  primitives.unfreeze.mockClear();
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
@@ -47,6 +53,43 @@ describe("client runtime", () => {
     mounted.unmount();
     mounted.unmount();
     expect(document.getElementById("agent-feedback-root")).toBeNull();
+  });
+
+  it("freezes capture symmetrically while leaving the ignored toolbar usable", async () => {
+    const mounted = await mountAgentFeedback({ transport: new MemoryTaskTransport() });
+    const shadow = document.getElementById("agent-feedback-root")!.shadowRoot!;
+    shadow.querySelector<HTMLButtonElement>('[aria-label^="Pick"]')!.click();
+    expect(primitives.freeze).not.toHaveBeenCalled();
+    const target = document.createElement("button");
+    document.body.append(target);
+    primitives.getElementAtPoint.mockReturnValue(target);
+    target.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 1, clientY: 1 }));
+    expect(primitives.freeze).toHaveBeenCalledOnce();
+    expect(shadow.querySelector<HTMLButtonElement>('[aria-label^="Annotations"]')!.disabled).toBe(false);
+    mounted.api.commands.capture.cancel();
+    expect(primitives.unfreeze).toHaveBeenCalledOnce();
+    mounted.unmount();
+    expect(primitives.unfreeze).toHaveBeenCalledOnce();
+  });
+
+  it("starts marker observers only for rendered markers and coalesces dynamic DOM refresh", async () => {
+    const Mutation = vi.fn(class {
+      callback: MutationCallback;
+      constructor(callback: MutationCallback) { this.callback = callback; }
+      observe = vi.fn();
+      disconnect = vi.fn();
+    });
+    const Resize = vi.fn(class {
+      observe = vi.fn();
+      disconnect = vi.fn();
+    });
+    vi.stubGlobal("MutationObserver", Mutation);
+    vi.stubGlobal("ResizeObserver", Resize);
+    const empty = await mountAgentFeedback({ transport: new MemoryTaskTransport() });
+    expect(Mutation).not.toHaveBeenCalled();
+    expect(Resize).not.toHaveBeenCalled();
+    empty.unmount();
+    vi.unstubAllGlobals();
   });
 
   it("exposes snapshot subscriptions and commands without React setters", async () => {

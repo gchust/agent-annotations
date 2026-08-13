@@ -54,11 +54,11 @@ describe("file task store", () => {
     const png = Buffer.from("89504e470d0a1a0a00000000", "hex");
     const evidenced = await store.writeEvidence(
       { taskId: added.taskId, expectedRevision: 1, operations: [] },
-      { annotationId: "ann-1", bytes: png, mediaType: "image/png" }
+      { annotationId: "ann-1", bytes: png, mediaType: "image/png", width: 1600, height: 900 }
     );
     expect(evidenced).toMatchObject({
       taskRevision: 2,
-      annotations: [{ evidence: [{ kind: "screenshot", mediaType: "image/png" }] }],
+      annotations: [{ evidence: [{ kind: "screenshot", mediaType: "image/png", width: 1600, height: 900 }] }],
     });
     const reference = evidenced.annotations[0].evidence?.[0].ref;
     expect(readFileSync(path.join(store.root, reference!))).toEqual(png);

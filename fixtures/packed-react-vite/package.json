@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1 --strictPort",
     "build": "vite build",
-    "test:e2e": "playwright test tests/vertical.spec.ts && playwright test tests/source-benchmark.spec.ts && node tests/shutdown.mjs"
+    "test:e2e": "playwright test tests/vertical.spec.ts && playwright test tests/source-benchmark.spec.ts && playwright test tests/reliability.spec.ts && node tests/shutdown.mjs"
   },
   "devDependencies": {
     "@gchust/agent-feedback": "file:./gchust-agent-feedback.tgz",

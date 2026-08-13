@@ -3,10 +3,13 @@ import { describe, expect, it, vi } from "vitest";
 
 const primitives = vi.hoisted(() => ({
   elementsAtPoint: vi.fn<(...args: unknown[]) => Element[]>(() => []),
+  freeze: vi.fn(),
+  unfreeze: vi.fn(),
 }));
 
 vi.mock("react-grab/primitives", () => ({
   disposeBaselineStyles: vi.fn(),
+  freeze: primitives.freeze,
   getElementAtPoint: vi.fn(),
   getElementBounds: vi.fn((element: Element) => ({
     x: Number(element.getAttribute("data-x") ?? 1), y: 2, width: 30, height: 20,
@@ -18,9 +21,16 @@ vi.mock("react-grab/primitives", () => ({
   getElementSelector: vi.fn(() => "#save"),
   getElementsAtPoint: primitives.elementsAtPoint,
   isElementGrabbable: vi.fn(() => true),
+  unfreeze: primitives.unfreeze,
 }));
 
-import { inspectTarget, sampleRegionTargets } from "../../src/client/inspection-engine.js";
+import {
+  inspectTarget,
+  pruneRegionTargets,
+  resolveTargetResult,
+  sampleRegionTargets,
+  setInspectionFrozen,
+} from "../../src/client/inspection-engine.js";
 
 describe("React Grab inspection boundary", () => {
   it("normalizes one generic target without host vocabulary", async () => {
@@ -45,5 +55,58 @@ describe("React Grab inspection boundary", () => {
     expect(primitives.elementsAtPoint.mock.calls.length).toBeLessThanOrEqual(69);
     expect(scan).not.toHaveBeenCalledWith("*");
     scan.mockRestore();
+  });
+
+  it("prunes wrapper-heavy candidates after collection and keeps semantic targets", () => {
+    const wrapper = document.createElement("div");
+    let parent = wrapper;
+    const candidates: Element[] = [wrapper];
+    for (let index = 0; index < 80; index += 1) {
+      const child = document.createElement("div");
+      parent.append(child);
+      parent = child;
+      candidates.push(child);
+    }
+    const button = document.createElement("button");
+    button.setAttribute("aria-label", "Checkout");
+    parent.append(button);
+    candidates.push(button);
+    document.body.append(wrapper);
+    expect(pruneRegionTargets(candidates)[0]).toBe(button);
+  });
+
+  it("resolves nested iframe and open shadow boundaries", () => {
+    const outer = document.createElement("iframe");
+    outer.id = "outer";
+    document.body.append(outer);
+    const inner = outer.contentDocument!.createElement("iframe");
+    inner.id = "inner";
+    outer.contentDocument!.body.append(inner);
+    const host = inner.contentDocument!.createElement("section");
+    host.id = "host";
+    inner.contentDocument!.body.append(host);
+    const target = inner.contentDocument!.createElement("button");
+    target.id = "target";
+    host.attachShadow({ mode: "open" }).append(target);
+    expect(resolveTargetResult("#outer >>iframe>> #inner >>iframe>> #host >>> #target"))
+      .toEqual({ status: "resolved", element: target });
+  });
+
+  it("reports cross-origin boundaries as unsupported", () => {
+    const frame = document.createElement("iframe");
+    frame.id = "remote";
+    Object.defineProperty(frame, "contentDocument", { get: () => { throw new DOMException("Blocked"); } });
+    document.body.append(frame);
+    expect(resolveTargetResult("#remote >>iframe>> #target")).toMatchObject({ status: "unsupported" });
+  });
+
+  it("uses symmetric React Grab freeze/unfreeze calls", () => {
+    const element = document.createElement("main");
+    setInspectionFrozen(true, [element]);
+    setInspectionFrozen(true, [element]);
+    setInspectionFrozen(false);
+    expect(primitives.freeze).toHaveBeenCalledOnce();
+    expect(primitives.freeze).toHaveBeenCalledWith([element]);
+    expect(primitives.unfreeze).toHaveBeenCalledOnce();
   });
 });

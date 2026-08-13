@@ -11,6 +11,8 @@ export default defineConfig({
   outputDir: path.join(artifactRoot, "playwright-results"),
   reporter: "list",
   timeout: 30_000,
+  workers: 1,
+  fullyParallel: false,
   use: {
     baseURL: "http://127.0.0.1:4179",
     screenshot: "only-on-failure",

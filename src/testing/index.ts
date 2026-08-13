@@ -29,4 +29,30 @@ export class MemoryTaskTransport implements TaskTransport {
     this.#task = parseAgentFeedbackTask(result.task);
     return structuredClone(this.#task);
   }
+
+  async writeEvidence(input: {
+    taskId: string;
+    expectedRevision: number;
+    annotationId: string;
+    png: string;
+    width: number;
+    height: number;
+  }): Promise<AgentFeedbackTask> {
+    return this.mutate({
+      taskId: input.taskId,
+      expectedRevision: input.expectedRevision,
+      operations: [{
+        op: "addEvidence",
+        annotationId: input.annotationId,
+        evidence: {
+          kind: "screenshot",
+          ref: `memory:${input.png.length}`,
+          mediaType: "image/png",
+          width: input.width,
+          height: input.height,
+          capturedAt: new Date().toISOString(),
+        },
+      }],
+    });
+  }
 }

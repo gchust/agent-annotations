@@ -13,6 +13,7 @@ const VIRTUAL_ID = "virtual:agent-feedback/client";
 const RESOLVED_VIRTUAL_ID = `\0${VIRTUAL_ID}`;
 const TOKEN_HEADER = "x-agent-feedback-token";
 const MAX_BODY_BYTES = 256 * 1024;
+const MAX_EVIDENCE_BODY_BYTES = 3 * 1024 * 1024;
 const SOURCE_MODULE = /\.[cm]?[jt]sx?$/i;
 
 export type AgentFeedbackPluginOptions = {
@@ -70,13 +71,13 @@ const json = (
   response.end(JSON.stringify(payload));
 };
 
-const body = async (request: IncomingMessage): Promise<unknown> => {
+const body = async (request: IncomingMessage, limit = MAX_BODY_BYTES): Promise<unknown> => {
   const chunks: Buffer[] = [];
   let bytes = 0;
   for await (const chunk of request) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     bytes += buffer.length;
-    if (bytes > MAX_BODY_BYTES) throw new Error("payload_too_large");
+    if (bytes > limit) throw new Error("payload_too_large");
     chunks.push(buffer);
   }
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
@@ -287,17 +288,19 @@ export default function agentFeedback(
             });
           }
           if (url.pathname === `${endpoint}/evidence` && request.method === "POST") {
-            const input = await body(request) as {
+            const input = await body(request, MAX_EVIDENCE_BODY_BYTES) as {
               taskId: string;
               expectedRevision: number;
               annotationId: string;
               png: string;
+              width?: number;
+              height?: number;
             };
             const bytes = Buffer.from(input.png ?? "", "base64");
             return json(response, 200, {
               task: await store.writeEvidence(
                 { taskId: input.taskId, expectedRevision: input.expectedRevision, operations: [] },
-                { annotationId: input.annotationId, bytes, mediaType: "image/png" }
+                { annotationId: input.annotationId, bytes, mediaType: "image/png", width: input.width, height: input.height }
               ),
             });
           }

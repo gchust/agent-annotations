@@ -30,9 +30,13 @@ import {
   inspectTarget,
   resolveTarget,
   sampleRegionTargets,
+  setInspectionFrozen,
+  targetBounds,
+  targetFromEvent,
   targetAtPoint,
 } from "./inspection-engine.js";
 import { builtinClientExtension } from "./builtin-extension.js";
+import { captureViewportPng } from "./screenshot.js";
 import { AGENT_FEEDBACK_STYLES } from "./styles.js";
 
 const HOST_ID = "agent-feedback-root";
@@ -145,6 +149,8 @@ export async function mountAgentFeedback(
   const cleanups: Array<() => void> = [];
   const timers = new Set<number>();
   const frames = new Set<number>();
+  let refreshCaptureDocuments = (): void => undefined;
+  let clearCaptureDocuments = (): void => undefined;
 
   const scheduleTimer = (callback: () => void, delay: number): number => {
     const timer = window.setTimeout(() => {
@@ -251,8 +257,8 @@ export async function mountAgentFeedback(
       }
     }, 1800);
   };
-  const mutate = async (operations: AgentFeedbackMutationOperation[]) => {
-    if (destroyed) return;
+  const mutate = async (operations: AgentFeedbackMutationOperation[]): Promise<AgentFeedbackTask | undefined> => {
+    if (destroyed) return undefined;
     const redactors = registry.getRedactors().map((redactor) => ({
       extensionId: redactor.extensionId,
       redact: redactor.redact,
@@ -273,10 +279,14 @@ export async function mountAgentFeedback(
       expectedRevision: task.taskRevision,
       operations: redactedOperations,
     });
-    if (destroyed) return;
+    if (destroyed) return undefined;
     task = next;
     render();
     emit();
+    return next;
+  };
+  const mutateCommand = async (operations: AgentFeedbackMutationOperation[]): Promise<void> => {
+    await mutate(operations);
   };
 
   const exportTask = async (
@@ -340,6 +350,8 @@ export async function mountAgentFeedback(
   };
 
   const cancelCapture = () => {
+    setInspectionFrozen(false);
+    clearCaptureDocuments();
     captureMode = "idle";
     selected = [];
     hover = null;
@@ -355,6 +367,7 @@ export async function mountAgentFeedback(
     composer = null;
     editingId = null;
     openPanel = null;
+    refreshCaptureDocuments();
     render();
     emit();
   };
@@ -381,10 +394,10 @@ export async function mountAgentFeedback(
       },
       annotations: {
         copyOpen,
-        complete: (id) => mutate([{ op: "complete", annotationId: id }]),
-        reopen: (id) => mutate([{ op: "reopen", annotationId: id }]),
-        remove: (id) => mutate([{ op: "remove", annotationId: id }]),
-        removeCompleted: () => mutate([{ op: "removeCompleted" }]),
+        complete: (id) => mutateCommand([{ op: "complete", annotationId: id }]),
+        reopen: (id) => mutateCommand([{ op: "reopen", annotationId: id }]),
+        remove: (id) => mutateCommand([{ op: "remove", annotationId: id }]),
+        removeCompleted: () => mutateCommand([{ op: "removeCompleted" }]),
       },
       markers: {
         show: () => setMarkersVisible(true),
@@ -510,7 +523,8 @@ export async function mountAgentFeedback(
   };
 
   const renderMarkers = () => {
-    if (!markersVisible) return;
+    const resolved: Element[] = [];
+    if (!markersVisible) return resolved;
     task.annotations.forEach((annotation, index) => {
       if (annotation.region) {
         addOutline({
@@ -523,23 +537,26 @@ export async function mountAgentFeedback(
       const target = annotation.targets?.[0]
         ? resolveTarget(annotation.targets[0].selector)
         : null;
-      const rect = target?.getBoundingClientRect();
+      if (target) resolved.push(target);
+      const rect = target ? targetBounds(target) : null;
       const anchor = rect
-        ? { x: rect.left - 8, y: rect.top - 8 }
+        ? { x: rect.x - 8, y: rect.y - 8 }
         : annotation.region
           ? { x: annotation.region.x - scrollX + annotation.region.width - 14, y: annotation.region.y - scrollY + 4 }
           : null;
-      if (!anchor) return;
       const marker = document.createElement("button");
       marker.type = "button";
       marker.className = "af-marker";
       marker.dataset.status = annotation.status;
+      marker.dataset.annotationId = annotation.annotationId;
       marker.setAttribute("aria-label", `Annotation ${index + 1}: edit`);
       marker.textContent = String(index + 1);
-      Object.assign(marker.style, { left: `${anchor.x}px`, top: `${anchor.y}px` });
+      marker.hidden = !anchor;
+      if (anchor) Object.assign(marker.style, { left: `${anchor.x}px`, top: `${anchor.y}px` });
       marker.addEventListener("click", () => focusAnnotation(annotation.annotationId));
       root.append(marker);
     });
+    return resolved;
   };
 
   const renderComposer = () => {
@@ -587,7 +604,30 @@ export async function mountAgentFeedback(
               registry.getTargetEnrichers()
             );
         if (destroyed) return;
-        await mutate([{ op: "add", annotation }]);
+        const persisted = await mutate([{ op: "add", annotation }]);
+        if (destroyed) return;
+        if (persisted && options.transport.writeEvidence) {
+          const overlays = composer?.kind === "region"
+            ? [composer.rect]
+            : composer?.elements.map(targetBounds) ?? [];
+          const screenshot = await captureViewportPng(overlays);
+          if (screenshot && !destroyed) {
+            try {
+              task = await options.transport.writeEvidence({
+                taskId: persisted.taskId,
+                expectedRevision: persisted.taskRevision,
+                annotationId: annotation.annotationId,
+                png: screenshot.png,
+                width: screenshot.width,
+                height: screenshot.height,
+              });
+              render();
+              emit();
+            } catch {
+              // Screenshot evidence is explicitly best-effort; the annotation is authoritative.
+            }
+          }
+        }
         if (destroyed) return;
         cancelCapture();
         setStatus("Annotation saved");
@@ -740,7 +780,7 @@ export async function mountAgentFeedback(
     });
     grip.addEventListener("pointerup", () => { drag = null; });
 
-    renderMarkers();
+    const markerTargets = renderMarkers();
     if (hover && captureMode !== "area") addOutline(hover.getBoundingClientRect());
     for (const element of selected) addOutline(element.getBoundingClientRect());
     if (areaRect) {
@@ -774,6 +814,7 @@ export async function mountAgentFeedback(
       toast.textContent = status;
       root.append(toast);
     }
+    syncMarkerTracking(markerTargets);
   };
 
   const isHostEvent = (event: Event): boolean =>
@@ -791,7 +832,7 @@ export async function mountAgentFeedback(
       render();
       return;
     }
-    hover = targetAtPoint(event.clientX, event.clientY);
+    hover = targetFromEvent(event) ?? targetAtPoint(event.clientX, event.clientY);
     render();
   };
   const onPointerDown = (event: PointerEvent) => {
@@ -814,21 +855,25 @@ export async function mountAgentFeedback(
     areaStart = null;
     areaRect = null;
     if (rect.width < 8 || rect.height < 8) return render();
-    const sampled = sampleRegionTargets(rect).length;
+    const targets = sampleRegionTargets(rect);
+    const sampled = targets.length;
     composer = { kind: "region", rect, sampled };
+    if (targets.length > 0) setInspectionFrozen(true, targets);
     render();
   };
   const onClick = (event: MouseEvent) => {
     if ((captureMode !== "pick" && captureMode !== "multi") || composer || isHostEvent(event)) return;
-    const target = targetAtPoint(event.clientX, event.clientY);
+    const target = targetFromEvent(event) ?? targetAtPoint(event.clientX, event.clientY);
     if (!target) return;
     event.preventDefault();
     event.stopPropagation();
     if (captureMode === "pick") {
       selected = [target];
       composer = { kind: "element", elements: [target] };
+      setInspectionFrozen(true, [target]);
     } else if (event.detail === 2 && selected.length >= 2) {
       composer = { kind: "multi", elements: [...selected] };
+      setInspectionFrozen(true, selected);
     } else {
       selected = selected.includes(target)
         ? selected.filter((entry) => entry !== target)
@@ -852,6 +897,7 @@ export async function mountAgentFeedback(
     if (captureMode === "multi" && event.key === "Enter" && selected.length >= 2 && !isEditable(event.target)) {
       event.preventDefault();
       composer = { kind: "multi", elements: [...selected] };
+      setInspectionFrozen(true, selected);
       return render();
     }
     const shortcut = shortcuts.find((entry) => matchesAgentFeedbackShortcut({
@@ -895,20 +941,157 @@ export async function mountAgentFeedback(
     if (console.error === onConsoleError) console.error = originalConsoleError;
   });
 
+  const captureDocuments = new Map<Document, () => void>();
+  const bindCaptureDocument = (captureDocument: Document): void => {
+    if (captureDocuments.has(captureDocument)) return;
+    for (const [type, listener] of [
+      ["pointermove", onPointerMove], ["pointerdown", onPointerDown],
+      ["pointerup", onPointerUp], ["click", onClick],
+    ] as Array<[string, EventListener]>) captureDocument.addEventListener(type, listener, true);
+    const cleanup = () => {
+      for (const [type, listener] of [
+        ["pointermove", onPointerMove], ["pointerdown", onPointerDown],
+        ["pointerup", onPointerUp], ["click", onClick],
+      ] as Array<[string, EventListener]>) captureDocument.removeEventListener(type, listener, true);
+    };
+    captureDocuments.set(captureDocument, cleanup);
+    for (const frame of captureDocument.querySelectorAll("iframe")) {
+      const refresh = () => {
+        try {
+          if (frame.contentDocument) bindCaptureDocument(frame.contentDocument);
+        } catch {
+          // Cross-origin frames are explicitly unsupported and remain unresolved.
+        }
+      };
+      frame.addEventListener("load", refresh);
+      const baseCleanup = captureDocuments.get(captureDocument)!;
+      captureDocuments.set(captureDocument, () => {
+        frame.removeEventListener("load", refresh);
+        baseCleanup();
+      });
+      try {
+        if (frame.contentDocument) bindCaptureDocument(frame.contentDocument);
+      } catch {
+        // Cross-origin frames are explicitly unsupported and remain unresolved.
+      }
+    }
+  };
+  refreshCaptureDocuments = () => bindCaptureDocument(document);
+  clearCaptureDocuments = () => {
+    for (const cleanup of captureDocuments.values()) cleanup();
+    captureDocuments.clear();
+  };
+  cleanups.push(clearCaptureDocuments);
+
   for (const [type, listener, target] of [
-    ["pointermove", onPointerMove, document], ["pointerdown", onPointerDown, document],
-    ["pointerup", onPointerUp, document], ["click", onClick, document], ["keydown", onKeyDown, window],
-    ["error", onError, window], ["unhandledrejection", onRejection, window],
-  ] as Array<[string, EventListener, Document | Window]>) {
+    ["keydown", onKeyDown as EventListener, window],
+    ["error", onError as EventListener, window],
+    ["unhandledrejection", onRejection as EventListener, window],
+  ] satisfies Array<[string, EventListener, Window]>) {
     target.addEventListener(type, listener, true);
     cleanups.push(() => target.removeEventListener(type, listener, true));
   }
-  const onViewport = () => render();
+  let markerObserver: MutationObserver | null = null;
+  let markerResizeObserver: ResizeObserver | null = null;
+  let markerFrameCleanups: Array<() => void> = [];
+  let markerFrames = new WeakSet<Element>();
+  let markerFrame: number | null = null;
+  let markerRefreshes = 0;
+  const stopMarkerTracking = () => {
+    markerObserver?.disconnect();
+    markerResizeObserver?.disconnect();
+    for (const cleanup of markerFrameCleanups.splice(0)) cleanup();
+    markerFrames = new WeakSet<Element>();
+    markerObserver = null;
+    markerResizeObserver = null;
+    if (markerFrame !== null) {
+      window.cancelAnimationFrame(markerFrame);
+      frames.delete(markerFrame);
+      markerFrame = null;
+    }
+  };
+  const scheduleMarkerRefresh = () => {
+    if (markerFrame !== null) return;
+    markerFrame = scheduleFrame(() => {
+      markerFrame = null;
+      for (const annotation of task.annotations) {
+        const marker = Array.from(root.querySelectorAll<HTMLElement>(".af-marker"))
+          .find((node) => node.dataset.annotationId === annotation.annotationId);
+        if (!marker) continue;
+        const target = annotation.targets?.[0]
+          ? resolveTarget(annotation.targets[0].selector)
+          : null;
+        const rect = target ? targetBounds(target) : null;
+        const anchor = rect
+          ? { x: rect.x - 8, y: rect.y - 8 }
+          : annotation.region
+            ? { x: annotation.region.x - scrollX + annotation.region.width - 14, y: annotation.region.y - scrollY + 4 }
+            : null;
+        marker.hidden = !anchor;
+        if (anchor) Object.assign(marker.style, { left: `${anchor.x}px`, top: `${anchor.y}px` });
+      }
+      markerRefreshes += 1;
+      hostElement.dataset.markerRefreshes = String(markerRefreshes);
+    });
+  };
+  const appRoot = document.getElementById("root") ?? document.querySelector("main") ?? document.body;
+  const watchMarkerFrames = (scope: ParentNode): void => {
+    for (const frame of scope.querySelectorAll("iframe")) {
+      if (markerFrames.has(frame)) continue;
+      markerFrames.add(frame);
+      const refresh = () => {
+        scheduleMarkerRefresh();
+        try {
+          if (frame.contentDocument) watchMarkerFrames(frame.contentDocument);
+        } catch {
+          // Cross-origin frames are explicitly unsupported and remain unresolved.
+        }
+      };
+      frame.addEventListener("load", refresh);
+      markerFrameCleanups.push(() => frame.removeEventListener("load", refresh));
+      try {
+        if (frame.contentDocument) watchMarkerFrames(frame.contentDocument);
+      } catch {
+        // Cross-origin frames are explicitly unsupported and remain unresolved.
+      }
+    }
+  };
+  const hasPersistedFrameTarget = (): boolean => task.annotations.some((annotation) =>
+    annotation.targets?.some(({ selector }) => selector.includes(">>iframe>>"))
+  );
+  function syncMarkerTracking(targets: Element[]): void {
+    stopMarkerTracking();
+    const watchFrames = markersVisible && hasPersistedFrameTarget();
+    if ((!markersVisible || targets.length === 0) && !editingId && !watchFrames) return;
+    if (watchFrames) watchMarkerFrames(appRoot);
+    if (targets.length === 0 && !editingId) return;
+    markerObserver = new MutationObserver(scheduleMarkerRefresh);
+    const mutationOptions = { childList: true, subtree: true };
+    markerObserver.observe(appRoot, mutationOptions);
+    const observed = new Set<Node>([appRoot]);
+    for (const target of targets) {
+      for (const node of [target.ownerDocument.documentElement, target.getRootNode()]) {
+        if (node && !observed.has(node)) {
+          markerObserver.observe(node, mutationOptions);
+          observed.add(node);
+        }
+      }
+    }
+    if (typeof ResizeObserver !== "undefined") {
+      markerResizeObserver = new ResizeObserver(scheduleMarkerRefresh);
+      for (const target of targets) markerResizeObserver.observe(target);
+    }
+  }
+  hostElement.dataset.markerRefreshes = "0";
+  cleanups.push(stopMarkerTracking);
+
+  const onViewport = () => {
+    if (markerObserver || editingId) scheduleMarkerRefresh();
+  };
   window.addEventListener("resize", onViewport);
   window.addEventListener("scroll", onViewport, true);
   cleanups.push(() => window.removeEventListener("resize", onViewport));
   cleanups.push(() => window.removeEventListener("scroll", onViewport, true));
-
   render();
   const setupCleanups: Array<() => void> = [];
   try {
