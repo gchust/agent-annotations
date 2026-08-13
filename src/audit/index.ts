@@ -3,7 +3,7 @@ import path from "node:path";
 
 export type AuditProblem = { check: string; file: string; line: number };
 
-export const SOLE_PRIMITIVES_IMPORTER = "src/client/inspection-engine.ts";
+const SOLE_PRIMITIVES_IMPORTER = "src/client/inspection-engine.ts";
 const SCOPES = ["src", "scripts", "tests", "fixtures", "playgrounds"];
 const EXTENSIONS = new Set([".ts", ".tsx", ".js", ".mjs", ".cjs", ".json"]);
 const ALLOWLIST = new Set([

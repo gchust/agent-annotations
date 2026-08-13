@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -20,6 +20,16 @@ try {
   const allowed = /^(?:package\.json|LICENSE|README\.md|API\.md|CHANGELOG\.md|THIRD_PARTY_NOTICES\.md|dist\/)/;
   const unexpected = files.filter((file) => !allowed.test(file));
   if (unexpected.length) throw new Error(`unexpected tarball files: ${unexpected.join(", ")}`);
+  const leaks = files.filter((file) => file.endsWith(".map") || /^(?:src|tests|fixtures|playgrounds|scripts)\//.test(file));
+  if (leaks.length) throw new Error(`source or fixture files in tarball: ${leaks.join(", ")}`);
+  const declarations = readdirSync(path.join(root, "dist"), { recursive: true })
+    .filter((file) => typeof file === "string" && /\.d\.(?:ts|mts)$/.test(file));
+  const internalPath = /\/root\/work|from\s+["'][^"']*src\/|import\s*\(["'][^"']*src\//;
+  for (const file of declarations) {
+    if (internalPath.test(readFileSync(path.join(root, "dist", file), "utf8"))) {
+      throw new Error(`internal import path in declaration: dist/${file}`);
+    }
+  }
   const size = statSync(packed.filename).size;
   if (size > 200_000) throw new Error(`tarball exceeds 200000-byte gate: ${size}`);
   if (JSON.stringify(manifest).includes("workspace:")) throw new Error("workspace protocol in package metadata");

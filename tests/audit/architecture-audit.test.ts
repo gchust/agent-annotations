@@ -4,9 +4,10 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { runArchitectureAudit, SOLE_PRIMITIVES_IMPORTER } from "../../src/audit/index.js";
+import { runArchitectureAudit } from "../../src/audit/index.js";
 
 const roots: string[] = [];
+const SOLE_PRIMITIVES_IMPORTER = "src/client/inspection-engine.ts";
 const primitives = "react-grab" + "/primitives";
 const fixture = (offender?: string) => {
   const root = mkdtempSync(path.join(tmpdir(), "agent-feedback-audit-"));
