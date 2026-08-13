@@ -31,6 +31,8 @@ describe("architecture audit", () => {
     const root = mkdtempSync(path.join(tmpdir(), "agent-feedback-audit-packed-"));
     roots.push(root);
     writeFileSync(path.join(root, "package.json"), '{"name":"packed-consumer"}');
+    mkdirSync(path.join(root, "src"));
+    writeFileSync(path.join(root, "src/main.ts"), "export const app = true;");
     expect(runArchitectureAudit(root)).toEqual({ ok: true, problems: [], importerFiles: [] });
   });
 
