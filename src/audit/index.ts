@@ -44,6 +44,7 @@ export const runArchitectureAudit = (root: string): { ok: boolean; problems: Aud
   }
   const problems: AuditProblem[] = [];
   const importerFiles: string[] = [];
+  const sourcePresent = existsSync(path.join(root, "src"));
   for (const file of files.sort()) {
     if (ALLOWLIST.has(file)) continue;
     const content = readFileSync(path.join(root, file), "utf8");
@@ -58,7 +59,7 @@ export const runArchitectureAudit = (root: string): { ok: boolean; problems: Aud
     }
   }
   const sourceImporters = importerFiles.filter((file) => file.startsWith("src/"));
-  if (sourceImporters.length !== 1 || sourceImporters[0] !== SOLE_PRIMITIVES_IMPORTER) {
+  if (sourcePresent && (sourceImporters.length !== 1 || sourceImporters[0] !== SOLE_PRIMITIVES_IMPORTER)) {
     problems.push({ check: "sole-primitives-importer", file: SOLE_PRIMITIVES_IMPORTER, line: 1 });
   }
   return { ok: problems.length === 0, problems, importerFiles };

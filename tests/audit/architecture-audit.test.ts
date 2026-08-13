@@ -27,6 +27,13 @@ afterEach(() => roots.splice(0).forEach((root) => rmSync(root, { recursive: true
 describe("architecture audit", () => {
   it("passes a clean tree", () => expect(runArchitectureAudit(fixture()).ok).toBe(true));
 
+  it("passes a packed consumer without package source", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "agent-feedback-audit-packed-"));
+    roots.push(root);
+    writeFileSync(path.join(root, "package.json"), '{"name":"packed-consumer"}');
+    expect(runArchitectureAudit(root)).toEqual({ ok: true, problems: [], importerFiles: [] });
+  });
+
   it.each([
     ["sole-primitives-importer", `import { freeze } from "${primitives}";`],
     ["react-grab-ui", `import "react-grab";`],
