@@ -133,6 +133,7 @@ describe("ClientExtensionRegistry", () => {
     expect(() => registry.register(extension("three", {
       toolbar: [{ ...action("symbol", "X"), shortcut: { key: "χ", code: "keyc", primary: true, alt: true, shift: false } }],
     }))).toThrow("Duplicate toolbar shortcut: symbol conflicts with copy");
+
     const intra = new ClientExtensionRegistry();
     expect(() => intra.register(extension("broken", { toolbar: [
       action("first", "A"),
