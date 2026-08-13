@@ -1034,7 +1034,7 @@ export async function mountAgentFeedback(
       }
       markerRefreshes += 1;
       hostElement.dataset.markerRefreshes = String(markerRefreshes);
-      if (!markerObserver && resolved.length > 0) syncMarkerTracking(resolved);
+      if (resolved.length > 0) syncMarkerTracking(resolved);
     });
   };
   const appRoot = document.getElementById("root") ?? document.querySelector("main") ?? document.body;
