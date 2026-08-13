@@ -1014,6 +1014,7 @@ export async function mountAgentFeedback(
     if (markerFrame !== null) return;
     markerFrame = scheduleFrame(() => {
       markerFrame = null;
+      const resolved: Element[] = [];
       for (const annotation of task.annotations) {
         const marker = Array.from(root.querySelectorAll<HTMLElement>(".af-marker"))
           .find((node) => node.dataset.annotationId === annotation.annotationId);
@@ -1021,6 +1022,7 @@ export async function mountAgentFeedback(
         const target = annotation.targets?.[0]
           ? resolveTarget(annotation.targets[0].selector)
           : null;
+        if (target) resolved.push(target);
         const rect = target ? targetBounds(target) : null;
         const anchor = rect
           ? { x: rect.x - 8, y: rect.y - 8 }
@@ -1032,6 +1034,7 @@ export async function mountAgentFeedback(
       }
       markerRefreshes += 1;
       hostElement.dataset.markerRefreshes = String(markerRefreshes);
+      if (resolved.length > 0) syncMarkerTracking(resolved);
     });
   };
   const appRoot = document.getElementById("root") ?? document.querySelector("main") ?? document.body;

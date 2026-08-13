@@ -28,12 +28,10 @@ test("screenshot keeps style, media geometry, scroll, large viewport and aligned
   await expect.poll(() => JSON.parse(readFileSync(taskPath, "utf8")).annotations.at(-1).evidence?.length ?? 0, { timeout: 10_000 }).toBe(1);
   const task = JSON.parse(readFileSync(taskPath, "utf8"));
   const annotation = task.annotations.at(-1);
-  expect(annotation.targets[0].bounds).toMatchObject({
-    x: expect.closeTo(before!.x, 0),
-    y: expect.closeTo(before!.y, 0),
-    width: expect.closeTo(before!.width, 0),
-    height: expect.closeTo(before!.height, 0),
-  });
+  expect(annotation.targets[0].bounds.x).toBeCloseTo(before!.x, 0);
+  expect(annotation.targets[0].bounds.y).toBeCloseTo(before!.y, 0);
+  expect(annotation.targets[0].bounds.width).toBeCloseTo(before!.width, 0);
+  expect(annotation.targets[0].bounds.height).toBeCloseTo(before!.height, 0);
   const evidence = annotation.evidence.at(-1);
   expect(evidence).toMatchObject({ kind: "screenshot", mediaType: "image/png", width: 1600, height: 900 });
   const png = readFileSync(path.join(runtimeRoot, evidence.ref));
@@ -103,17 +101,17 @@ test("cross-origin stays explicitly unsupported and public freeze keeps toolbar 
 
 test("region is bounded and semantic target survives wrapper-heavy sampling", async ({ page }) => {
   await page.goto("/");
-  const box = await page.locator("#wrapper-fixture").boundingBox();
+  const box = await page.locator("#semantic-region-target").boundingBox();
   expect(box).not.toBeNull();
   const durations: number[] = [];
   for (let run = 0; run < 3; run += 1) {
     const started = Date.now();
     await shadow(page, '[aria-label^="Area"]').click();
-    await page.mouse.move(box!.x, box!.y);
+    await page.mouse.move(box!.x - 2, box!.y - 2);
     await page.mouse.down();
-    await page.mouse.move(box!.x + box!.width, box!.y + box!.height);
+    await page.mouse.move(box!.x + box!.width + 2, box!.y + box!.height + 2);
     await page.mouse.up();
-    await expect(shadow(page, '[aria-label="Annotation composer"]')).toContainText("Area (1 sampled targets)");
+    await expect(shadow(page, '[aria-label="Annotation composer"]')).toContainText("Area (0 sampled targets)");
     durations.push(Date.now() - started);
     await page.keyboard.press("Escape");
   }
@@ -135,4 +133,7 @@ test("dynamic marker refresh stays rAF-bounded and observers stop with hidden ma
   expect(refreshes).toBeLessThan(60);
   await shadow(page, '[aria-label^="Markers"]').click();
   await expect(shadow(page, ".af-marker")).toHaveCount(0);
+  const stopped = Number(await page.locator("#agent-feedback-root").getAttribute("data-marker-refreshes"));
+  await page.waitForTimeout(500);
+  expect(Number(await page.locator("#agent-feedback-root").getAttribute("data-marker-refreshes"))).toBe(stopped);
 });

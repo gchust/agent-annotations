@@ -48,7 +48,10 @@ function ReliabilityFixtures() {
     <div id="fixture-popover" popover="auto">Popover content</div>
     <div id="animated-target" style={{ animation: "fixture-pulse 100ms infinite alternate" }}>Animated target</div>
     <button id="dynamic-target">Dynamic {dynamic}</button>
-    <div id="wrapper-fixture">{Array.from({ length: 70 }, (_, index) => <div className="wrapper" key={index} />)}<button id="semantic-region-target" aria-label="Semantic target">Save</button></div>
+    <div id="wrapper-fixture" style={{ position: "relative", width: 400, height: 240 }}>
+      {Array.from({ length: 70 }, (_, index) => <div className="wrapper" key={index} style={{ position: "absolute", inset: 0 }} />)}
+      <button id="semantic-region-target" aria-label="Semantic target" style={{ position: "absolute", inset: 0, margin: "auto", width: 120, height: 44 }}>Save</button>
+    </div>
   </>;
 }
 
