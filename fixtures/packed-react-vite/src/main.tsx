@@ -17,7 +17,10 @@ function RealmFixtures() {
       outer.body.innerHTML = '<iframe id="nested-frame" srcdoc="<button id=\'nested-target\'>Nested target</button>"></iframe><div id="frame-shadow"></div>';
       outer.querySelector("#frame-shadow")!.attachShadow({ mode: "open" }).innerHTML =
         '<button id="frame-shadow-target">Frame shadow target</button>';
-      frame.current!.dataset.ready = "true";
+      const nested = outer.querySelector<HTMLIFrameElement>("#nested-frame")!;
+      const ready = () => { frame.current!.dataset.ready = "true"; };
+      if (nested.contentDocument?.readyState === "complete") ready();
+      else nested.addEventListener("load", ready, { once: true });
     };
     const element = frame.current;
     element?.addEventListener("load", setup, { once: true });
