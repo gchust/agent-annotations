@@ -68,7 +68,10 @@ test("complete generic Pick/Multi/Area annotation closed loop", async ({ page, c
   await shadow(page, '[aria-label="Annotation editor"] textarea').fill("Make the plain button purple");
   await shadow(page, '[aria-label="Annotation editor"] button:has-text("Save comment")').click();
   await shadow(page, '[aria-label="Annotation editor"] button:has-text("Complete")').click();
-  await expect(shadow(page, '[aria-label="Annotation 1: edit"]')).toHaveAttribute("data-status", "completed");
+  await expect.poll(() => page.evaluate(() =>
+    window.__agentFeedback?.api.getSnapshot().task.annotations[0]?.status
+  )).toBe("completed");
+  await expect(shadow(page, '[aria-label="Annotation 1: edit"]')).toHaveCount(0);
   await page.screenshot({ path: `${artifactDir}/marker-editor.png` });
   await shadow(page, '[aria-label="Annotation editor"] button:has-text("Close")').click();
 

@@ -47,9 +47,9 @@ test("packed browser to file to CLI to browser loop, HMR and session security", 
   const beforeComplete = JSON.parse(cli("verify")).taskRevision;
   expect(cli("complete", id, "--verified", "--summary", "Playwright verified")).toContain(`taskRevision ${beforeComplete + 1}`);
   await expect.poll(() => page.evaluate(() =>
-    document.getElementById("agent-feedback-root")?.shadowRoot
-      ?.querySelector('[aria-label="Annotation 1: edit"]')?.getAttribute("data-status")
+    window.__demoExtension?.studio?.getSnapshot().task.annotations[0]?.status
   )).toBe("completed");
+  await expect(shadow(page, '[aria-label="Annotation 1: edit"]')).toHaveCount(0);
   expect(JSON.parse(cli("verify"))).toMatchObject({ ok: true, taskRevision: beforeComplete + 1 });
   expect(cli("reopen", id)).toContain(`taskRevision ${beforeComplete + 2}`);
   await expect.poll(() => page.evaluate(() =>

@@ -4,6 +4,22 @@
   "description": "Developer-only visual annotations and Code Agent feedback for React/Vite applications",
   "version": "0.1.0-alpha.0",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gchust/agent-feedback.git"
+  },
+  "bugs": {
+    "url": "https://github.com/gchust/agent-feedback/issues"
+  },
+  "homepage": "https://github.com/gchust/agent-feedback#readme",
+  "keywords": [
+    "agent-feedback",
+    "annotations",
+    "code-agent",
+    "developer-tools",
+    "react",
+    "vite"
+  ],
   "private": false,
   "type": "module",
   "engines": {
@@ -12,7 +28,10 @@
   "files": [
     "dist",
     "README.md",
-    "LICENSE"
+    "API.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "exports": {
     ".": {
@@ -50,7 +69,9 @@
     "test": "vitest run",
     "test:e2e": "pnpm --dir fixtures/packed-react-vite test:e2e",
     "audit": "pnpm build && node dist/audit/index.mjs",
-    "check:package": "publint && attw --pack . --profile esm-only"
+    "check:package": "publint && attw --pack . --profile esm-only",
+    "check:docs": "node scripts/docs-smoke.mjs",
+    "check:tarball": "node scripts/tarball-audit.mjs"
   },
   "dependencies": {
     "react-grab": "0.1.50"
@@ -78,7 +99,7 @@
     "react-dom": "19.2.8",
     "tsdown": "0.22.14",
     "typescript": "5.9.3",
-    "vite": "6.3.5",
+    "vite": "6.4.3",
     "vitest": "4.1.10"
   },
   "packageManager": "pnpm@10.28.1"
