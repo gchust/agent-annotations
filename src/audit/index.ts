@@ -19,7 +19,7 @@ const CHECKS = [
   ["transformed-code-guess", /transformResult\s*\??\s*\.\s*code|resolveComponentSources|assignSourceCandidates/],
   ["basename-lookup", /(?:path\.)?basename\s*\([^)]*filePath|readdirSync[\s\S]{0,120}basename/],
   ["old-schema", /PortalStudio|portal-studio|\.portal-studio|TASK_SCHEMA_VERSION_V[1-6]|normalizeLegacy|capture_task/],
-  ["nocobase", /@nocobase|data-nb-|data-ai-page-element|NOCOBASE_/],
+  ["nocobase", /\x40nocobase|data\x2dnb-|data\x2dai\x2dpage\x2delement|NOCO\x42ASE_/],
   ["builtin-bypass", /switch\s*\([^)]*(?:action|contribution)[^)]*\)|case\s+["'](?:pick|multi|area|copy|visibility|help|list)["']/],
 ] as const;
 
