@@ -17,6 +17,7 @@ export class HttpTaskTransport implements TaskTransport {
   readonly endpoint: string;
   readonly token: string;
   readonly pollInterval: number;
+  #lastReadRevision: number | undefined;
 
   constructor(options: HttpTaskTransportOptions) {
     this.endpoint = options.endpoint;
@@ -27,8 +28,10 @@ export class HttpTaskTransport implements TaskTransport {
   async #request(init?: RequestInit): Promise<AgentFeedbackTask> {
     const response = await fetch(`${this.endpoint}/task`, {
       ...init,
+      cache: "no-store",
       headers: {
         [TOKEN_HEADER]: this.token,
+        "cache-control": "no-cache",
         ...(init?.body ? { "content-type": "application/json" } : {}),
       },
     });
@@ -40,8 +43,10 @@ export class HttpTaskTransport implements TaskTransport {
     return payload.task;
   }
 
-  read(): Promise<AgentFeedbackTask> {
-    return this.#request();
+  async read(): Promise<AgentFeedbackTask> {
+    const task = await this.#request();
+    this.#lastReadRevision = task.taskRevision;
+    return task;
   }
 
   mutate(request: AgentFeedbackMutationRequest): Promise<AgentFeedbackTask> {
@@ -67,12 +72,15 @@ export class HttpTaskTransport implements TaskTransport {
   }
 
   subscribe(listener: (task: AgentFeedbackTask) => void): () => void {
-    let revision: number | undefined;
+    let revision = this.#lastReadRevision;
     const poll = async () => {
       try {
-        const task = await this.read();
-        if (revision !== undefined && task.taskRevision !== revision) listener(task);
-        revision = task.taskRevision;
+        const task = await this.#request();
+        if (task.taskRevision !== revision) {
+          listener(task);
+          revision = task.taskRevision;
+          this.#lastReadRevision = revision;
+        }
       } catch {
         // The dev server may be restarting; the next poll reconnects.
       }

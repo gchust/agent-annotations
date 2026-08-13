@@ -32,6 +32,7 @@ import { mountAgentFeedback } from "../../src/client/index.js";
 import { defineClientExtension } from "../../src/extension/index.js";
 import { MemoryTaskTransport } from "../../src/testing/index.js";
 import type { AgentFeedbackTask, TaskTransport } from "../../src/types/index.js";
+import { taskFixture } from "../core/test-data.js";
 
 afterEach(() => {
   document.getElementById("agent-feedback-root")?.remove();
@@ -135,6 +136,17 @@ describe("client runtime", () => {
     expect(mounted.api.getSnapshot().task.taskRevision).toBe(1);
     mounted.unmount();
     expect(unsubscribe).toHaveBeenCalledOnce();
+  });
+
+  it("does not render markers for completed annotations", async () => {
+    const mounted = await mountAgentFeedback({
+      transport: new MemoryTaskTransport(taskFixture({
+        annotations: [{ ...taskFixture().annotations[0]!, status: "completed" }],
+      })),
+    });
+    expect(document.getElementById("agent-feedback-root")!.shadowRoot!.querySelector(".af-marker"))
+      .toBeNull();
+    mounted.unmount();
   });
 
   it("does not inspect capture events from inside the ignored shadow host", async () => {

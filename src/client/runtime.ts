@@ -526,6 +526,7 @@ export async function mountAgentFeedback(
     const resolved: Element[] = [];
     if (!markersVisible) return resolved;
     task.annotations.forEach((annotation, index) => {
+      if (annotation.status === "completed") return;
       if (annotation.region) {
         addOutline({
           x: annotation.region.x - scrollX,
