@@ -95,7 +95,7 @@ describe("client runtime", () => {
 
   it("recovers an unresolved nested iframe marker after the outer document is populated", async () => {
     vi.useFakeTimers();
-    document.body.innerHTML = '<div id="root"><iframe id="outer"></iframe></div>';
+    document.body.innerHTML = '<div id="root"></div>';
     const mounted = await mountAgentFeedback({
       transport: new MemoryTaskTransport(taskFixture({
         annotations: [annotationFixture({
@@ -111,7 +111,12 @@ describe("client runtime", () => {
       expect(marker.hidden).toBe(true);
       await vi.runAllTimersAsync();
 
-      const outer = document.querySelector<HTMLIFrameElement>("#outer")!;
+      const outer = document.createElement("iframe");
+      outer.id = "outer";
+      document.getElementById("root")!.append(outer);
+      await vi.runAllTimersAsync();
+      expect(marker.hidden).toBe(true);
+
       outer.contentDocument!.body.innerHTML = '<iframe id="inner"></iframe>';
       await vi.runAllTimersAsync();
       expect(marker.hidden).toBe(true);

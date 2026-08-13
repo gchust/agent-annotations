@@ -1073,6 +1073,7 @@ export async function mountAgentFeedback(
     }
   };
   const hasPersistedFrameTarget = (): boolean => task.annotations.some((annotation) =>
+    annotation.status === "open" &&
     annotation.targets?.some(({ selector }) => selector.includes(">>iframe>>"))
   );
   const hasUnresolvedFrameTarget = (): boolean => task.annotations.some((annotation) => {
@@ -1085,8 +1086,10 @@ export async function mountAgentFeedback(
     trackedMarkerTargets = new WeakSet(targets);
     if ((!markersVisible || targets.length === 0) && !editingId && !watchFrames) return;
     if (watchFrames) watchMarkerFrames(appRoot, hasUnresolvedFrameTarget());
-    if (targets.length === 0 && !editingId) return;
-    markerObserver = new MutationObserver(scheduleMarkerRefresh);
+    markerObserver = new MutationObserver(() => {
+      if (watchFrames) watchMarkerFrames(appRoot, hasUnresolvedFrameTarget());
+      scheduleMarkerRefresh();
+    });
     const mutationOptions = { childList: true, subtree: true };
     markerObserver.observe(appRoot, mutationOptions);
     const observed = new Set<Node>([appRoot]);
