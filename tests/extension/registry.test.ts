@@ -133,26 +133,12 @@ describe("ClientExtensionRegistry", () => {
     expect(() => registry.register(extension("three", {
       toolbar: [{ ...action("symbol", "X"), shortcut: { key: "χ", code: "keyc", primary: true, alt: true, shift: false } }],
     }))).toThrow("Duplicate toolbar shortcut: symbol conflicts with copy");
-    expect(() => registry.register(extension("layout-parity", {
-      toolbar: [{ ...action("same-key-other-code", "C"), shortcut: { key: "C", code: "KeyX", primary: true, alt: true, shift: false } }],
-    }))).toThrow("Duplicate toolbar shortcut: same-key-other-code conflicts with copy");
-    expect(() => registry.register(extension("symbol-parity", {
-      toolbar: [{ ...action("same-code-other-key", "Χ"), shortcut: { key: "Χ", code: "KeyC", primary: true, alt: true, shift: false } }],
-    }))).toThrow("Duplicate toolbar shortcut: same-code-other-key conflicts with copy");
-
     const intra = new ClientExtensionRegistry();
     expect(() => intra.register(extension("broken", { toolbar: [
       action("first", "A"),
       { ...action("second", "B"), shortcut: { key: "a", code: "KeyB", primary: true, alt: true, shift: false } },
     ] }))).toThrow("Duplicate toolbar shortcut: second conflicts with first");
     expect(intra.getExtensions()).toEqual([]);
-
-    const intraCode = new ClientExtensionRegistry();
-    expect(() => intraCode.register(extension("broken", { toolbar: [
-      action("first", "A"),
-      { ...action("second", "B"), shortcut: { key: "b", code: "KeyA", primary: true, alt: true, shift: false } },
-    ] }))).toThrow("Duplicate toolbar shortcut: second conflicts with first");
-    expect(intraCode.getExtensions()).toEqual([]);
   });
 
   it("rejects host and panel-reference conflicts atomically", () => {

@@ -197,8 +197,7 @@ export class ClientExtensionRegistry {
   readonly #enrichers = new Map<string, RegisteredTargetEnricher>();
   readonly #exporters = new Map<string, RegisteredFeedbackExporter>();
   readonly #redactors = new Map<string, RegisteredFeedbackRedactor>();
-  readonly #shortcutKeys = new Map<string, string>();
-  readonly #shortcutCodes = new Map<string, string>();
+  readonly #shortcuts = new Map<string, string>();
   #host: { extensionId: string; value: HostIntegration } | undefined;
 
   register(extension: AgentFeedbackClientExtension): () => void {
@@ -231,8 +230,7 @@ export class ClientExtensionRegistry {
     assertUnique("exporter", extension.exporters ?? [], this.#exporters);
     assertUnique("redactor", extension.redactors ?? [], this.#redactors);
 
-    const pendingKeys = new Map<string, string>();
-    const pendingCodes = new Map<string, string>();
+    const pendingShortcuts = new Map<string, string>();
     for (const toolbar of extension.toolbar ?? []) {
       if (
         toolbar.panelId &&
@@ -241,19 +239,15 @@ export class ClientExtensionRegistry {
       ) {
         throw new TypeError(`Unknown toolbar panel ID: ${toolbar.panelId}`);
       }
-      const [key, code] = shortcutKeys(toolbar.shortcut, toolbar.id);
-      const conflict = [
-        key && (this.#shortcutKeys.get(key) ?? pendingKeys.get(key)),
-        code && (this.#shortcutCodes.get(code) ?? pendingCodes.get(code)),
-      ]
-        .find(Boolean);
-      if (conflict) {
-        throw new TypeError(
-          `Duplicate toolbar shortcut: ${toolbar.id} conflicts with ${conflict}`
-        );
+      for (const key of shortcutKeys(toolbar.shortcut, toolbar.id)) {
+        const conflict = this.#shortcuts.get(key) ?? pendingShortcuts.get(key);
+        if (conflict) {
+          throw new TypeError(
+            `Duplicate toolbar shortcut: ${toolbar.id} conflicts with ${conflict}`
+          );
+        }
+        pendingShortcuts.set(key, toolbar.id);
       }
-      if (key) pendingKeys.set(key, toolbar.id);
-      if (code) pendingCodes.set(code, toolbar.id);
     }
 
     const add = <T extends { id: string }>(
@@ -270,8 +264,7 @@ export class ClientExtensionRegistry {
     add(extension.targetEnrichers, this.#enrichers);
     add(extension.exporters, this.#exporters);
     add(extension.redactors, this.#redactors);
-    for (const [key, id] of pendingKeys) this.#shortcutKeys.set(key, id);
-    for (const [code, id] of pendingCodes) this.#shortcutCodes.set(code, id);
+    for (const [key, id] of pendingShortcuts) this.#shortcuts.set(key, id);
     if (extension.host) {
       this.#host = { extensionId: extension.id, value: extension.host };
     }
@@ -293,9 +286,9 @@ export class ClientExtensionRegistry {
       remove(extension.exporters, this.#exporters);
       remove(extension.redactors, this.#redactors);
       for (const toolbar of extension.toolbar ?? []) {
-        const [key, code] = shortcutKeys(toolbar.shortcut, toolbar.id);
-        if (key) this.#shortcutKeys.delete(key);
-        if (code) this.#shortcutCodes.delete(code);
+        for (const key of shortcutKeys(toolbar.shortcut, toolbar.id)) {
+          this.#shortcuts.delete(key);
+        }
       }
       if (this.#host?.extensionId === extension.id) this.#host = undefined;
     };
