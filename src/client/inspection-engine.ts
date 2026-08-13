@@ -231,7 +231,7 @@ export function sampleRegionTargets(rect: AgentFeedbackRect): Element[] {
   for (const point of samplePoints(rect)) {
     const elements = getElementsAtPoint(point.x, point.y, { filter: isRegionCandidate });
     if (elements.length === 0) {
-      const element = document.elementFromPoint(point.x, point.y);
+      const element = document.elementFromPoint?.(point.x, point.y);
       if (element && isRegionCandidate(element) && addCandidate(element)) break;
     }
     for (const element of elements) {

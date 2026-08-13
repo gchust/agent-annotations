@@ -38,7 +38,7 @@ describe("Region semantic pruning", () => {
     button.textContent = "Save";
     document.body.append(button);
     primitives.elementsAtPoint.mockReturnValue([]);
-    vi.spyOn(document, "elementFromPoint").mockReturnValue(button);
+    Object.defineProperty(document, "elementFromPoint", { configurable: true, value: vi.fn(() => button) });
     expect(sampleRegionTargets({ x: 0, y: 0, width: 20, height: 20 })).toEqual([button]);
   });
 });
