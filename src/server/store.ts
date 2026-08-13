@@ -17,6 +17,7 @@ import {
   parseAgentFeedbackTask,
 } from "../core/index.js";
 import type {
+  AgentFeedbackAnnotation,
   AgentFeedbackMutationRequest,
   AgentFeedbackTask,
 } from "../types/index.js";
@@ -101,7 +102,10 @@ export class FileTaskStore {
     return task;
   }
 
-  mutate(request: AgentFeedbackMutationRequest): Promise<AgentFeedbackTask> {
+  mutate(
+    request: AgentFeedbackMutationRequest,
+    mapAnnotation: (annotation: AgentFeedbackAnnotation) => AgentFeedbackAnnotation = (annotation) => annotation
+  ): Promise<AgentFeedbackTask> {
     const write = async (): Promise<AgentFeedbackTask> => {
       const unlock = await acquireLock(path.join(this.root, "tasks/.write.lock"));
       try {
@@ -114,7 +118,12 @@ export class FileTaskStore {
         const updatedAt = new Date(
           Math.max(Date.now(), Date.parse(task.updatedAt) + 1)
         ).toISOString();
-        const result = applyAgentFeedbackMutation(task, request, updatedAt);
+        const result = applyAgentFeedbackMutation(task, {
+          ...request,
+          operations: request.operations.map((operation) => operation.op === "add"
+            ? { ...operation, annotation: mapAnnotation(operation.annotation) }
+            : operation),
+        }, updatedAt);
         if (!result.ok) {
           const error = new Error(result.error) as Error & {
             code: string;

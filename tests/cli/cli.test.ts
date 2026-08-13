@@ -6,7 +6,8 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createAgentFeedbackTask } from "../../src/core/index.js";
-import { annotationFixture } from "../core/test-data.js";
+import { createSourcePathService } from "../../src/server/source-path.js";
+import { annotationFixture, targetFixture } from "../core/test-data.js";
 
 const script = path.resolve("dist/cli/index.mjs");
 const roots: string[] = [];
@@ -30,6 +31,34 @@ const run = (root: string, args: string[]) => execFileSync(process.execPath, [sc
   env: { ...process.env, AGENT_FEEDBACK_DIR: root },
 });
 
+const sourceFixture = () => {
+  const workspace = mkdtempSync(path.join(tmpdir(), "agent-feedback-cli-source-"));
+  roots.push(workspace);
+  const runtime = path.join(workspace, ".agent-feedback");
+  const selected = path.join(workspace, "src/a/Card.tsx");
+  const wrong = path.join(workspace, "src/b/Card.tsx");
+  mkdirSync(path.dirname(selected), { recursive: true });
+  mkdirSync(path.dirname(wrong), { recursive: true });
+  mkdirSync(path.join(runtime, "tasks"), { recursive: true });
+  writeFileSync(selected, "export const A = 1;\n");
+  writeFileSync(wrong, "export const B = 1;\n");
+  const task = createAgentFeedbackTask({
+    taskId: "task-source",
+    createdAt: "2026-08-12T12:00:00.000Z",
+    annotations: [annotationFixture({
+      targets: [targetFixture({
+        inspection: {
+          ...targetFixture().inspection,
+          source: { filePath: "src/a/Card.tsx", lineNumber: 1, columnNumber: 14, componentName: "A" },
+          sourceStack: [],
+        },
+      })],
+    })],
+  });
+  writeFileSync(path.join(runtime, "tasks/active-task.json"), JSON.stringify(task));
+  return { workspace, runtime, selected, wrong, task };
+};
+
 describe("public CLI processes", () => {
   it("shows help from the built public binary", () => {
     expect(run(fixture(), ["--help"])).toContain("Usage: agent-feedback");
@@ -37,7 +66,7 @@ describe("public CLI processes", () => {
 
   it("runs every command help plus list, complete, reopen, print, and verify", () => {
     const root = fixture();
-    for (const command of ["list", "complete", "reopen", "print", "verify", "mcp"]) {
+    for (const command of ["list", "complete", "reopen", "print", "verify", "mcp", "audit"]) {
       expect(run(root, [command, "--help"])).toContain("Agent Feedback");
     }
     expect(run(root, ["list"])).toContain("ann-1");
@@ -75,7 +104,14 @@ describe("public CLI processes", () => {
     child.kill();
     expect(responses[0].result.serverInfo.name).toBe("agent-feedback");
     const tools = responses[1].result.tools;
-    expect(tools.map((tool: { name: string }) => tool.name)).toEqual(["list_annotations", "print_task", "verify_task"]);
+    expect(tools.map((tool: { name: string }) => tool.name)).toEqual([
+      "list_annotations",
+      "print_task",
+      "verify_task",
+      "read_diagnostics",
+      "list_screenshots",
+      "wait_verification",
+    ]);
     expect(JSON.stringify(tools)).not.toMatch(/capture_task|portal.studio|schema v[2-9]/i);
     expect(responses[2].result.content[0].text).toContain("agent-feedback.task.v1");
 
@@ -89,5 +125,42 @@ describe("public CLI processes", () => {
     });
     unknown.kill();
     expect(failed.result).toMatchObject({ isError: true });
+  });
+
+  it("waits on the exact source revision in a real MCP process", async () => {
+    const { workspace, runtime, selected, wrong, task } = sourceFixture();
+    const baseline = createSourcePathService(workspace).revision(task);
+    const child = spawn(process.execPath, [script, "mcp"], {
+      cwd: workspace,
+      env: { ...process.env, AGENT_FEEDBACK_DIR: runtime },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    let settled = false;
+    const response = new Promise<any>((resolve, reject) => {
+      child.stdout.once("data", (chunk) => {
+        settled = true;
+        resolve(JSON.parse(String(chunk)));
+      });
+      child.once("error", reject);
+    });
+    child.stdin.write(`${JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "wait_verification", arguments: { sourceRevision: baseline, timeoutMs: 2_000 } },
+    })}\n`);
+    writeFileSync(wrong, "export const B = 2;\n");
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect(settled).toBe(false);
+    writeFileSync(selected, "export const A = 2;\n");
+    const result = await response;
+    child.kill();
+    const payload = JSON.parse(result.result.content[0].text);
+    expect(payload).toEqual({
+      changed: true,
+      sourceRevision: createSourcePathService(workspace).revision(task),
+    });
+    expect(payload.sourceRevision).not.toBe(baseline);
+    expect(payload).not.toHaveProperty("taskRevision");
   });
 });

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 
 import {
@@ -7,6 +7,7 @@ import {
   parseAgentFeedbackTask,
 } from "../core/index.js";
 import { FileTaskStore } from "../server/store.js";
+import { createSourcePathService } from "../server/source-path.js";
 import type { AgentFeedbackMutationOperation, AgentFeedbackTask } from "../types/index.js";
 
 const HELP = `Agent Feedback 0.1.0-alpha.0
@@ -20,6 +21,7 @@ Commands:
   print [--json|--markdown]
   verify
   mcp
+  audit
 `;
 
 const runtimeRoot = (): string => path.resolve(
@@ -42,6 +44,28 @@ const readMcpTask = (): AgentFeedbackTask => {
   const found = new FileTaskStore(runtimeRoot()).read();
   if (!found) throw new Error(`no task found at ${path.join(runtimeRoot(), "tasks", "active-task.json")}`);
   return found;
+};
+
+const sourceRevision = (current: AgentFeedbackTask): string =>
+  createSourcePathService(process.cwd()).revision(current);
+
+const readDiagnostics = (): unknown => {
+  try {
+    return JSON.parse(readFileSync(path.join(runtimeRoot(), "diagnostics.json"), "utf8"));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+};
+
+const screenshots = (): string[] => {
+  const directory = path.join(runtimeRoot(), "evidence");
+  try {
+    return readdirSync(directory).filter((file) => file.endsWith(".png")).sort().map((file) => `evidence/${file}`);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
 };
 
 const parseMutationArgs = (command: "complete" | "reopen", args: string[]): {
@@ -102,8 +126,27 @@ const TOOLS = [
   },
   {
     name: "verify_task",
-    description: "Read and validate the active Agent Feedback task without changing it.",
+    description: "Read and validate the active agent-feedback.task.v1 task without changing it.",
     inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "read_diagnostics",
+    description: "Read the persisted Agent Feedback runtime diagnostics without changing state.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "list_screenshots",
+    description: "List persisted PNG screenshot evidence references without changing state.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "wait_verification",
+    description: "Boundedly wait until the exact source revision for the active agent-feedback.task.v1 differs from a caller-provided revision.",
+    inputSchema: {
+      type: "object",
+      properties: { sourceRevision: { type: "string" }, timeoutMs: { type: "number" } },
+      required: ["sourceRevision"],
+    },
   },
 ] as const;
 
@@ -116,7 +159,7 @@ const mcp = async (): Promise<void> => {
     buffer = lines.pop() ?? "";
     for (const line of lines) {
       if (!line.trim()) continue;
-      let request: { id?: unknown; method?: string; params?: { name?: string } };
+      let request: { id?: unknown; method?: string; params?: { name?: string; arguments?: Record<string, unknown> } };
       try {
         request = JSON.parse(line);
       } catch {
@@ -131,13 +174,34 @@ const mcp = async (): Promise<void> => {
         } else if (request.method === "tools/list") {
           result = { tools: TOOLS };
         } else if (request.method === "tools/call") {
-          const current = readMcpTask();
           const name = request.params?.name;
-          const text = name === "list_annotations"
-            ? current.annotations.map((annotation) => `${annotation.annotationId}: ${annotation.comment}`).join("\n") || "No annotations."
-            : name === "print_task" || name === "verify_task"
-              ? JSON.stringify(current, null, 2)
-              : (() => { throw new Error(`unknown tool: ${name}`); })();
+          const args = request.params?.arguments ?? {};
+          let text: string;
+          if (name === "read_diagnostics") text = JSON.stringify(readDiagnostics(), null, 2);
+          else if (name === "list_screenshots") text = JSON.stringify(screenshots(), null, 2);
+          else if (name === "wait_verification") {
+            const baseline = args.sourceRevision;
+            const timeoutMs = Math.min(Math.max(Number(args.timeoutMs ?? 10_000), 0), 30_000);
+            if (typeof baseline !== "string" || !/^[a-f\d]{64}$/.test(baseline) || !Number.isFinite(timeoutMs)) {
+              throw new Error("wait_verification requires a SHA-256 sourceRevision and optional finite timeoutMs");
+            }
+            const deadline = Date.now() + timeoutMs;
+            let current = readMcpTask();
+            let revision = sourceRevision(current);
+            while (revision === baseline && Date.now() < deadline) {
+              await new Promise((resolve) => setTimeout(resolve, 100));
+              current = readMcpTask();
+              revision = sourceRevision(current);
+            }
+            text = JSON.stringify({ changed: revision !== baseline, sourceRevision: revision });
+          } else {
+            const current = readMcpTask();
+            text = name === "list_annotations"
+              ? current.annotations.map((annotation) => `${annotation.annotationId}: ${annotation.comment}`).join("\n") || "No annotations."
+              : name === "print_task" || name === "verify_task"
+                ? JSON.stringify(current, null, 2)
+                : (() => { throw new Error(`unknown tool: ${name}`); })();
+          }
           result = { content: [{ type: "text", text }], isError: false };
         } else {
           throw new Error(`unsupported method: ${request.method}`);
@@ -178,6 +242,13 @@ const main = async (): Promise<void> => {
     return;
   }
   if (command === "mcp") return mcp();
+  if (command === "audit") {
+    const { runArchitectureAudit } = await import("../audit/index.js");
+    const result = runArchitectureAudit(process.cwd());
+    if (!result.ok) fail(`architecture audit failed: ${result.problems.map(({ check, file, line }) => `${check}:${file}:${line}`).join(", ")}`);
+    process.stdout.write("[agent-feedback] architecture audit PASS\n");
+    return;
+  }
   fail(`unknown command: ${command}`, 2);
 };
 

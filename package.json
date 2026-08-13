@@ -48,6 +48,8 @@
     "typecheck": "tsc --noEmit",
     "pretest": "pnpm build",
     "test": "vitest run",
+    "test:e2e": "pnpm --dir fixtures/packed-react-vite test:e2e",
+    "audit": "pnpm build && node dist/audit/index.mjs",
     "check:package": "publint && attw --pack . --profile esm-only"
   },
   "dependencies": {

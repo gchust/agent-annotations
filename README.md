@@ -41,3 +41,25 @@ export default defineConfig({
   })],
 });
 ```
+
+## CLI
+
+The CLI reads `.agent-feedback/tasks/active-task.json`, which always uses
+`agent-feedback.task.v1`:
+
+```text
+agent-feedback list
+agent-feedback complete <annotation-id> --verified --summary <text>
+agent-feedback reopen <annotation-id>
+agent-feedback print [--json|--markdown]
+agent-feedback verify
+agent-feedback mcp
+agent-feedback audit
+```
+
+The MCP server is read-only. It exposes annotation/task reads, diagnostics,
+screenshot references, and bounded exact-source revision verification through
+`wait_verification({ sourceRevision, timeoutMs? })`; it cannot capture or
+create tasks. `audit` enforces the package's single React Grab engine and bans
+legacy source fallbacks, basename lookup, old schemas, host coupling, and
+built-in Registry bypasses.

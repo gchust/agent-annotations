@@ -1,15 +1,19 @@
 import { randomBytes } from "node:crypto";
+import { existsSync, realpathSync, statSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import type { Plugin } from "vite";
 
 import { FileTaskStore } from "../server/store.js";
+import { createSourcePathService } from "../server/source-path.js";
 
 const VIRTUAL_ID = "virtual:agent-feedback/client";
 const RESOLVED_VIRTUAL_ID = `\0${VIRTUAL_ID}`;
 const TOKEN_HEADER = "x-agent-feedback-token";
 const MAX_BODY_BYTES = 256 * 1024;
+const SOURCE_MODULE = /\.[cm]?[jt]sx?$/i;
 
 export type AgentFeedbackPluginOptions = {
   root?: string;
@@ -36,6 +40,11 @@ const isLoopback = (address: string | undefined): boolean =>
   address === "127.0.0.1" ||
   address === "::1" ||
   address === "::ffff:127.0.0.1";
+
+const inside = (root: string, candidate: string): boolean => {
+  const relative = path.relative(root, candidate);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+};
 
 const requestOriginMatches = (request: Pick<IncomingMessage, "headers">): boolean => {
   const expected = request.headers.host;
@@ -73,15 +82,6 @@ const body = async (request: IncomingMessage): Promise<unknown> => {
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 };
 
-export const createSourcePathService = (root: string) => ({
-  canonicalize(filePath: string): string | null {
-    const absolute = path.resolve(root, filePath);
-    return absolute === root || absolute.startsWith(`${root}${path.sep}`)
-      ? path.relative(root, absolute).split(path.sep).join("/")
-      : null;
-  },
-});
-
 export default function agentFeedback(
   options: AgentFeedbackPluginOptions = {}
 ): Plugin {
@@ -89,6 +89,7 @@ export default function agentFeedback(
     throw new Error("agentFeedback endpoint must be a root-relative path");
   }
   let root = path.resolve(options.root ?? process.cwd());
+  let realRoot = existsSync(root) ? realpathSync(root) : root;
   let runtimeRoot = path.resolve(root, options.dir ?? ".agent-feedback");
   const assertRuntimeRoot = (): void => {
     if (runtimeRoot !== root && !runtimeRoot.startsWith(`${root}${path.sep}`)) {
@@ -122,11 +123,12 @@ export default function agentFeedback(
     });
   };
 
-  return {
+  const serverPlugin: Plugin = {
     name: "agent-feedback",
     apply: "serve",
     configResolved(config) {
       root = path.resolve(options.root ?? config.root);
+      realRoot = realpathSync(root);
       runtimeRoot = path.resolve(root, options.dir ?? ".agent-feedback");
       assertRuntimeRoot();
       store = new FileTaskStore(runtimeRoot);
@@ -157,6 +159,60 @@ export default function agentFeedback(
         "  import.meta.hot.dispose(() => window[key]?.());",
         "}",
       ].filter(Boolean).join("\n");
+    },
+    transform: {
+      order: "post",
+      handler(code, id, transformOptions) {
+        const file = id.split(/[?#]/, 1)[0]!;
+        if (
+          transformOptions?.ssr ||
+          file.includes("\0") ||
+          file.includes("/node_modules/") ||
+          !SOURCE_MODULE.test(file) ||
+          !path.isAbsolute(file) ||
+          !existsSync(file)
+        ) return;
+        const realModule = realpathSync(file);
+        if (!statSync(realModule).isFile() || !inside(realRoot, realModule)) return;
+        const map = this.getCombinedSourcemap();
+        if (!map?.version || !map.sources.length) return;
+        const sourceRoot = (map as typeof map & { sourceRoot?: string }).sourceRoot;
+        const sources: string[] = [];
+        for (const source of map.sources) {
+          let candidate: string;
+          try {
+            if (source.startsWith("file:")) {
+              candidate = fileURLToPath(source);
+            } else if (/^[a-zA-Z][a-zA-Z\d+.-]*:|^\/\//.test(source)) {
+              return;
+            } else if (path.isAbsolute(source)) {
+              candidate = source;
+            } else {
+              let base = path.dirname(file);
+              if (sourceRoot) {
+                if (sourceRoot.startsWith("file:")) {
+                  base = fileURLToPath(sourceRoot);
+                } else if (/^[a-zA-Z][a-zA-Z\d+.-]*:|^\/\//.test(sourceRoot)) {
+                  return;
+                } else {
+                  base = path.resolve(base, sourceRoot);
+                }
+              }
+              candidate = path.resolve(base, source);
+            }
+            if (!existsSync(candidate)) return;
+            const realSource = realpathSync(candidate);
+            if (!statSync(realSource).isFile() || !inside(realRoot, realSource)) return;
+            sources.push(pathToFileURL(realSource).href);
+          } catch {
+            return;
+          }
+        }
+        map.sources.splice(0, map.sources.length, ...sources);
+        (map as typeof map & { sourceRoot?: string }).sourceRoot = undefined;
+        map.file = file;
+        return;
+      },
     },
     transformIndexHtml() {
       return [{
@@ -204,10 +260,20 @@ export default function agentFeedback(
             return json(response, 200, { task: store.read() ?? store.create() });
           }
           if (url.pathname === `${endpoint}/task` && request.method === "POST") {
-            return json(response, 200, { task: await store.mutate(await body(request) as never) });
+            return json(response, 200, {
+              task: await store.mutate(
+                await body(request) as never,
+                sourcePaths.canonicalizeAnnotation
+              ),
+            });
           }
           if (url.pathname === `${endpoint}/revision` && request.method === "GET") {
-            return json(response, 200, { taskRevision: store.read()?.taskRevision ?? null });
+            const task = store.read();
+            return json(response, 200, {
+              taskRevision: task?.taskRevision ?? null,
+              sourceRevision: task ? sourcePaths.revision(task) : null,
+              sourceFiles: task ? sourcePaths.files(task) : [],
+            });
           }
           if (url.pathname === `${endpoint}/heartbeat` && request.method === "POST") {
             return json(response, 200, { ok: true, receivedAt: new Date().toISOString() });
@@ -244,6 +310,9 @@ export default function agentFeedback(
       });
     },
   };
+
+  return serverPlugin;
 }
 
 export { FileTaskStore } from "../server/store.js";
+export { createSourcePathService } from "../server/source-path.js";

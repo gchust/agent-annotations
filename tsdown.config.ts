@@ -19,6 +19,7 @@ export default defineConfig([
     entry: {
       "vite/index": "src/vite/index.ts",
       "cli/index": "src/cli/index.ts",
+      "audit/index": "src/audit/index.ts",
     },
     format: "esm",
     dts: true,
