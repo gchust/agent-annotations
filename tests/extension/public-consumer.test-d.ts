@@ -13,6 +13,9 @@ const useStudio = (studio: StudioPublicApi): void => {
   void studio.commands.annotations.copyOpen();
   studio.commands.markers.focus("annotation-id");
   studio.commands.panels.open("panel-id");
+  studio.commands.toolbar.toggleCollapsed();
+  void studio.commands.exporters.format("exporter-id");
+  void studio.commands.exporters.copy("exporter-id");
   // @ts-expect-error Internal setters are not public.
   studio.setMode("pick");
   // @ts-expect-error Internal setters are not public.
@@ -29,9 +32,8 @@ const toolbar: ToolbarContribution = {
   label: "Consumer action",
   icon: () => null,
   kind: "action",
-  execute: ({ studio, transport }) => {
+  execute: ({ studio }) => {
     useStudio(studio);
-    void transport.read();
   },
 };
 const panel: PanelContribution = {

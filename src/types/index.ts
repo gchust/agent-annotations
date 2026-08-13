@@ -285,8 +285,9 @@ export interface TargetEnricher {
 export interface FeedbackRedactor {
   id: string;
   redact(
-    task: AgentFeedbackTask
-  ): AgentFeedbackTask | null | Promise<AgentFeedbackTask | null>;
+    data: AgentFeedbackJsonObject,
+    context: { annotationId: string; extensionId: string }
+  ): AgentFeedbackJsonObject | null;
 }
 
 export interface FeedbackExporter {
@@ -304,6 +305,19 @@ export type AgentFeedbackToolbarShortcut = Omit<
   "id"
 >;
 
+export type StudioPublicShortcut = {
+  id: string;
+  extensionId: string;
+  label: string;
+  formatted: string;
+  shortcut: AgentFeedbackToolbarShortcut;
+};
+
+export type StudioPublicExporter = {
+  id: string;
+  extensionId: string;
+};
+
 export type StudioPublicSnapshot = {
   task: AgentFeedbackTask;
   captureMode: AgentFeedbackCaptureMode;
@@ -311,6 +325,8 @@ export type StudioPublicSnapshot = {
   markersVisible: boolean;
   openPanel: string | null;
   diagnostics: readonly AgentFeedbackDiagnosticsEntry[];
+  shortcuts: readonly StudioPublicShortcut[];
+  exporters: readonly StudioPublicExporter[];
 };
 
 export interface StudioPublicApi {
@@ -339,6 +355,19 @@ export interface StudioPublicApi {
       open(id: string): void;
       close(id?: string): void;
     };
+    toolbar: {
+      toggleCollapsed(): void;
+    };
+    exporters: {
+      format(
+        id?: string,
+        annotations?: AgentFeedbackAnnotationFilter
+      ): Promise<string>;
+      copy(
+        id?: string,
+        annotations?: AgentFeedbackAnnotationFilter
+      ): Promise<void>;
+    };
   };
 }
 
@@ -347,7 +376,8 @@ export type AgentFeedbackExtensionContext = {
   readonly studio: StudioPublicApi;
 };
 
-export type ToolbarCommandContext = AgentFeedbackExtensionContext & {
+export type ToolbarCommandContext = {
+  readonly studio: StudioPublicApi;
   extensionId: string;
 };
 
@@ -379,10 +409,7 @@ export interface PanelContribution {
 
 export type MountAgentFeedbackOptions = {
   transport: TaskTransport;
-  host?: HostIntegration;
-  targetEnrichers?: TargetEnricher[];
-  redactors?: FeedbackRedactor[];
-  exporters?: FeedbackExporter[];
+  extensions?: readonly AgentFeedbackClientExtension[];
 };
 
 export interface AgentFeedbackClientExtension {

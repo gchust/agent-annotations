@@ -3,9 +3,11 @@ import {
   formatAgentFeedbackShortcut,
   formatAgentFeedbackTask,
   matchesAgentFeedbackShortcut,
+  redactAgentFeedbackTask,
   redactAgentFeedbackText,
   toAgentFeedbackDocumentRegion,
 } from "../core/index.js";
+import { ClientExtensionRegistry } from "../extension/index.js";
 import type {
   AgentFeedbackAnnotation,
   AgentFeedbackCaptureMode,
@@ -13,15 +15,16 @@ import type {
   AgentFeedbackMutationOperation,
   AgentFeedbackRect,
   AgentFeedbackTask,
-  FeedbackExporter,
-  FeedbackRedactor,
   HostIntegration,
   MountedAgentFeedback,
   MountAgentFeedbackOptions,
   StudioPublicApi,
   StudioPublicSnapshot,
-  TargetEnricher,
+  ToolbarCommandContext,
 } from "../types/index.js";
+import { createElement } from "react";
+import { flushSync } from "react-dom";
+import { createRoot, type Root } from "react-dom/client";
 import {
   disposeInspectionEngine,
   inspectTarget,
@@ -29,32 +32,17 @@ import {
   sampleRegionTargets,
   targetAtPoint,
 } from "./inspection-engine.js";
+import { builtinClientExtension } from "./builtin-extension.js";
 import { AGENT_FEEDBACK_STYLES } from "./styles.js";
 
 const HOST_ID = "agent-feedback-root";
 const IGNORE_ATTRIBUTE = "data-react-grab-ignore";
-
-const labels = {
-  pick: "Pick",
-  multi: "Multi",
-  area: "Area",
-  copy: "Copy",
-  visibility: "Markers",
-  list: "Annotations",
-  help: "Shortcut help",
-  toggle: "Collapse toolbar",
-} as const;
-
-const shortcuts = [
-  { id: "pick", key: "P", code: "KeyP", primary: true, alt: true, shift: false },
-  { id: "multi", key: "M", code: "KeyM", primary: true, alt: true, shift: false },
-  { id: "area", key: "A", code: "KeyA", primary: true, alt: true, shift: false },
-  { id: "copy", key: "C", code: "KeyC", primary: true, alt: true, shift: false },
-  { id: "visibility", key: "V", code: "KeyV", primary: true, alt: true, shift: false },
-  { id: "list", key: "L", code: "KeyL", primary: true, alt: true, shift: false },
-  { id: "help", key: "/", code: "Slash", primary: false, alt: false, shift: true },
-  { id: "toggle", key: "K", code: "KeyK", primary: true, alt: true, shift: false },
-] as const;
+type RegisteredToolbarContribution = ReturnType<
+  ClientExtensionRegistry["getToolbarContributions"]
+>[number];
+type RegisteredTargetEnricher = ReturnType<
+  ClientExtensionRegistry["getTargetEnrichers"]
+>[number];
 
 const isEditable = (target: EventTarget | null): boolean => {
   const element = target as HTMLElement | null;
@@ -76,7 +64,7 @@ const elementAnnotation = async (
   elements: Element[],
   comment: string,
   host: HostIntegration | undefined,
-  enrichers: TargetEnricher[]
+  enrichers: readonly RegisteredTargetEnricher[]
 ): Promise<AgentFeedbackAnnotation> => {
   const targets = await Promise.all(elements.map((element) => inspectTarget(element, host)));
   const extensions: AgentFeedbackAnnotation["extensions"] = {};
@@ -87,8 +75,12 @@ const elementAnnotation = async (
       )
     );
     const data = values.filter((value) => value !== null);
-    if (data.length === 1) extensions[enricher.id] = data[0]!;
-    else if (data.length > 1) extensions[enricher.id] = { targets: data };
+    if (data.length > 0) {
+      extensions[enricher.extensionId] = {
+        ...(extensions[enricher.extensionId] ?? {}),
+        [enricher.id]: data.length === 1 ? data[0]! : { targets: data },
+      };
+    }
   }
   return {
     annotationId: createAgentFeedbackId(),
@@ -108,7 +100,25 @@ export async function mountAgentFeedback(
   if (typeof document === "undefined") throw new Error("Agent Feedback requires a browser document");
   if (document.getElementById(HOST_ID)) throw new Error("Agent Feedback is already mounted");
 
-  let task = await options.transport.read();
+  const registry = new ClientExtensionRegistry();
+  const registrations: Array<() => void> = [];
+  try {
+    for (const extension of [builtinClientExtension, ...(options.extensions ?? [])]) {
+      registrations.push(registry.register(extension));
+    }
+  } catch (error) {
+    for (const unregister of registrations.reverse()) unregister();
+    throw error;
+  }
+  const host = registry.getHostIntegration();
+
+  let task: AgentFeedbackTask;
+  try {
+    task = await options.transport.read();
+  } catch (error) {
+    for (const unregister of registrations.reverse()) unregister();
+    throw error;
+  }
   let captureMode: AgentFeedbackCaptureMode = "idle";
   let collapsed = false;
   let markersVisible = true;
@@ -122,10 +132,13 @@ export async function mountAgentFeedback(
   let editingId: string | null = null;
   let areaStart: { x: number; y: number } | null = null;
   let areaRect: AgentFeedbackRect | null = null;
-  let listFilter: "open" | "all" = "open";
   let status = "";
   let copyFallback = "";
   let dockPosition: { left: number; top: number } | null = null;
+  let collapseAction: string | null = null;
+  let focusPanel = false;
+  let panelReturnAction: string | null = null;
+  let panelRoot: Root | null = null;
   let destroyed = false;
   const listeners = new Set<(snapshot: StudioPublicSnapshot) => void>();
   const diagnostics: AgentFeedbackDiagnosticsEntry[] = [];
@@ -182,16 +195,45 @@ export async function mountAgentFeedback(
   const root = document.createElement("div");
   shadow.append(root);
 
-  const locale = options.host?.locale?.() ?? (document.documentElement.lang || "en-US");
+  const locale = host?.locale?.() ?? (document.documentElement.lang || "en-US");
+  const messages = { ...registry.getMessages(), ...(host?.messages ?? {}) };
   root.lang = locale;
 
+  const localized = (value: string | Readonly<Record<string, string>>): string =>
+    typeof value === "string"
+      ? (messages[value] ?? value)
+      : value[locale] ??
+        value[locale.split("-")[0]] ??
+        value["en-US"] ??
+        Object.values(value)[0] ??
+        "";
+  const platform = /Mac|iPhone|iPad/.test(navigator.platform) ? "mac" : "other";
+  const toolbar = registry.getToolbarContributions();
+  const shortcuts = toolbar.flatMap((contribution) =>
+    contribution.shortcut
+      ? [{
+          id: contribution.id,
+          extensionId: contribution.extensionId,
+          label: localized(contribution.label),
+          formatted: formatAgentFeedbackShortcut(
+            { id: contribution.id, ...contribution.shortcut },
+            platform
+          ),
+          shortcut: contribution.shortcut,
+        }]
+      : []
+  );
+  const exporters = registry.getExporters();
+
   const snapshot = (): StudioPublicSnapshot => ({
-    task,
+    task: structuredClone(task),
     captureMode,
     collapsed,
     markersVisible,
     openPanel,
     diagnostics: [...diagnostics],
+    shortcuts,
+    exporters: exporters.map(({ id, extensionId }) => ({ id, extensionId })),
   });
   const emit = () => {
     if (destroyed) return;
@@ -211,10 +253,25 @@ export async function mountAgentFeedback(
   };
   const mutate = async (operations: AgentFeedbackMutationOperation[]) => {
     if (destroyed) return;
+    const redactors = registry.getRedactors().map((redactor) => ({
+      extensionId: redactor.extensionId,
+      redact: redactor.redact,
+    }));
+    const redactedOperations = operations.map((operation) =>
+      operation.op === "add"
+        ? {
+            ...operation,
+            annotation: redactAgentFeedbackTask(
+              { ...task, annotations: [operation.annotation] },
+              redactors
+            ).task.annotations[0],
+          }
+        : operation
+    );
     const next = await options.transport.mutate({
       taskId: task.taskId,
       expectedRevision: task.taskRevision,
-      operations,
+      operations: redactedOperations,
     });
     if (destroyed) return;
     task = next;
@@ -222,23 +279,32 @@ export async function mountAgentFeedback(
     emit();
   };
 
-  const applyRedactors = async (value: AgentFeedbackTask): Promise<AgentFeedbackTask> => {
-    let next = value;
-    for (const redactor of options.redactors ?? []) {
-      const redacted = await redactor.redact(next);
-      if (redacted) next = redacted;
+  const exportTask = async (
+    filter: "open" | "all",
+    exporterId?: string
+  ): Promise<string> => {
+    const redacted = redactAgentFeedbackTask(
+      task,
+      registry.getRedactors().map((redactor) => ({
+        extensionId: redactor.extensionId,
+        redact: redactor.redact,
+      }))
+    ).task;
+    const exporter = exporterId
+      ? exporters.find(({ id }) => id === exporterId)
+      : exporters[0];
+    if (exporterId && !exporter) {
+      throw new TypeError(`Unknown exporter ID: ${exporterId}`);
     }
-    return next;
-  };
-  const exportTask = async (filter: "open" | "all"): Promise<string> => {
-    const redacted = await applyRedactors(task);
-    const exporter: FeedbackExporter | undefined = options.exporters?.[0];
     return exporter
       ? exporter.export({ task: redacted, annotations: filter })
       : formatAgentFeedbackTask(redacted, { annotations: filter });
   };
-  const copyOpen = async (): Promise<void> => {
-    const output = await exportTask("open");
+  const copyOutput = async (
+    exporterId?: string,
+    filter: "open" | "all" = "open"
+  ): Promise<void> => {
+    const output = await exportTask(filter, exporterId);
     if (destroyed) return;
     try {
       if (!navigator.clipboard?.writeText) throw new Error("clipboard unavailable");
@@ -251,6 +317,26 @@ export async function mountAgentFeedback(
       copyFallback = output;
       render();
     }
+  };
+  const copyOpen = () => copyOutput();
+
+  const setMarkersVisible = (visible: boolean) => {
+    markersVisible = visible;
+    render();
+    emit();
+  };
+  const toggleCollapsed = () => {
+    const before = snapshot();
+    collapsed = !collapsed;
+    collapseAction = collapsed
+      ? toolbar.find(
+          (contribution) =>
+            contribution.isPressed?.(before) === false &&
+            contribution.isPressed?.(snapshot()) === true
+        )?.id ?? null
+      : null;
+    render();
+    emit();
   };
 
   const cancelCapture = () => {
@@ -301,15 +387,69 @@ export async function mountAgentFeedback(
         removeCompleted: () => mutate([{ op: "removeCompleted" }]),
       },
       markers: {
-        show: () => { markersVisible = true; render(); emit(); },
-        hide: () => { markersVisible = false; render(); emit(); },
+        show: () => setMarkersVisible(true),
+        hide: () => setMarkersVisible(false),
         focus: focusAnnotation,
       },
       panels: {
-        open: (id) => { openPanel = id === "help" ? "help" : "list"; render(); emit(); },
-        close: (id) => { if (!id || openPanel === id) openPanel = null; render(); emit(); },
+        open: (id) => {
+          if (!registry.getPanels().some((panel) => panel.id === id)) {
+            throw new TypeError(`Unknown panel ID: ${id}`);
+          }
+          openPanel = id;
+          focusPanel = true;
+          render();
+          emit();
+        },
+        close: (id) => {
+          if (!id || openPanel === id) {
+            const returnAction = panelReturnAction;
+            openPanel = null;
+            panelReturnAction = null;
+            render();
+            emit();
+            scheduleFrame(() => {
+              if (returnAction) {
+                root
+                  .querySelector<HTMLElement>(`[data-action-id="${returnAction}"]`)
+                  ?.focus();
+              }
+            });
+          }
+        },
+      },
+      toolbar: {
+        toggleCollapsed,
+      },
+      exporters: {
+        format: (id, annotations = "open") => exportTask(annotations, id),
+        copy: (id, annotations = "open") => copyOutput(id, annotations),
       },
     },
+  };
+
+  const executeContribution = (
+    contribution: RegisteredToolbarContribution
+  ): void => {
+    const current = snapshot();
+    if (
+      contribution.isVisible?.(current) === false &&
+      contribution.id !== collapseAction
+    ) return;
+    if (contribution.isEnabled?.(current) === false) return;
+    if (contribution.kind === "panel") {
+      const panelId = contribution.panelId!;
+      if (openPanel === panelId) api.commands.panels.close(panelId);
+      else {
+        panelReturnAction = contribution.id;
+        api.commands.panels.open(panelId);
+      }
+      return;
+    }
+    void contribution.execute?.({
+      studio: api,
+      extensionId: contribution.extensionId,
+    } satisfies ToolbarCommandContext);
   };
 
   const nativeButton = (
@@ -435,7 +575,7 @@ export async function mountAgentFeedback(
               comment,
               status: "open" as const,
               createdAt: now(),
-              pageContext: pageContext(options.host),
+              pageContext: pageContext(host),
               region: toAgentFeedbackDocumentRegion(composer.rect, { x: scrollX, y: scrollY }),
               extensions: {},
             }
@@ -443,8 +583,8 @@ export async function mountAgentFeedback(
               composer!.kind,
               composer!.elements,
               comment,
-              options.host,
-              options.targetEnrichers ?? []
+              host,
+              registry.getTargetEnrichers()
             );
         if (destroyed) return;
         await mutate([{ op: "add", annotation }]);
@@ -500,56 +640,45 @@ export async function mountAgentFeedback(
 
   const renderPanel = () => {
     if (!openPanel) return;
+    const contribution = registry.getPanels().find(({ id }) => id === openPanel);
+    if (!contribution) return;
     const panel = document.createElement("section");
     panel.className = "af-panel";
     panel.setAttribute("role", "dialog");
-    panel.setAttribute("aria-label", openPanel === "help" ? "Shortcut help" : "Annotation list");
+    panel.setAttribute("aria-modal", "false");
+    panel.tabIndex = -1;
+    panel.setAttribute("aria-label", localized(contribution.title));
     const heading = document.createElement("h2");
-    heading.textContent = openPanel === "help" ? "Shortcuts" : "Annotations";
+    heading.textContent = localized(contribution.title);
     panel.append(heading);
-    if (openPanel === "help") {
-      const list = document.createElement("ul");
-      list.className = "af-help-list";
-      for (const shortcut of shortcuts) {
-        const item = document.createElement("li");
-        item.className = "af-help-row";
-        item.innerHTML = `<span>${labels[shortcut.id]}</span><kbd>${formatAgentFeedbackShortcut(shortcut, /Mac|iPhone|iPad/.test(navigator.platform) ? "mac" : "other")}</kbd>`;
-        list.append(item);
-      }
-      panel.append(list);
-    } else {
-      const filters = document.createElement("div");
-      filters.className = "af-filter";
-      for (const filter of ["open", "all"] as const) {
-        const node = nativeButton(filter === "open" ? "Open" : "All", () => { listFilter = filter; render(); }, { "aria-pressed": String(listFilter === filter) });
-        node.className = "af-button";
-        filters.append(node);
-      }
-      panel.append(filters);
-      const list = document.createElement("ol");
-      list.className = "af-list";
-      task.annotations.forEach((annotation, index) => {
-        if (listFilter === "open" && annotation.status !== "open") return;
-        const item = document.createElement("li");
-        item.className = "af-list-item";
-        const open = document.createElement("button");
-        open.className = "af-button";
-        open.textContent = `${index + 1}. ${annotation.comment}`;
-        open.setAttribute("aria-label", `Edit annotation ${index + 1}`);
-        open.addEventListener("click", () => focusAnnotation(annotation.annotationId));
-        const meta = document.createElement("span");
-        meta.className = "af-muted";
-        meta.textContent = annotation.status;
-        item.append(open, meta);
-        list.append(item);
-      });
-      panel.append(list);
-    }
+    const mount = document.createElement("div");
+    panel.append(mount);
     root.append(panel);
+    panelRoot = createRoot(mount);
+    flushSync(() =>
+      panelRoot!.render(
+        createElement(contribution.render, {
+          studio: api,
+          close: () => api.commands.panels.close(contribution.id),
+        })
+      )
+    );
+    if (focusPanel) {
+      focusPanel = false;
+      scheduleFrame(() =>
+        panel
+          .querySelector<HTMLElement>(
+            "button,[href],input,select,textarea,[tabindex]:not([tabindex='-1'])"
+          )
+          ?.focus() ?? panel.focus()
+      );
+    }
   };
 
   const render = () => {
     if (destroyed) return;
+    panelRoot?.unmount();
+    panelRoot = null;
     root.replaceChildren();
     const dock = document.createElement("div");
     dock.className = "af-dock";
@@ -567,23 +696,30 @@ export async function mountAgentFeedback(
     grip.textContent = "⋮⋮";
     grip.setAttribute("aria-label", "Drag toolbar");
     dock.append(grip);
-    const addAction = (id: keyof typeof labels, fn: () => void, pressed?: boolean) => {
-      const shortcut = shortcuts.find((entry) => entry.id === id);
-      const node = nativeButton(labels[id], fn, {
-        "aria-label": `${labels[id]}${shortcut ? ` (${formatAgentFeedbackShortcut(shortcut, /Mac|iPhone|iPad/.test(navigator.platform) ? "mac" : "other")})` : ""}`,
-        ...(pressed === undefined ? {} : { "aria-pressed": String(pressed) }),
+    for (const contribution of toolbar) {
+      const current = snapshot();
+      if (
+        contribution.isVisible?.(current) === false &&
+        contribution.id !== collapseAction
+      ) continue;
+      const shortcut = shortcuts.find(({ id }) => id === contribution.id);
+      const label = localized(contribution.label);
+      const node = nativeButton(label, () => executeContribution(contribution), {
+        "aria-label": `${label}${shortcut ? ` (${shortcut.formatted})` : ""}`,
+        "data-action-id": contribution.id,
+        ...(contribution.isPressed
+          ? { "aria-pressed": String(contribution.isPressed(current)) }
+          : {}),
+        ...(contribution.kind === "panel"
+          ? { "aria-expanded": String(openPanel === contribution.panelId) }
+          : {}),
       });
-      if (id === "toggle") node.dataset.toggle = "true";
+      node.disabled = contribution.isEnabled?.(current) === false;
+      if (contribution.id === collapseAction) {
+        node.dataset.toggle = "true";
+      }
       dock.append(node);
-    };
-    addAction("pick", () => startCapture("pick"), captureMode === "pick");
-    addAction("multi", () => startCapture("multi"), captureMode === "multi");
-    addAction("area", () => startCapture("area"), captureMode === "area");
-    addAction("copy", () => void copyOpen());
-    addAction("visibility", () => { markersVisible = !markersVisible; render(); emit(); }, markersVisible);
-    addAction("list", () => { openPanel = openPanel === "list" ? null : "list"; render(); emit(); }, openPanel === "list");
-    addAction("help", () => { openPanel = openPanel === "help" ? null : "help"; render(); emit(); }, openPanel === "help");
-    addAction("toggle", () => { collapsed = !collapsed; render(); emit(); }, collapsed);
+    }
     root.append(dock);
 
     let drag: { x: number; y: number; left: number; top: number } | null = null;
@@ -702,7 +838,13 @@ export async function mountAgentFeedback(
     render();
   };
   const onKeyDown = (event: KeyboardEvent) => {
-    if (isHostEvent(event)) return;
+    if (isHostEvent(event)) {
+      if (event.key === "Escape" && openPanel) {
+        event.preventDefault();
+        api.commands.panels.close(openPanel);
+      }
+      return;
+    }
     if (event.key === "Escape" && captureMode !== "idle") {
       event.preventDefault();
       return cancelCapture();
@@ -712,8 +854,10 @@ export async function mountAgentFeedback(
       composer = { kind: "multi", elements: [...selected] };
       return render();
     }
-    const platform = /Mac|iPhone|iPad/.test(navigator.platform) ? "mac" : "other";
-    const shortcut = shortcuts.find((entry) => matchesAgentFeedbackShortcut(entry, {
+    const shortcut = shortcuts.find((entry) => matchesAgentFeedbackShortcut({
+      id: entry.id,
+      ...entry.shortcut,
+    }, {
       key: event.key,
       code: event.code,
       ctrlKey: event.ctrlKey,
@@ -726,15 +870,8 @@ export async function mountAgentFeedback(
     }, platform));
     if (!shortcut) return;
     event.preventDefault();
-    const actions: Record<string, () => void> = {
-      pick: () => startCapture("pick"), multi: () => startCapture("multi"), area: () => startCapture("area"),
-      copy: () => void copyOpen(), visibility: () => { markersVisible = !markersVisible; render(); },
-      list: () => { openPanel = openPanel === "list" ? null : "list"; render(); },
-      help: () => { openPanel = openPanel === "help" ? null : "help"; render(); },
-      toggle: () => { collapsed = !collapsed; render(); },
-    };
-    actions[shortcut.id]?.();
-    emit();
+    const contribution = toolbar.find(({ id }) => id === shortcut.id);
+    if (contribution) executeContribution(contribution);
   };
   const record = (source: AgentFeedbackDiagnosticsEntry["source"], value: unknown) => {
     if (destroyed) return;
@@ -773,9 +910,26 @@ export async function mountAgentFeedback(
   cleanups.push(() => window.removeEventListener("scroll", onViewport, true));
 
   render();
+  const setupCleanups: Array<() => void> = [];
+  try {
+    for (const extension of registry.getExtensions()) {
+      const dispose = extension.setup?.({ studio: api, transport: options.transport });
+      if (dispose) setupCleanups.push(dispose);
+    }
+  } catch (error) {
+    for (const dispose of setupCleanups.reverse()) dispose();
+    for (const unregister of registrations.reverse()) unregister();
+    for (const cleanup of cleanups.splice(0)) cleanup();
+    hostElement.remove();
+    throw error;
+  }
   const unmount = () => {
     if (destroyed) return;
     destroyed = true;
+    panelRoot?.unmount();
+    panelRoot = null;
+    for (const dispose of setupCleanups.reverse()) dispose();
+    for (const unregister of registrations.reverse()) unregister();
     for (const cleanup of cleanups.splice(0)) cleanup();
     listeners.clear();
     disposeInspectionEngine();

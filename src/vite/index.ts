@@ -148,12 +148,11 @@ export default function agentFeedback(
         `const config = ${JSON.stringify({ endpoint, token })};`,
         `const extensions = [${values}];`,
         "const key = Symbol.for('agent-feedback.mount');",
-        "if (!window[key]) {",
-        "  const transport = new HttpTaskTransport(config);",
-        "  const cleanups = extensions.flatMap((extension) => extension.setup ? [extension.setup({ transport })].filter(Boolean) : []);",
-        "  const mounted = await mountAgentFeedback({ transport, host: extensions.find((extension) => extension.host)?.host, targetEnrichers: extensions.flatMap((extension) => extension.targetEnrichers ?? []), redactors: extensions.flatMap((extension) => extension.redactors ?? []), exporters: extensions.flatMap((extension) => extension.exporters ?? []) });",
-        "  window[key] = () => { mounted.unmount(); cleanups.forEach((cleanup) => cleanup()); delete window[key]; };",
-        "}",
+        "window[key]?.();",
+        "const transport = new HttpTaskTransport(config);",
+        "const mounted = await mountAgentFeedback({ transport, extensions });",
+        "window[key] = () => { mounted.unmount(); delete window[key]; };",
+        "if (import.meta.hot) import.meta.hot.dispose(() => window[key]?.());",
       ].filter(Boolean).join("\n");
     },
     transformIndexHtml() {

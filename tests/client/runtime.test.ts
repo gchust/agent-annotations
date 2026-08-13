@@ -1,5 +1,6 @@
 /** @vitest-environment jsdom */
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createElement } from "react";
 
 const primitives = vi.hoisted(() => ({
   getElementAtPoint: vi.fn((): Element | null => null),
@@ -9,13 +10,22 @@ vi.mock("react-grab/primitives", () => ({
   disposeBaselineStyles: vi.fn(),
   getElementAtPoint: primitives.getElementAtPoint,
   getElementBounds: vi.fn(() => ({ x: 0, y: 0, width: 1, height: 1 })),
-  getElementContext: vi.fn(),
-  getElementSelector: vi.fn(),
+  getElementContext: vi.fn(() => ({
+    htmlPreview: "<button>Save</button>",
+    stack: [],
+    componentName: null,
+    filePath: null,
+    lineNumber: null,
+    columnNumber: null,
+    styles: "",
+  })),
+  getElementSelector: vi.fn(() => "button"),
   getElementsAtPoint: vi.fn(() => []),
   isElementGrabbable: vi.fn(() => true),
 }));
 
 import { mountAgentFeedback } from "../../src/client/index.js";
+import { defineClientExtension } from "../../src/extension/index.js";
 import { MemoryTaskTransport } from "../../src/testing/index.js";
 import type { AgentFeedbackTask, TaskTransport } from "../../src/types/index.js";
 
@@ -55,6 +65,10 @@ describe("client runtime", () => {
     });
     expect(listener).toHaveBeenCalled();
     expect(Object.keys(mounted.api)).toEqual(["getSnapshot", "subscribe", "commands"]);
+    const publicTask = mounted.api.getSnapshot().task;
+    const taskId = publicTask.taskId;
+    publicTask.taskId = "tampered";
+    expect(mounted.api.getSnapshot().task.taskId).toBe(taskId);
     unsubscribe();
     mounted.unmount();
   });
@@ -97,15 +111,11 @@ describe("client runtime", () => {
       clientX: 10,
       clientY: 10,
     }));
-    document
-      .getElementById("agent-feedback-root")!
-      .shadowRoot!
-      .querySelector<HTMLButtonElement>('[aria-label^="Annotations"]')!
-      .dispatchEvent(new KeyboardEvent("keydown", {
+    annotations.dispatchEvent(new KeyboardEvent("keydown", {
       bubbles: true,
       composed: true,
-      key: "Escape",
-      }));
+      key: "Enter",
+    }));
 
     expect(primitives.getElementAtPoint).not.toHaveBeenCalled();
     expect(mounted.api.getSnapshot().captureMode).toBe("pick");
@@ -164,5 +174,168 @@ describe("client runtime", () => {
     mounted.unmount();
     expect(console.error).toBe(restoredConsoleError);
     originalConsoleError.mockRestore();
+  });
+
+  it("runs all contributions through the registry and disposes extensions once", async () => {
+    vi.useFakeTimers();
+    const setup = vi.fn();
+    const dispose = vi.fn();
+    const execute = vi.fn();
+    const extension = defineClientExtension({
+      id: "runtime-test",
+      apiVersion: 1,
+      setup: () => {
+        setup();
+        return dispose;
+      },
+      toolbar: [{
+        id: "runtime-action",
+        group: "host" as const,
+        label: "Runtime action",
+        icon: () => null,
+        kind: "action" as const,
+        shortcut: { key: "R", code: "KeyR", primary: true, alt: true, shift: false },
+        execute,
+      }],
+      panels: [{
+        id: "runtime-panel",
+        title: "Runtime panel",
+        render: ({ close }) => createElement("button", { onClick: close }, "Close runtime panel"),
+      }],
+      targetEnrichers: [{ id: "target", enrich: () => ({ secret: "token=value" }) }],
+      redactors: [{ id: "redact", redact: () => ({ safe: true }) }],
+      exporters: [{ id: "json", export: ({ task }) => JSON.stringify(task) }],
+    });
+    const mounted = await mountAgentFeedback({
+      transport: new MemoryTaskTransport(),
+      extensions: [extension],
+    });
+    const shadow = document.getElementById("agent-feedback-root")!.shadowRoot!;
+    const action = shadow.querySelector<HTMLButtonElement>('[aria-label^="Runtime action"]')!;
+    expect(action.getAttribute("aria-label")).toContain("Ctrl+Alt+R");
+    expect(mounted.api.getSnapshot().shortcuts.find(({ id }) => id === "runtime-action")?.formatted).toBe("Ctrl+Alt+R");
+    mounted.api.commands.panels.open("help");
+    expect(shadow.querySelector('[aria-label="Shortcut help"]')?.textContent).toContain("Ctrl+Alt+R");
+    mounted.api.commands.panels.close("help");
+    action.click();
+    window.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "r", code: "KeyR", ctrlKey: true, altKey: true,
+    }));
+    expect(execute).toHaveBeenCalledTimes(2);
+    expect(setup).toHaveBeenCalledOnce();
+    expect(mounted.api.getSnapshot().exporters).toContainEqual({ id: "json", extensionId: "runtime-test" });
+    expect(await mounted.api.commands.exporters.format("json")).toContain('"schema":"agent-feedback.task.v1"');
+    mounted.api.commands.panels.open("runtime-panel");
+    vi.runAllTimers();
+    expect(shadow.activeElement?.querySelector("button")).toBe(shadow.querySelector(".af-panel button"));
+    shadow.querySelector<HTMLButtonElement>(".af-panel button")!.click();
+    expect(mounted.api.getSnapshot().openPanel).toBeNull();
+    mounted.unmount();
+    mounted.unmount();
+    expect(dispose).toHaveBeenCalledOnce();
+  });
+
+  it("keeps panels exclusive and returns focus to the opening action", async () => {
+    vi.useFakeTimers();
+    const mounted = await mountAgentFeedback({ transport: new MemoryTaskTransport() });
+    const shadow = document.getElementById("agent-feedback-root")!.shadowRoot!;
+    const list = shadow.querySelector<HTMLButtonElement>('[aria-label^="Annotations"]')!;
+    list.focus();
+    list.click();
+    vi.runAllTimers();
+    expect(mounted.api.getSnapshot().openPanel).toBe("list");
+    mounted.api.commands.panels.open("help");
+    expect(mounted.api.getSnapshot().openPanel).toBe("help");
+    expect(shadow.querySelectorAll(".af-panel")).toHaveLength(1);
+    mounted.api.commands.panels.close("help");
+    vi.runAllTimers();
+    expect(shadow.activeElement).toBe(
+      shadow.querySelector<HTMLButtonElement>('[aria-label^="Annotations"]')
+    );
+    mounted.unmount();
+  });
+
+  it("preserves built-in toolbar state parity", async () => {
+    const mounted = await mountAgentFeedback({ transport: new MemoryTaskTransport() });
+    const shadow = document.getElementById("agent-feedback-root")!.shadowRoot!;
+    const markers = shadow.querySelector<HTMLButtonElement>('[aria-label^="Markers"]')!;
+    markers.click();
+    expect(mounted.api.getSnapshot().markersVisible).toBe(false);
+    expect(
+      shadow
+        .querySelector('[aria-label^="Markers"]')
+        ?.getAttribute("aria-pressed")
+    ).toBe("false");
+    const collapse = shadow.querySelector<HTMLButtonElement>('[aria-label^="Collapse toolbar"]')!;
+    collapse.click();
+    expect(mounted.api.getSnapshot().collapsed).toBe(true);
+    expect(shadow.querySelectorAll(".af-action:not([data-toggle=true])")).toHaveLength(7);
+    expect(shadow.querySelector(".af-dock")?.getAttribute("data-collapsed")).toBe("true");
+    shadow
+      .querySelector<HTMLButtonElement>('[aria-label^="Collapse toolbar"]')!
+      .click();
+    expect(mounted.api.getSnapshot().collapsed).toBe(false);
+    expect(shadow.querySelectorAll(".af-action").length).toBeGreaterThan(1);
+    mounted.unmount();
+  });
+
+  it("namespaces enriched targets and redacts them before transport persistence", async () => {
+    const pageTarget = document.createElement("button");
+    pageTarget.textContent = "Save";
+    document.body.append(pageTarget);
+    primitives.getElementAtPoint.mockReturnValue(pageTarget);
+    const transport = new MemoryTaskTransport();
+    const mutate = vi.spyOn(transport, "mutate");
+    const mounted = await mountAgentFeedback({
+      transport,
+      extensions: [defineClientExtension({
+        id: "runtime-data",
+        apiVersion: 1,
+        targetEnrichers: [{ id: "target", enrich: () => ({ secret: "value" }) }],
+        redactors: [{ id: "redact", redact: () => ({ safe: true }) }],
+      })],
+    });
+    mounted.api.commands.capture.startPick();
+    document.dispatchEvent(new MouseEvent("click", {
+      bubbles: true,
+      clientX: 10,
+      clientY: 10,
+    }));
+    const shadow = document.getElementById("agent-feedback-root")!.shadowRoot!;
+    const textarea = shadow.querySelector<HTMLTextAreaElement>(".af-composer textarea")!;
+    textarea.value = "Change it";
+    shadow.querySelector<HTMLFormElement>(".af-composer")!.dispatchEvent(
+      new Event("submit", { bubbles: true, cancelable: true })
+    );
+    await vi.waitFor(() => expect(mutate).toHaveBeenCalledOnce());
+    expect(mutate.mock.calls[0][0].operations[0]).toMatchObject({
+      op: "add",
+      annotation: { extensions: { "runtime-data": { safe: true } } },
+    });
+    mounted.unmount();
+    pageTarget.remove();
+  });
+
+  it("cleans partial setup and leaves no mount when setup fails", async () => {
+    const dispose = vi.fn();
+    await expect(mountAgentFeedback({
+      transport: new MemoryTaskTransport(),
+      extensions: [
+        defineClientExtension({
+          id: "a-setup-first",
+          apiVersion: 1,
+          setup: () => dispose,
+        }),
+        defineClientExtension({
+          id: "z-setup-fails",
+          apiVersion: 1,
+          setup: () => {
+            throw new Error("setup failed");
+          },
+        }),
+      ],
+    })).rejects.toThrow("setup failed");
+    expect(dispose).toHaveBeenCalledOnce();
+    expect(document.getElementById("agent-feedback-root")).toBeNull();
   });
 });

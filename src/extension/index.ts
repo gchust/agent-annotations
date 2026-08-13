@@ -358,7 +358,6 @@ export type {
   StudioPublicApi,
   StudioPublicSnapshot,
   TargetEnricher,
-  TaskTransport,
   ToolbarCommandContext,
   ToolbarContribution,
 } from "../types/index.js";
