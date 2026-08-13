@@ -101,7 +101,9 @@ test("cross-origin stays explicitly unsupported and public freeze keeps toolbar 
 
 test("region is bounded and semantic target survives wrapper-heavy sampling", async ({ page }) => {
   await page.goto("/");
-  const box = await page.locator("#semantic-region-target").boundingBox();
+  const semantic = page.locator("#semantic-region-target");
+  await semantic.scrollIntoViewIfNeeded();
+  const box = await semantic.boundingBox();
   expect(box).not.toBeNull();
   const durations: number[] = [];
   for (let run = 0; run < 3; run += 1) {
@@ -111,7 +113,7 @@ test("region is bounded and semantic target survives wrapper-heavy sampling", as
     await page.mouse.down();
     await page.mouse.move(box!.x + box!.width + 2, box!.y + box!.height + 2);
     await page.mouse.up();
-    await expect(shadow(page, '[aria-label="Annotation composer"]')).toContainText("Area (0 sampled targets)");
+    await expect(shadow(page, '[aria-label="Annotation composer"]')).toContainText("Area (1 sampled targets)");
     durations.push(Date.now() - started);
     await page.keyboard.press("Escape");
   }

@@ -1,7 +1,20 @@
 /** @vitest-environment jsdom */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { pruneRegionTargets, REGION_CANDIDATE_LIMIT, REGION_TARGET_LIMIT } from "../../src/client/inspection-engine.js";
+const primitives = vi.hoisted(() => ({ elementsAtPoint: vi.fn<(...args: unknown[]) => Element[]>(() => []) }));
+vi.mock("react-grab/primitives", () => ({
+  disposeBaselineStyles: vi.fn(), freeze: vi.fn(), unfreeze: vi.fn(),
+  getElementAtPoint: vi.fn(), getElementBounds: vi.fn(), getElementContext: vi.fn(),
+  getElementSelector: vi.fn(), getElementsAtPoint: primitives.elementsAtPoint,
+  isElementGrabbable: vi.fn(() => false),
+}));
+
+import {
+  pruneRegionTargets,
+  REGION_CANDIDATE_LIMIT,
+  REGION_TARGET_LIMIT,
+  sampleRegionTargets,
+} from "../../src/client/inspection-engine.js";
 
 describe("Region semantic pruning", () => {
   it("keeps semantic descendants after collecting wrapper-heavy candidates", () => {
@@ -18,5 +31,14 @@ describe("Region semantic pruning", () => {
     console.log(`region-prune-200 durationMs=${(performance.now() - started).toFixed(3)}`);
     expect(result).toHaveLength(REGION_TARGET_LIMIT);
     expect(result.every((element) => element.tagName === "BUTTON")).toBe(true);
+  });
+
+  it("keeps a semantic region target even when React Grab does not consider it directly grabbable", () => {
+    const button = document.createElement("button");
+    button.textContent = "Save";
+    document.body.append(button);
+    primitives.elementsAtPoint.mockReturnValue([]);
+    vi.spyOn(document, "elementFromPoint").mockReturnValue(button);
+    expect(sampleRegionTargets({ x: 0, y: 0, width: 20, height: 20 })).toEqual([button]);
   });
 });

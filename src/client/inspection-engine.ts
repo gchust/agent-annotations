@@ -32,6 +32,11 @@ const isCandidate = (element: Element): boolean =>
   element.closest(IGNORE) === null &&
   isElementGrabbable(element);
 
+const isRegionCandidate = (element: Element): boolean =>
+  element.isConnected &&
+  !ROOTS.has(element.tagName.toLowerCase()) &&
+  element.closest(IGNORE) === null;
+
 const boundsOf = (element: Element): AgentFeedbackRect => {
   const bounds = getElementBounds(element);
   return { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height };
@@ -217,12 +222,20 @@ const samplePoints = (rect: AgentFeedbackRect): Array<{ x: number; y: number }> 
 export function sampleRegionTargets(rect: AgentFeedbackRect): Element[] {
   const candidates: Element[] = [];
   const seen = new Set<Element>();
+  const addCandidate = (element: Element): boolean => {
+    if (seen.has(element)) return false;
+    seen.add(element);
+    candidates.push(element);
+    return candidates.length >= MAX_REGION_CANDIDATES;
+  };
   for (const point of samplePoints(rect)) {
-    for (const element of getElementsAtPoint(point.x, point.y, { filter: isCandidate })) {
-      if (seen.has(element)) continue;
-      seen.add(element);
-      candidates.push(element);
-      if (candidates.length >= MAX_REGION_CANDIDATES) break;
+    const elements = getElementsAtPoint(point.x, point.y, { filter: isRegionCandidate });
+    if (elements.length === 0) {
+      const element = document.elementFromPoint(point.x, point.y);
+      if (element && isRegionCandidate(element) && addCandidate(element)) break;
+    }
+    for (const element of elements) {
+      if (addCandidate(element)) break;
     }
     if (candidates.length >= MAX_REGION_CANDIDATES) break;
   }
