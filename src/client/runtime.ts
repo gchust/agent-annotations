@@ -1045,7 +1045,10 @@ export async function mountAgentFeedback(
       const refresh = () => {
         scheduleMarkerRefresh();
         try {
-          if (frame.contentDocument) watchMarkerFrames(frame.contentDocument);
+          if (frame.contentDocument) {
+            watchMarkerFrames(frame.contentDocument);
+            scheduleFrame(scheduleMarkerRefresh);
+          }
         } catch {
           // Cross-origin frames are explicitly unsupported and remain unresolved.
         }
@@ -1053,7 +1056,10 @@ export async function mountAgentFeedback(
       frame.addEventListener("load", refresh);
       markerFrameCleanups.push(() => frame.removeEventListener("load", refresh));
       try {
-        if (frame.contentDocument) watchMarkerFrames(frame.contentDocument);
+        if (frame.contentDocument) {
+          watchMarkerFrames(frame.contentDocument);
+          scheduleFrame(scheduleMarkerRefresh);
+        }
       } catch {
         // Cross-origin frames are explicitly unsupported and remain unresolved.
       }
