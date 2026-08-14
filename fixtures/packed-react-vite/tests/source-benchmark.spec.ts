@@ -23,7 +23,7 @@ const capture = async (page: Page, selector: string) => {
   await shadow(page, 'button[aria-label^="Pick"]').click();
   await page.locator(selector).click();
   await shadow(page, '[aria-label="Annotation comment"]').fill(`source ${selector}`);
-  await shadow(page, 'button:has-text("Save annotation")').click();
+  await shadow(page, 'button[aria-label="Save annotation"]').click();
 };
 
 const revision = async (page: Page, token: string) => page.evaluate(async (value) => {

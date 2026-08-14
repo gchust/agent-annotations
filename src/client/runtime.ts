@@ -12,6 +12,7 @@ import type {
   AgentFeedbackAnnotation,
   AgentFeedbackCaptureMode,
   AgentFeedbackDiagnosticsEntry,
+  AgentFeedbackIconProps,
   AgentFeedbackMutationOperation,
   AgentFeedbackRect,
   AgentFeedbackTask,
@@ -22,7 +23,7 @@ import type {
   StudioPublicSnapshot,
   ToolbarCommandContext,
 } from "../types/index.js";
-import { createElement } from "react";
+import { createElement, type ComponentType } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import {
@@ -36,6 +37,14 @@ import {
   targetAtPoint,
 } from "./inspection-engine.js";
 import { builtinClientExtension } from "./builtin-extension.js";
+import {
+  CloseIcon,
+  CompleteIcon,
+  DeleteIcon,
+  GripIcon,
+  ReopenIcon,
+  SaveIcon,
+} from "./icons.js";
 import { captureViewportPng } from "./screenshot.js";
 import { AGENT_FEEDBACK_STYLES } from "./styles.js";
 
@@ -143,6 +152,7 @@ export async function mountAgentFeedback(
   let focusPanel = false;
   let panelReturnAction: string | null = null;
   let panelRoot: Root | null = null;
+  let iconRoots: Root[] = [];
   let destroyed = false;
   const listeners = new Set<(snapshot: StudioPublicSnapshot) => void>();
   const diagnostics: AgentFeedbackDiagnosticsEntry[] = [];
@@ -474,29 +484,43 @@ export async function mountAgentFeedback(
     } satisfies ToolbarCommandContext);
   };
 
-  const nativeButton = (
+  const renderIcon = (
+    node: HTMLElement,
+    Icon: ComponentType<AgentFeedbackIconProps>
+  ): void => {
+    const mount = document.createElement("span");
+    mount.className = "af-icon-slot";
+    node.append(mount);
+    const iconRoot = createRoot(mount);
+    iconRoots.push(iconRoot);
+    flushSync(() => iconRoot.render(createElement(Icon, { className: "af-icon" })));
+  };
+
+  const iconButton = (
     label: string,
-    action: () => void,
+    Icon: ComponentType<AgentFeedbackIconProps>,
+    action?: () => void,
     attributes: Record<string, string> = {}
   ): HTMLButtonElement => {
     const node = document.createElement("button");
     node.type = "button";
     node.className = "af-action";
-    node.textContent = label;
     node.setAttribute("aria-label", attributes["aria-label"] ?? label);
     for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, value);
-    node.addEventListener("click", action);
+    renderIcon(node, Icon);
+    if (action) node.addEventListener("click", action);
     node.addEventListener("mouseenter", () => showTooltip(node));
     node.addEventListener("mouseleave", hideTooltip);
     return node;
   };
 
-  const submitButton = (label: string): HTMLButtonElement => {
-    const node = document.createElement("button");
+  const submitButton = (
+    label: string,
+    Icon: ComponentType<AgentFeedbackIconProps>
+  ): HTMLButtonElement => {
+    const node = iconButton(label, Icon);
     node.type = "submit";
-    node.className = "af-button af-primary";
-    node.textContent = label;
-    node.setAttribute("aria-label", label);
+    node.className = "af-button af-icon-button af-primary";
     return node;
   };
 
@@ -584,9 +608,9 @@ export async function mountAgentFeedback(
     textarea.placeholder = "Describe the requested change";
     const actions = document.createElement("div");
     actions.className = "af-actions";
-    const cancel = nativeButton("Cancel", cancelCapture);
-    cancel.className = "af-button";
-    const save = submitButton("Save annotation");
+    const cancel = iconButton("Cancel", CloseIcon, cancelCapture);
+    cancel.className = "af-button af-icon-button";
+    const save = submitButton("Save annotation", SaveIcon);
     actions.append(cancel, save);
     surface.append(title, textarea, actions);
     surface.addEventListener("submit", async (event) => {
@@ -647,25 +671,46 @@ export async function mountAgentFeedback(
       }
     });
     root.append(surface);
+    positionComposer();
     scheduleFrame(() => textarea.focus());
   };
 
+  const positionSurface = (surface: HTMLElement, anchor: AgentFeedbackRect) => {
+    const surfaceRect = surface.getBoundingClientRect();
+    const edge = 8;
+    const maxLeft = Math.max(edge, innerWidth - surfaceRect.width - edge);
+    const maxTop = Math.max(edge, innerHeight - surfaceRect.height - edge);
+    const below = anchor.y + anchor.height + edge;
+    const preferredTop = below + surfaceRect.height <= innerHeight - edge
+      ? below
+      : anchor.y - edge - surfaceRect.height;
+    surface.style.left = `${Math.min(Math.max(edge, anchor.x), maxLeft)}px`;
+    surface.style.top = `${Math.min(Math.max(edge, preferredTop), maxTop)}px`;
+  };
+
+  function positionComposer(): void {
+    const surface = root.querySelector<HTMLElement>(".af-composer");
+    if (!surface || !composer) return;
+    const anchor = composer.kind === "region"
+      ? composer.rect
+      : composer.elements.at(-1)
+        ? targetBounds(composer.elements.at(-1)!)
+        : null;
+    if (anchor) positionSurface(surface, anchor);
+  }
+
   const positionEditor = () => {
-    const editor = root.querySelector<HTMLElement>(".af-editor");
+    const surface = root.querySelector<HTMLElement>(".af-editor");
     const marker = Array.from(root.querySelectorAll<HTMLElement>(".af-marker"))
       .find((node) => node.dataset.annotationId === editingId);
-    if (!editor || !marker || marker.hidden) return;
+    if (!surface || !marker || marker.hidden) return;
     const markerRect = marker.getBoundingClientRect();
-    const editorRect = editor.getBoundingClientRect();
-    const edge = 8;
-    const maxLeft = Math.max(edge, innerWidth - editorRect.width - edge);
-    const maxTop = Math.max(edge, innerHeight - editorRect.height - edge);
-    const below = markerRect.bottom + edge;
-    const preferredTop = below + editorRect.height <= innerHeight - edge
-      ? below
-      : markerRect.top - edge - editorRect.height;
-    editor.style.left = `${Math.min(Math.max(edge, markerRect.left), maxLeft)}px`;
-    editor.style.top = `${Math.min(Math.max(edge, preferredTop), maxTop)}px`;
+    positionSurface(surface, {
+      x: markerRect.x,
+      y: markerRect.y,
+      width: markerRect.width,
+      height: markerRect.height,
+    });
   };
 
   const renderEditor = () => {
@@ -681,20 +726,24 @@ export async function mountAgentFeedback(
     textarea.value = annotation.comment;
     const actions = document.createElement("div");
     actions.className = "af-actions";
-    const save = submitButton("Save comment");
-    const statusButton = nativeButton(annotation.status === "open" ? "Complete" : "Reopen", async () => {
+    const save = submitButton("Save comment", SaveIcon);
+    const statusButton = iconButton(
+      annotation.status === "open" ? "Complete" : "Reopen",
+      annotation.status === "open" ? CompleteIcon : ReopenIcon,
+      async () => {
       await mutate([{ op: annotation.status === "open" ? "complete" : "reopen", annotationId: annotation.annotationId }]);
-    });
-    statusButton.className = "af-button";
-    const remove = nativeButton("Delete", async () => {
+      }
+    );
+    statusButton.className = "af-button af-icon-button";
+    const remove = iconButton("Delete", DeleteIcon, async () => {
       await mutate([{ op: "remove", annotationId: annotation.annotationId }]);
       if (destroyed) return;
       editingId = null;
       render();
     });
-    remove.className = "af-button af-danger";
-    const close = nativeButton("Close", () => { editingId = null; render(); });
-    close.className = "af-button";
+    remove.className = "af-button af-icon-button af-danger";
+    const close = iconButton("Close", CloseIcon, () => { editingId = null; render(); });
+    close.className = "af-button af-icon-button";
     actions.append(save, statusButton, remove, close);
     surface.append(textarea, actions);
     surface.addEventListener("submit", async (event) => {
@@ -755,8 +804,10 @@ export async function mountAgentFeedback(
 
   const render = () => {
     if (destroyed) return;
+    hideTooltip();
     panelRoot?.unmount();
     panelRoot = null;
+    for (const iconRoot of iconRoots.splice(0)) iconRoot.unmount();
     root.replaceChildren();
     const dock = document.createElement("div");
     dock.className = "af-dock";
@@ -768,11 +819,8 @@ export async function mountAgentFeedback(
         bottom: "auto",
       });
     }
-    const grip = document.createElement("button");
-    grip.type = "button";
+    const grip = iconButton("Drag toolbar", GripIcon);
     grip.className = "af-grip";
-    grip.textContent = "⋮⋮";
-    grip.setAttribute("aria-label", "Drag toolbar");
     dock.append(grip);
     for (const contribution of toolbar) {
       const current = snapshot();
@@ -782,7 +830,7 @@ export async function mountAgentFeedback(
       ) continue;
       const shortcut = shortcuts.find(({ id }) => id === contribution.id);
       const label = localized(contribution.label);
-      const node = nativeButton(label, () => executeContribution(contribution), {
+      const node = iconButton(label, contribution.icon, () => executeContribution(contribution), {
         "aria-label": `${label}${shortcut ? ` (${shortcut.formatted})` : ""}`,
         "data-action-id": contribution.id,
         ...(contribution.isPressed
@@ -839,14 +887,17 @@ export async function mountAgentFeedback(
       textarea.className = "af-textarea";
       textarea.readOnly = true;
       textarea.value = copyFallback;
-      const close = nativeButton("Close", () => { copyFallback = ""; render(); });
-      close.className = "af-button";
+      const close = iconButton("Close", CloseIcon, () => { copyFallback = ""; render(); });
+      close.className = "af-button af-icon-button";
       fallback.append(textarea, close);
       root.append(fallback);
       scheduleFrame(() => textarea.select());
     }
     renderStatus();
-    syncMarkerTracking(markerTargets);
+    syncMarkerTracking([
+      ...markerTargets,
+      ...(composer && composer.kind !== "region" ? composer.elements : []),
+    ]);
   };
 
   const isHostEvent = (event: Event): boolean =>
@@ -919,6 +970,9 @@ export async function mountAgentFeedback(
       if (event.key === "Escape" && openPanel) {
         event.preventDefault();
         api.commands.panels.close(openPanel);
+      } else if (event.key === "Escape" && captureMode !== "idle") {
+        event.preventDefault();
+        cancelCapture();
       }
       return;
     }
@@ -1068,6 +1122,7 @@ export async function mountAgentFeedback(
         marker.hidden = !anchor;
         if (anchor) Object.assign(marker.style, { left: `${anchor.x}px`, top: `${anchor.y}px` });
       }
+      positionComposer();
       positionEditor();
       markerRefreshes += 1;
       hostElement.dataset.markerRefreshes = String(markerRefreshes);
@@ -1116,7 +1171,8 @@ export async function mountAgentFeedback(
     stopMarkerTracking();
     const watchFrames = markersVisible && hasPersistedFrameTarget();
     trackedMarkerTargets = new WeakSet(targets);
-    if ((!markersVisible || targets.length === 0) && !editingId && !watchFrames) return;
+    const hasElementComposer = composer && composer.kind !== "region";
+    if ((!markersVisible || targets.length === 0) && !editingId && !hasElementComposer && !watchFrames) return;
     if (watchFrames) watchMarkerFrames(appRoot, hasUnresolvedFrameTarget());
     markerObserver = new MutationObserver(() => {
       if (watchFrames) watchMarkerFrames(appRoot, hasUnresolvedFrameTarget());
@@ -1142,7 +1198,7 @@ export async function mountAgentFeedback(
   cleanups.push(stopMarkerTracking);
 
   const onViewport = () => {
-    if (markerObserver || editingId) scheduleMarkerRefresh();
+    if (markerObserver || editingId || composer) scheduleMarkerRefresh();
   };
   window.addEventListener("resize", onViewport);
   window.addEventListener("scroll", onViewport, true);
@@ -1156,6 +1212,7 @@ export async function mountAgentFeedback(
       if (dispose) setupCleanups.push(dispose);
     }
   } catch (error) {
+    for (const iconRoot of iconRoots.splice(0)) iconRoot.unmount();
     for (const dispose of setupCleanups.reverse()) dispose();
     for (const unregister of registrations.reverse()) unregister();
     for (const cleanup of cleanups.splice(0)) cleanup();
@@ -1167,6 +1224,7 @@ export async function mountAgentFeedback(
     destroyed = true;
     panelRoot?.unmount();
     panelRoot = null;
+    for (const iconRoot of iconRoots.splice(0)) iconRoot.unmount();
     for (const dispose of setupCleanups.reverse()) dispose();
     for (const unregister of registrations.reverse()) unregister();
     for (const cleanup of cleanups.splice(0)) cleanup();

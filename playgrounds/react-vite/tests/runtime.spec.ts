@@ -8,12 +8,16 @@ const capturePick = async (page: Page, target: string, comment: string) => {
   await page.locator(target).click({ position: { x: 12, y: 12 } });
   await expect(shadow(page, '[aria-label="Annotation composer"]')).toBeVisible();
   await shadow(page, '[aria-label="Annotation comment"]').fill(comment);
-  await shadow(page, 'button:has-text("Save annotation")').click();
+  await shadow(page, 'button[aria-label="Save annotation"]').click();
 };
 
 test("complete generic Pick/Multi/Area annotation closed loop", async ({ page, context }) => {
   await page.goto("/");
   await expect(shadow(page, ".af-dock")).toBeVisible();
+  await expect(shadow(page, ".af-dock")).toHaveCSS("background-color", "rgb(255, 255, 255)");
+  expect(await shadow(page, ".af-action").evaluateAll((buttons) =>
+    buttons.every((button) => !!button.querySelector("svg") && !button.textContent?.trim())
+  )).toBe(true);
 
   await page.screenshot({ path: `${artifactDir}/toolbar-expanded.png` });
   await shadow(page, 'button[aria-label^="Collapse toolbar"]').click();
@@ -23,9 +27,20 @@ test("complete generic Pick/Multi/Area annotation closed loop", async ({ page, c
   await shadow(page, 'button[aria-label^="Pick"]').click();
   await page.locator("#plain-button").click({ position: { x: 12, y: 12 } });
   await expect(shadow(page, '[aria-label="Annotation composer"]')).toBeVisible();
+  const [targetBox, composerBox] = await Promise.all([
+    page.locator("#plain-button").boundingBox(),
+    shadow(page, '[aria-label="Annotation composer"]').boundingBox(),
+  ]);
+  expect(composerBox!.y - (targetBox!.y + targetBox!.height)).toBeCloseTo(8, 0);
+  expect(await shadow(page, ".af-composer button").evaluateAll((buttons) =>
+    buttons.every((button) => !!button.querySelector("svg") && !button.textContent?.trim())
+  )).toBe(true);
   await page.screenshot({ path: `${artifactDir}/pick-composer.png` });
   await shadow(page, '[aria-label="Annotation comment"]').fill("Make the plain button violet");
-  await shadow(page, 'button:has-text("Save annotation")').click();
+  const save = shadow(page, 'button[aria-label="Save annotation"]');
+  await save.hover();
+  await expect(shadow(page, '[role="tooltip"]')).toHaveText("Save annotation");
+  await save.click();
   await expect.poll(() => page.evaluate(() => ({
     annotations: window.__agentFeedback?.api.getSnapshot().task.annotations.length,
     composer: !!document.getElementById("agent-feedback-root")?.shadowRoot?.querySelector(".af-composer"),
@@ -38,7 +53,7 @@ test("complete generic Pick/Multi/Area annotation closed loop", async ({ page, c
   await page.locator("#map-button").click({ position: { x: 12, y: 12 } });
   await page.keyboard.press("Enter");
   await shadow(page, '[aria-label="Annotation comment"]').fill("Align SVG and mapped item");
-  await shadow(page, 'button:has-text("Save annotation")').click();
+  await shadow(page, 'button[aria-label="Save annotation"]').click();
   await expect.poll(() => page.evaluate(() => window.__agentFeedback?.api.getSnapshot().task.annotations[1]?.targets?.length)).toBe(2);
   await page.screenshot({ path: `${artifactDir}/multi-annotation.png` });
 
@@ -59,21 +74,23 @@ test("complete generic Pick/Multi/Area annotation closed loop", async ({ page, c
   await page.mouse.up();
   await expect(shadow(page, '[aria-label="Annotation composer"]')).toBeVisible();
   await shadow(page, '[aria-label="Annotation comment"]').fill("Tighten the fixture grid");
-  await shadow(page, 'button:has-text("Save annotation")').click();
+  await shadow(page, 'button[aria-label="Save annotation"]').click();
   await expect.poll(() => page.evaluate(() => window.__agentFeedback?.api.getSnapshot().task.annotations[2]?.kind)).toBe("region");
   await page.screenshot({ path: `${artifactDir}/area-annotation.png` });
 
   await shadow(page, '[aria-label="Annotation 1: edit"]').click();
   await expect(shadow(page, '[aria-label="Annotation editor"]')).toBeVisible();
   await shadow(page, '[aria-label="Annotation editor"] textarea').fill("Make the plain button purple");
-  await shadow(page, '[aria-label="Annotation editor"] button:has-text("Save comment")').click();
-  await shadow(page, '[aria-label="Annotation editor"] button:has-text("Complete")').click();
+  await shadow(page, '[aria-label="Annotation editor"] button[aria-label="Save comment"]').click();
+  await expect(shadow(page, '[aria-label="Annotation editor"]')).toHaveCount(0);
+  await shadow(page, '[aria-label="Annotation 1: edit"]').click();
+  await shadow(page, '[aria-label="Annotation editor"] button[aria-label="Complete"]').click();
   await expect.poll(() => page.evaluate(() =>
     window.__agentFeedback?.api.getSnapshot().task.annotations[0]?.status
   )).toBe("completed");
   await expect(shadow(page, '[aria-label="Annotation 1: edit"]')).toHaveCount(0);
   await page.screenshot({ path: `${artifactDir}/marker-editor.png` });
-  await shadow(page, '[aria-label="Annotation editor"] button:has-text("Close")').click();
+  await shadow(page, '[aria-label="Annotation editor"] button[aria-label="Close"]').click();
 
   await shadow(page, 'button[aria-label^="Annotations"]').click();
   await expect(shadow(page, '[aria-label="Annotation list"]')).not.toContainText("Make the plain button purple");
@@ -91,17 +108,17 @@ test("complete generic Pick/Multi/Area annotation closed loop", async ({ page, c
   expect(clipboard).not.toContain("Make the plain button purple");
   expect(clipboard).toContain("Align SVG and mapped item");
   await page.screenshot({ path: `${artifactDir}/copy-success.png` });
-  await shadow(page, '[aria-label="Annotation editor"] button:has-text("Reopen")').click();
+  await shadow(page, '[aria-label="Annotation editor"] button[aria-label="Reopen"]').click();
 
   await page.evaluate(() => Object.defineProperty(navigator, "clipboard", { configurable: true, value: undefined }));
   await shadow(page, 'button[aria-label^="Copy"]').click();
   await expect(shadow(page, '[aria-label="Manual copy fallback"]')).toBeVisible();
   await page.screenshot({ path: `${artifactDir}/copy-fallback.png` });
-  await shadow(page, '[aria-label="Manual copy fallback"] button:has-text("Close")').click();
+  await shadow(page, '[aria-label="Manual copy fallback"] button[aria-label="Close"]').click();
 
-  await shadow(page, '[aria-label="Annotation editor"] button:has-text("Close")').click();
+  await shadow(page, '[aria-label="Annotation editor"] button[aria-label="Close"]').click();
   await shadow(page, '[aria-label="Annotation 1: edit"]').click();
-  await shadow(page, '[aria-label="Annotation editor"] button:has-text("Delete")').click();
+  await shadow(page, '[aria-label="Annotation editor"] button[aria-label="Delete"]').click();
   await expect.poll(() => page.evaluate(() => window.__agentFeedback?.api.getSnapshot().task.annotations.length)).toBe(2);
 
   await page.evaluate(() => window.__unmountAgentFeedback?.());
@@ -162,7 +179,7 @@ test("captures SVG, map, memo, forwardRef, Portal, and Shadow Root targets", asy
   await shadow(page, 'button[aria-label^="Pick"]').click();
   await page.locator("#shadow-fixture").locator("#shadow-button").click();
   await shadow(page, '[aria-label="Annotation comment"]').fill("Capture Shadow Root");
-  await shadow(page, 'button:has-text("Save annotation")').click();
+  await shadow(page, 'button[aria-label="Save annotation"]').click();
 
   const task = await page.evaluate(() => window.__agentFeedback?.api.getSnapshot().task);
   expect(task?.annotations).toHaveLength(6);

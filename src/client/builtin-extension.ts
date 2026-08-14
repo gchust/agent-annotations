@@ -2,8 +2,18 @@ import { createElement, useState } from "react";
 
 import { defineClientExtension } from "../extension/index.js";
 import type { PanelContribution, ToolbarContribution } from "../types/index.js";
+import {
+  AnnotationsIcon,
+  AreaIcon,
+  CloseIcon,
+  CollapseIcon,
+  CopyIcon,
+  HelpIcon,
+  MarkersIcon,
+  MultiIcon,
+  PickIcon,
+} from "./icons.js";
 
-const Icon = () => createElement("span", { "aria-hidden": true });
 const shortcut = (
   key: string,
   code: string,
@@ -20,8 +30,14 @@ const HelpPanel: PanelContribution["render"] = ({ studio, close }) =>
     null,
     createElement(
       "button",
-      { type: "button", className: "af-button", onClick: close },
-      "Close"
+      {
+        type: "button",
+        className: "af-button af-icon-button",
+        "aria-label": "Close",
+        title: "Close",
+        onClick: close,
+      },
+      createElement(CloseIcon)
     ),
     createElement(
       "ul",
@@ -67,8 +83,14 @@ const AnnotationList: PanelContribution["render"] = ({ studio, close }) => {
       ),
       createElement(
         "button",
-        { type: "button", className: "af-button", onClick: close },
-        "Close"
+        {
+          type: "button",
+          className: "af-button af-icon-button",
+          "aria-label": "Close",
+          title: "Close",
+          onClick: close,
+        },
+        createElement(CloseIcon)
       )
     ),
     createElement(
@@ -105,14 +127,14 @@ const AnnotationList: PanelContribution["render"] = ({ studio, close }) => {
 };
 
 const toolbar: ToolbarContribution[] = [
-  { id: "pick", group: "capture", order: 10, label: "Pick", icon: Icon, kind: "toggle", shortcut: shortcut("P", "KeyP"), isPressed: ({ captureMode }) => captureMode === "pick", execute: ({ studio }) => studio.commands.capture.startPick() },
-  { id: "multi", group: "capture", order: 20, label: "Multi", icon: Icon, kind: "toggle", shortcut: shortcut("M", "KeyM"), isPressed: ({ captureMode }) => captureMode === "multi", execute: ({ studio }) => studio.commands.capture.startMulti() },
-  { id: "area", group: "capture", order: 30, label: "Area", icon: Icon, kind: "toggle", shortcut: shortcut("A", "KeyA"), isPressed: ({ captureMode }) => captureMode === "area", execute: ({ studio }) => studio.commands.capture.startArea() },
-  { id: "copy", group: "handoff", order: 10, label: "Copy", icon: Icon, kind: "action", shortcut: shortcut("C", "KeyC"), execute: ({ studio }) => studio.commands.annotations.copyOpen() },
-  { id: "visibility", group: "view", order: 10, label: "Markers", icon: Icon, kind: "toggle", shortcut: shortcut("V", "KeyV"), isPressed: ({ markersVisible }) => markersVisible, execute: ({ studio }) => studio.getSnapshot().markersVisible ? studio.commands.markers.hide() : studio.commands.markers.show() },
-  { id: "list", group: "view", order: 20, label: "Annotations", icon: Icon, kind: "panel", shortcut: shortcut("L", "KeyL"), panelId: "list", isPressed: ({ openPanel }) => openPanel === "list" },
-  { id: "help", group: "view", order: 30, label: "Shortcut help", icon: Icon, kind: "panel", shortcut: shortcut("/", "Slash", false, false, true), panelId: "help", isPressed: ({ openPanel }) => openPanel === "help" },
-  { id: "toggle", group: "view", order: 40, label: "Collapse toolbar", icon: Icon, kind: "toggle", shortcut: shortcut("K", "KeyK"), isVisible: showCollapse, isPressed: toggleCollapsed, execute: ({ studio }) => studio.commands.toolbar.toggleCollapsed() },
+  { id: "pick", group: "capture", order: 10, label: "Pick", icon: PickIcon, kind: "toggle", shortcut: shortcut("P", "KeyP"), isPressed: ({ captureMode }) => captureMode === "pick", execute: ({ studio }) => studio.commands.capture.startPick() },
+  { id: "multi", group: "capture", order: 20, label: "Multi", icon: MultiIcon, kind: "toggle", shortcut: shortcut("M", "KeyM"), isPressed: ({ captureMode }) => captureMode === "multi", execute: ({ studio }) => studio.commands.capture.startMulti() },
+  { id: "area", group: "capture", order: 30, label: "Area", icon: AreaIcon, kind: "toggle", shortcut: shortcut("A", "KeyA"), isPressed: ({ captureMode }) => captureMode === "area", execute: ({ studio }) => studio.commands.capture.startArea() },
+  { id: "copy", group: "handoff", order: 10, label: "Copy", icon: CopyIcon, kind: "action", shortcut: shortcut("C", "KeyC"), execute: ({ studio }) => studio.commands.annotations.copyOpen() },
+  { id: "visibility", group: "view", order: 10, label: "Markers", icon: MarkersIcon, kind: "toggle", shortcut: shortcut("V", "KeyV"), isPressed: ({ markersVisible }) => markersVisible, execute: ({ studio }) => studio.getSnapshot().markersVisible ? studio.commands.markers.hide() : studio.commands.markers.show() },
+  { id: "list", group: "view", order: 20, label: "Annotations", icon: AnnotationsIcon, kind: "panel", shortcut: shortcut("L", "KeyL"), panelId: "list", isPressed: ({ openPanel }) => openPanel === "list" },
+  { id: "help", group: "view", order: 30, label: "Shortcut help", icon: HelpIcon, kind: "panel", shortcut: shortcut("/", "Slash", false, false, true), panelId: "help", isPressed: ({ openPanel }) => openPanel === "help" },
+  { id: "toggle", group: "view", order: 40, label: "Collapse toolbar", icon: CollapseIcon, kind: "toggle", shortcut: shortcut("K", "KeyK"), isVisible: showCollapse, isPressed: toggleCollapsed, execute: ({ studio }) => studio.commands.toolbar.toggleCollapsed() },
 ];
 
 export const builtinClientExtension = defineClientExtension({

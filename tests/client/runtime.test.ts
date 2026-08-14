@@ -5,6 +5,7 @@ import { createElement } from "react";
 const primitives = vi.hoisted(() => ({
   freeze: vi.fn(),
   getElementAtPoint: vi.fn((): Element | null => null),
+  getElementBounds: vi.fn(() => ({ x: 0, y: 0, width: 1, height: 1 })),
   unfreeze: vi.fn(),
 }));
 
@@ -12,7 +13,7 @@ vi.mock("react-grab/primitives", () => ({
   disposeBaselineStyles: vi.fn(),
   freeze: primitives.freeze,
   getElementAtPoint: primitives.getElementAtPoint,
-  getElementBounds: vi.fn(() => ({ x: 0, y: 0, width: 1, height: 1 })),
+  getElementBounds: primitives.getElementBounds,
   getElementContext: vi.fn(() => ({
     htmlPreview: "<button>Save</button>",
     stack: [],
@@ -38,6 +39,8 @@ afterEach(() => {
   document.getElementById("agent-feedback-root")?.remove();
   primitives.getElementAtPoint.mockReset();
   primitives.getElementAtPoint.mockReturnValue(null);
+  primitives.getElementBounds.mockReset();
+  primitives.getElementBounds.mockReturnValue({ x: 0, y: 0, width: 1, height: 1 });
   primitives.freeze.mockClear();
   primitives.unfreeze.mockClear();
   vi.useRealTimers();
@@ -49,7 +52,10 @@ describe("client runtime", () => {
     const mounted = await mountAgentFeedback({ transport: new MemoryTaskTransport() });
     const host = document.getElementById("agent-feedback-root");
     expect(host?.hasAttribute("data-react-grab-ignore")).toBe(true);
-    expect(host?.shadowRoot?.querySelector('[aria-label^="Pick"]')).not.toBeNull();
+    const pick = host?.shadowRoot?.querySelector('[aria-label^="Pick"]');
+    expect(pick?.querySelector("svg")).not.toBeNull();
+    expect(pick?.textContent).toBe("");
+    expect(host?.shadowRoot?.querySelector("style")?.textContent).toContain("color-scheme:light");
 
     mounted.unmount();
     mounted.unmount();
@@ -214,6 +220,11 @@ describe("client runtime", () => {
       mounted.api.commands.markers.focus("ann-1");
       const editor = document.getElementById("agent-feedback-root")!
         .shadowRoot!.querySelector<HTMLElement>(".af-editor")!;
+      expect([...editor.querySelectorAll("button")].map((button) => button.getAttribute("aria-label")))
+        .toEqual(["Save comment", "Complete", "Delete", "Close"]);
+      expect([...editor.querySelectorAll("button")].every((button) =>
+        button.textContent === "" && !!button.querySelector("svg")
+      )).toBe(true);
       expect({ left: editor.style.left, top: editor.style.top }).toEqual({
         left: "422px",
         top: "124px",
@@ -225,6 +236,47 @@ describe("client runtime", () => {
       expect({ left: editor.style.left, top: editor.style.top }).toEqual({
         left: "682px",
         top: "558px",
+      });
+    } finally {
+      mounted.unmount();
+      target.remove();
+    }
+  });
+
+  it("positions the icon-only composer beside its target and clamps it on scroll", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(window, "innerWidth", "get").mockReturnValue(1000);
+    vi.spyOn(window, "innerHeight", "get").mockReturnValue(800);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this.classList.contains("af-composer")) return new DOMRect(0, 0, 310, 160);
+      return new DOMRect();
+    });
+    primitives.getElementBounds.mockReturnValue({ x: 420, y: 90, width: 120, height: 30 });
+    const target = document.createElement("button");
+    document.body.append(target);
+    const mounted = await mountAgentFeedback({ transport: new MemoryTaskTransport() });
+
+    try {
+      mounted.api.commands.capture.startPick();
+      target.click();
+      const composer = document.getElementById("agent-feedback-root")!
+        .shadowRoot!.querySelector<HTMLElement>(".af-composer")!;
+      expect({ left: composer.style.left, top: composer.style.top }).toEqual({
+        left: "420px",
+        top: "128px",
+      });
+      expect([...composer.querySelectorAll("button")].map((button) => button.getAttribute("aria-label")))
+        .toEqual(["Cancel", "Save annotation"]);
+      expect([...composer.querySelectorAll("button")].every((button) =>
+        button.textContent === "" && !!button.querySelector("svg")
+      )).toBe(true);
+
+      primitives.getElementBounds.mockReturnValue({ x: 950, y: 740, width: 80, height: 28 });
+      window.dispatchEvent(new Event("scroll"));
+      await vi.runAllTimersAsync();
+      expect({ left: composer.style.left, top: composer.style.top }).toEqual({
+        left: "682px",
+        top: "572px",
       });
     } finally {
       mounted.unmount();
@@ -268,10 +320,8 @@ describe("client runtime", () => {
     const mounted = await mountAgentFeedback({ transport: new MemoryTaskTransport() });
     mounted.api.commands.capture.startPick();
 
-    const annotations = document
-      .getElementById("agent-feedback-root")!
-      .shadowRoot!
-      .querySelector<HTMLButtonElement>('[aria-label^="Annotations"]')!;
+    const shadow = document.getElementById("agent-feedback-root")!.shadowRoot!;
+    const annotations = shadow.querySelector<HTMLButtonElement>('[aria-label^="Annotations"]')!;
     annotations.dispatchEvent(new MouseEvent("click", {
       bubbles: true,
       composed: true,
@@ -288,6 +338,14 @@ describe("client runtime", () => {
     expect(mounted.api.getSnapshot().captureMode).toBe("pick");
     expect(mounted.api.getSnapshot().openPanel).toBe("list");
     expect(document.getElementById("agent-feedback-root")!.shadowRoot!.querySelector(".af-composer")).toBeNull();
+    shadow.querySelector<HTMLButtonElement>('[aria-label^="Annotations"]')!.click();
+    shadow.querySelector<HTMLButtonElement>('[aria-label^="Annotations"]')!
+      .dispatchEvent(new KeyboardEvent("keydown", {
+        bubbles: true,
+        composed: true,
+        key: "Escape",
+      }));
+    expect(mounted.api.getSnapshot().captureMode).toBe("idle");
     mounted.unmount();
     pageTarget.remove();
   });
@@ -359,7 +417,12 @@ describe("client runtime", () => {
         id: "runtime-action",
         group: "host" as const,
         label: "Runtime action",
-        icon: () => null,
+        icon: ({ className, size }) => createElement("svg", {
+          className,
+          width: size,
+          height: size,
+          "data-runtime-icon": "",
+        }),
         kind: "action" as const,
         shortcut: { key: "R", code: "KeyR", primary: true, alt: true, shift: false },
         execute,
@@ -380,6 +443,8 @@ describe("client runtime", () => {
     const shadow = document.getElementById("agent-feedback-root")!.shadowRoot!;
     const action = shadow.querySelector<HTMLButtonElement>('[aria-label^="Runtime action"]')!;
     expect(action.getAttribute("aria-label")).toContain("Ctrl+Alt+R");
+    expect(action.querySelector("[data-runtime-icon]")).not.toBeNull();
+    expect(action.textContent).toBe("");
     expect(mounted.api.getSnapshot().shortcuts.find(({ id }) => id === "runtime-action")?.formatted).toBe("Ctrl+Alt+R");
     mounted.api.commands.panels.open("help");
     expect(shadow.querySelector('[aria-label="Shortcut help"]')?.textContent).toContain("Ctrl+Alt+R");

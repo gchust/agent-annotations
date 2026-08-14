@@ -42,7 +42,7 @@ test("external extension shares the public registry and survives HMR", async ({ 
   if (evidenceRoot) {
     await page.screenshot({ path: path.join(evidenceRoot, "shortcut-help.png") });
   }
-  await shadow(page, '[aria-label="Shortcut help"] button:has-text("Close")').click();
+  await shadow(page, '[aria-label="Shortcut help"] button[aria-label="Close"]').click();
 
   await shadow(page, '[data-action-id="list"]').click();
   await expect(shadow(page, '[aria-label="Annotation list"]')).toBeVisible();
@@ -65,7 +65,7 @@ test("external extension shares the public registry and survives HMR", async ({ 
   await shadow(page, '[data-action-id="pick"]').click();
   await page.locator("#demo-target").click();
   await shadow(page, '[aria-label="Annotation comment"]').fill("Keep Demo data safe");
-  await shadow(page, 'button:has-text("Save annotation")').click();
+  await shadow(page, 'button[aria-label="Save annotation"]').click();
   await expect.poll(() => page.evaluate(() =>
     window.__demoExtension?.studio?.getSnapshot().task.annotations[0]?.extensions
   )).toEqual({
@@ -77,6 +77,7 @@ test("external extension shares the public registry and survives HMR", async ({ 
   await shadow(page, '[data-action-id="copy"]').click();
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText()))
     .toContain("# Agent Feedback Task");
+  await page.locator("main").click();
   await page.keyboard.press("Control+Alt+KeyJ");
   await expect.poll(() => page.evaluate(() => window.__demoExtension?.actionCount)).toBe(1);
   const json = JSON.parse(await page.evaluate(() => navigator.clipboard.readText()));
@@ -112,6 +113,7 @@ test("external extension shares the public registry and survives HMR", async ({ 
         ?.querySelectorAll('[data-action-id="demo-copy-json"]').length,
     }))).toEqual({ setup: 2, dispose: 1, buttons: 1 });
     const beforeAction = await page.evaluate(() => window.__demoExtension?.actionCount);
+    await page.locator("main").click();
     await page.keyboard.press("Control+Alt+KeyJ");
     await expect.poll(() => page.evaluate(() => window.__demoExtension?.actionCount))
       .toBe((beforeAction ?? 0) + 1);

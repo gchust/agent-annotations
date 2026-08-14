@@ -27,7 +27,7 @@ test("packed browser to file to CLI to browser loop, HMR and session security", 
   await shadow(page, 'button[aria-label^="Pick"]').click();
   await page.locator("#target").click();
   await shadow(page, '[aria-label="Annotation comment"]').fill("Make target purple");
-  await shadow(page, 'button:has-text("Save annotation")').click();
+  await shadow(page, 'button[aria-label="Save annotation"]').click();
   const taskPath = path.join(runtimeRoot, "tasks/active-task.json");
   await expect.poll(() => JSON.parse(readFileSync(taskPath, "utf8")).annotations.length).toBe(1);
   const task = JSON.parse(readFileSync(taskPath, "utf8"));

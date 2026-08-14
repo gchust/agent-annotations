@@ -12,7 +12,7 @@ const save = async (page: import("@playwright/test").Page, target: import("@play
   await shadow(page, '[aria-label^="Pick"]').click();
   await target.click();
   await shadow(page, '[aria-label="Annotation comment"]').fill(comment);
-  await shadow(page, 'button:has-text("Save annotation")').click();
+  await shadow(page, 'button[aria-label="Save annotation"]').click();
   await expect.poll(() => JSON.parse(readFileSync(taskPath, "utf8")).annotations.length).toBe(expected);
 };
 
