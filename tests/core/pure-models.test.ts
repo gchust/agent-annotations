@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { AgentFeedbackAnnotation } from "../../src/types/index.js";
 
@@ -27,6 +27,20 @@ describe("plain-data selection, placement and shortcut definitions", () => {
       /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
     );
     expect(second).not.toBe(first);
+  });
+
+  it("creates secure IDs when randomUUID is unavailable on LAN HTTP", () => {
+    vi.stubGlobal("crypto", {
+      getRandomValues(bytes: Uint8Array) {
+        bytes.set(Array.from({ length: 16 }, (_, index) => index));
+        return bytes;
+      },
+    });
+    try {
+      expect(createAgentFeedbackId()).toBe("00010203-0405-4607-8809-0a0b0c0d0e0f");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("selects open annotations while preserving full-order display numbers", () => {
