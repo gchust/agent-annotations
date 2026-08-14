@@ -106,6 +106,14 @@ describe("serve-only Vite plugin", () => {
     expect(transform.call({ getCombinedSourcemap: () => map }, "code", a, { ssr: true })).toBeUndefined();
   });
 
+  it("injects the virtual client under the resolved Vite base", () => {
+    const { root } = fixture();
+    const plugin = agentFeedback({ root });
+    (plugin.configResolved as Function).call({} as never, { root, base: "/x/main/" });
+    const tags = (plugin.transformIndexHtml as Function).call({} as never, "", {} as never);
+    expect(tags[0].attrs.src).toBe("/x/main/@id/__x00__virtual:agent-feedback/client");
+  });
+
   it("serves distinct file URL sources after React transforms", async () => {
     const { root, a, b } = fixture();
     const server = await createServer({

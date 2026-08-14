@@ -105,6 +105,7 @@ export default function agentFeedback(
   let sourcePaths = createSourcePathService(root);
   let store = new FileTaskStore(runtimeRoot);
   let closeInstalled = false;
+  let viteBase = "/";
 
   if (allowRemote) {
     console.warn(
@@ -128,6 +129,7 @@ export default function agentFeedback(
     name: "agent-feedback",
     apply: "serve",
     configResolved(config) {
+      viteBase = config.base;
       root = path.resolve(options.root ?? config.root);
       realRoot = realpathSync(root);
       runtimeRoot = path.resolve(root, options.dir ?? ".agent-feedback");
@@ -220,7 +222,7 @@ export default function agentFeedback(
         tag: "script",
         attrs: {
           type: "module",
-          src: "/@id/__x00__virtual:agent-feedback/client",
+          src: `${viteBase}@id/__x00__virtual:agent-feedback/client`,
         },
         injectTo: "head",
       }];
