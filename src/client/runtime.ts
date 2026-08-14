@@ -246,14 +246,23 @@ export async function mountAgentFeedback(
     const value = snapshot();
     for (const listener of listeners) listener(value);
   };
+  const renderStatus = () => {
+    root.querySelector(".af-status")?.remove();
+    if (!status) return;
+    const toast = document.createElement("div");
+    toast.className = "af-status";
+    toast.setAttribute("role", "status");
+    toast.textContent = status;
+    root.append(toast);
+  };
   const setStatus = (message: string) => {
     if (destroyed) return;
     status = message;
-    render();
+    renderStatus();
     scheduleTimer(() => {
       if (status === message) {
         status = "";
-        render();
+        renderStatus();
       }
     }, 1800);
   };
@@ -641,6 +650,24 @@ export async function mountAgentFeedback(
     scheduleFrame(() => textarea.focus());
   };
 
+  const positionEditor = () => {
+    const editor = root.querySelector<HTMLElement>(".af-editor");
+    const marker = Array.from(root.querySelectorAll<HTMLElement>(".af-marker"))
+      .find((node) => node.dataset.annotationId === editingId);
+    if (!editor || !marker || marker.hidden) return;
+    const markerRect = marker.getBoundingClientRect();
+    const editorRect = editor.getBoundingClientRect();
+    const edge = 8;
+    const maxLeft = Math.max(edge, innerWidth - editorRect.width - edge);
+    const maxTop = Math.max(edge, innerHeight - editorRect.height - edge);
+    const below = markerRect.bottom + edge;
+    const preferredTop = below + editorRect.height <= innerHeight - edge
+      ? below
+      : markerRect.top - edge - editorRect.height;
+    editor.style.left = `${Math.min(Math.max(edge, markerRect.left), maxLeft)}px`;
+    editor.style.top = `${Math.min(Math.max(edge, preferredTop), maxTop)}px`;
+  };
+
   const renderEditor = () => {
     const annotation = task.annotations.find((entry) => entry.annotationId === editingId);
     if (!annotation) return;
@@ -672,11 +699,21 @@ export async function mountAgentFeedback(
     surface.append(textarea, actions);
     surface.addEventListener("submit", async (event) => {
       event.preventDefault();
-      await mutate([{ op: "update", annotationId: annotation.annotationId, comment: textarea.value }]);
-      if (destroyed) return;
-      setStatus("Comment saved");
+      save.disabled = true;
+      try {
+        await mutate([{ op: "update", annotationId: annotation.annotationId, comment: textarea.value }]);
+        if (destroyed) return;
+        editingId = null;
+        render();
+        setStatus("Comment saved");
+      } catch (error) {
+        if (destroyed) return;
+        save.disabled = false;
+        setStatus(error instanceof Error ? error.message : "Save failed");
+      }
     });
     root.append(surface);
+    positionEditor();
   };
 
   const renderPanel = () => {
@@ -808,13 +845,7 @@ export async function mountAgentFeedback(
       root.append(fallback);
       scheduleFrame(() => textarea.select());
     }
-    if (status) {
-      const toast = document.createElement("div");
-      toast.className = "af-status";
-      toast.setAttribute("role", "status");
-      toast.textContent = status;
-      root.append(toast);
-    }
+    renderStatus();
     syncMarkerTracking(markerTargets);
   };
 
@@ -1037,6 +1068,7 @@ export async function mountAgentFeedback(
         marker.hidden = !anchor;
         if (anchor) Object.assign(marker.style, { left: `${anchor.x}px`, top: `${anchor.y}px` });
       }
+      positionEditor();
       markerRefreshes += 1;
       hostElement.dataset.markerRefreshes = String(markerRefreshes);
       if (resolved.some((target) => !trackedMarkerTargets.has(target))) {

@@ -189,6 +189,78 @@ describe("client runtime", () => {
     mounted.unmount();
   });
 
+  it("positions the editor beside its marker and clamps it after viewport changes", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(window, "innerWidth", "get").mockReturnValue(1000);
+    vi.spyOn(window, "innerHeight", "get").mockReturnValue(800);
+    let markerRect = new DOMRect(422, 88, 28, 28);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this.classList.contains("af-marker")) return markerRect;
+      if (this.classList.contains("af-editor")) return new DOMRect(0, 0, 310, 174);
+      return new DOMRect();
+    });
+    const target = document.createElement("button");
+    target.id = "position-target";
+    document.body.append(target);
+    const mounted = await mountAgentFeedback({
+      transport: new MemoryTaskTransport(taskFixture({
+        annotations: [annotationFixture({
+          targets: [targetFixture({ selector: "#position-target" })],
+        })],
+      })),
+    });
+
+    try {
+      mounted.api.commands.markers.focus("ann-1");
+      const editor = document.getElementById("agent-feedback-root")!
+        .shadowRoot!.querySelector<HTMLElement>(".af-editor")!;
+      expect({ left: editor.style.left, top: editor.style.top }).toEqual({
+        left: "422px",
+        top: "124px",
+      });
+
+      markerRect = new DOMRect(950, 740, 28, 28);
+      window.dispatchEvent(new Event("resize"));
+      await vi.runAllTimersAsync();
+      expect({ left: editor.style.left, top: editor.style.top }).toEqual({
+        left: "682px",
+        top: "558px",
+      });
+    } finally {
+      mounted.unmount();
+      target.remove();
+    }
+  });
+
+  it("keeps failed comment edits retryable and closes the editor after persistence", async () => {
+    const transport = new MemoryTaskTransport(taskFixture());
+    const mutate = vi.spyOn(transport, "mutate")
+      .mockRejectedValueOnce(new Error("revision conflict"));
+    const mounted = await mountAgentFeedback({ transport });
+    const shadow = document.getElementById("agent-feedback-root")!.shadowRoot!;
+
+    mounted.api.commands.markers.focus("ann-1");
+    const form = shadow.querySelector<HTMLFormElement>(".af-editor")!;
+    const textarea = form.querySelector<HTMLTextAreaElement>("textarea")!;
+    const save = form.querySelector<HTMLButtonElement>('[type="submit"]')!;
+    textarea.value = "Retained draft";
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    expect(save.disabled).toBe(true);
+
+    await vi.waitFor(() => expect(shadow.querySelector('[role="status"]')?.textContent)
+      .toBe("revision conflict"));
+    expect(shadow.querySelector<HTMLTextAreaElement>(".af-editor textarea")?.value)
+      .toBe("Retained draft");
+    expect(save.disabled).toBe(false);
+
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(shadow.querySelector(".af-editor")).toBeNull());
+    expect(shadow.querySelector('[role="status"]')?.textContent).toBe("Comment saved");
+    expect((await transport.read()).annotations[0]?.comment).toBe("Retained draft");
+    expect(mutate).toHaveBeenCalledTimes(2);
+    mounted.unmount();
+  });
+
   it("does not inspect capture events from inside the ignored shadow host", async () => {
     const pageTarget = document.createElement("button");
     document.body.append(pageTarget);
