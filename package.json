@@ -1,5 +1,5 @@
 {
-  "name": "@gchust/agent-feedback",
+  "name": "@gchust/agent-annotations",
   "displayName": "Agent Feedback",
   "description": "Developer-only visual annotations and Code Agent feedback for React/Vite applications",
   "version": "0.1.0-alpha.0",
@@ -13,7 +13,7 @@
   },
   "homepage": "https://github.com/gchust/agent-feedback#readme",
   "keywords": [
-    "agent-feedback",
+    "agent-annotations",
     "annotations",
     "code-agent",
     "developer-tools",

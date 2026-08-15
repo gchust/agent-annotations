@@ -7,7 +7,7 @@ Developer-only visual annotations and Code Agent feedback for React/Vite applica
 Agent Feedback requires Node 20 or newer, React 19, React DOM 19, and Vite 6:
 
 ```sh
-pnpm add -D @gchust/agent-feedback
+pnpm add -D @gchust/agent-annotations
 ```
 
 The package is ESM-only. Vite is optional when the root runtime is embedded
@@ -19,7 +19,7 @@ Register the development-only plugin; it injects the client automatically, so
 the application entry point needs no Agent Feedback code:
 
 ```ts
-import agentFeedback from "@gchust/agent-feedback/vite";
+import agentFeedback from "@gchust/agent-annotations/vite";
 import { defineConfig } from "vite";
 
 export default defineConfig({
@@ -29,15 +29,15 @@ export default defineConfig({
 
 The package root exports the host-neutral `agent-feedback.task.v1` core and
 `mountAgentFeedback()` browser runtime. Public contracts are also available
-from `@gchust/agent-feedback/types`; `MemoryTaskTransport` is available only
-from `@gchust/agent-feedback/testing` for tests and playgrounds.
+from `@gchust/agent-annotations/types`; `MemoryTaskTransport` is available only
+from `@gchust/agent-annotations/testing` for tests and playgrounds.
 
 ## Minimal client extension
 
 Create `src/feedback-extension.ts` using only the public extension entry:
 
 ```ts
-import { defineClientExtension } from "@gchust/agent-feedback/extension";
+import { defineClientExtension } from "@gchust/agent-annotations/extension";
 
 export default defineClientExtension({
   id: "example.copy",
@@ -57,7 +57,7 @@ Register its absolute browser-module path with the Vite plugin:
 
 ```ts
 import path from "node:path";
-import agentFeedback from "@gchust/agent-feedback/vite";
+import agentFeedback from "@gchust/agent-annotations/vite";
 import { defineConfig } from "vite";
 
 export default defineConfig({

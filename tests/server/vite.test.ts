@@ -34,8 +34,8 @@ describe("serve-only Vite plugin", () => {
     expect(resolveId.call({} as never, "virtual:agent-feedback/client", undefined, {} as never)).toBe("\0virtual:agent-feedback/client");
     const loaded = load.call({} as never, "\0virtual:agent-feedback/client", {} as never);
     expect(String(loaded)).toContain("/tmp/demo/extension.ts");
-    expect(String(loaded)).toContain('from "@gchust/agent-feedback"');
-    expect(String(loaded)).toContain('from "@gchust/agent-feedback/vite/client"');
+    expect(String(loaded)).toContain('from "@gchust/agent-annotations"');
+    expect(String(loaded)).toContain('from "@gchust/agent-annotations/vite/client"');
     expect(String(loaded)).toContain("mountAgentFeedback");
     expect(String(loaded)).toContain("mountAgentFeedback({ transport, extensions })");
     expect(String(loaded)).toContain("window[key]?.()");

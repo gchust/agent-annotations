@@ -2,6 +2,8 @@
 
 ## 0.1.0-alpha.0 - 2026-08-13
 
+- Ships as `@gchust/agent-annotations`; the `agent-feedback` CLI and task schema
+  identifiers remain unchanged.
 - Added the host-neutral `agent-feedback.task.v1` schema, mutations, formatting,
   redaction, React runtime, Vite plugin, file transport, CLI, and read-only MCP.
 - Added the public client Extension Registry and built-in toolbar contributions.

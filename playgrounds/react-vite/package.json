@@ -9,7 +9,7 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
-    "@gchust/agent-feedback": "../..",
+    "@gchust/agent-annotations": "../..",
     "@playwright/test": "1.62.1",
     "@vitejs/plugin-react": "4.4.1",
     "react": "19.2.8",

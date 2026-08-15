@@ -2,9 +2,9 @@ import { readFileSync } from "node:fs";
 
 const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
 for (const text of [
-  "pnpm add -D @gchust/agent-feedback",
-  'import agentFeedback from "@gchust/agent-feedback/vite"',
-  'import { defineClientExtension } from "@gchust/agent-feedback/extension"',
+  "pnpm add -D @gchust/agent-annotations",
+  'import agentFeedback from "@gchust/agent-annotations/vite"',
+  'import { defineClientExtension } from "@gchust/agent-annotations/extension"',
   "agent-feedback list",
   "agent-feedback complete <annotation-id> --verified --summary <text>",
   "agent-feedback reopen <annotation-id>",

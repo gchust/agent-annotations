@@ -147,8 +147,8 @@ export default function agentFeedback(
         .join("\n");
       const values = extensions.map((_, index) => `extension${index}.default ?? extension${index}`).join(", ");
       return [
-        `import { mountAgentFeedback } from "@gchust/agent-feedback";`,
-        `import { HttpTaskTransport } from "@gchust/agent-feedback/vite/client";`,
+        `import { mountAgentFeedback } from "@gchust/agent-annotations";`,
+        `import { HttpTaskTransport } from "@gchust/agent-annotations/vite/client";`,
         imports,
         `const config = ${JSON.stringify({ endpoint, token })};`,
         `const extensions = [${values}];`,

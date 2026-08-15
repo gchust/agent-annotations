@@ -3,7 +3,7 @@ import {
   defineClientExtension,
   type PanelContribution,
   type StudioPublicApi,
-} from "@gchust/agent-feedback/extension";
+} from "@gchust/agent-annotations/extension";
 
 type DemoState = {
   setupCount: number;

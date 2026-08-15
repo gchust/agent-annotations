@@ -8,7 +8,7 @@ importers:
 
   .:
     dependencies:
-      '@gchust/agent-feedback':
+      '@gchust/agent-annotations':
         specifier: ../..
         version: link:../..
       '@playwright/test':

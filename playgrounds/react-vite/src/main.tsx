@@ -1,5 +1,5 @@
-import { mountAgentFeedback, type MountedAgentFeedback } from "@gchust/agent-feedback";
-import { MemoryTaskTransport } from "@gchust/agent-feedback/testing";
+import { mountAgentFeedback, type MountedAgentFeedback } from "@gchust/agent-annotations";
+import { MemoryTaskTransport } from "@gchust/agent-annotations/testing";
 import React, { forwardRef, memo, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 

@@ -1,6 +1,6 @@
 # API reference
 
-## `@gchust/agent-feedback`
+## `@gchust/agent-annotations`
 
 - `mountAgentFeedback(options)` mounts the React runtime and returns
   `{ api, unmount }`. `options.transport` implements `TaskTransport`; optional
@@ -14,7 +14,7 @@
 - The remaining root exports are pure ID, selection, placement, selector, and
   shortcut helpers plus their public types.
 
-## `@gchust/agent-feedback/vite`
+## `@gchust/agent-annotations/vite`
 
 The default export is `agentFeedback(options)`. Options are `root`, `dir`,
 `endpoint`, `allowRemote`, and absolute browser-module paths in
@@ -22,7 +22,7 @@ The default export is `agentFeedback(options)`. Options are `root`, `dir`,
 `FileTaskStore` and `createSourcePathService` are exported for controlled Node
 integrations.
 
-## `@gchust/agent-feedback/extension`
+## `@gchust/agent-annotations/extension`
 
 - `defineClientExtension(extension)` defines a public extension without global
   mutation.
@@ -33,17 +33,17 @@ integrations.
 - `StudioPublicApi` exposes snapshots, subscriptions, and commands only. It does
   not expose React setters, reducers, live DOM, or inspection internals.
 
-## `@gchust/agent-feedback/types`
+## `@gchust/agent-annotations/types`
 
 Exports the JSON-safe task, annotation, source, evidence, transport, runtime,
 extension, contribution, and public Studio API types.
 
-## `@gchust/agent-feedback/testing`
+## `@gchust/agent-annotations/testing`
 
 Exports `MemoryTaskTransport` for tests and local playgrounds. It is not a
 persistent production transport.
 
-## `@gchust/agent-feedback/vite/client`
+## `@gchust/agent-annotations/vite/client`
 
 Exports `HttpTaskTransport`, the browser transport used by the Vite virtual
 client. Applications normally receive it through automatic development-server
