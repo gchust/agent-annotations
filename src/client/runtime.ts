@@ -5,6 +5,7 @@ import {
   matchesAgentAnnotationsShortcut,
   redactAgentAnnotationsTask,
   redactAgentAnnotationsText,
+  resolveAgentAnnotationsPlacement,
   toAgentAnnotationsDocumentRegion,
 } from "../core/index.js";
 import { ClientExtensionRegistry } from "../extension/index.js";
@@ -530,6 +531,13 @@ export async function mountAgentAnnotations(
     tooltipTimer = null;
     root.querySelector(".aa-tooltip")?.remove();
   };
+  const positionTooltip = (trigger: HTMLElement) => {
+    const tooltip = root.querySelector<HTMLElement>(".aa-tooltip");
+    if (!tooltip) return;
+    const rect = trigger.getBoundingClientRect();
+    tooltip.style.left = `${Math.max(4, rect.left)}px`;
+    tooltip.style.top = `${Math.max(4, rect.top - 34)}px`;
+  };
   const showTooltip = (trigger: HTMLElement) => {
     hideTooltip();
     tooltipTimer = scheduleTimer(() => {
@@ -538,10 +546,8 @@ export async function mountAgentAnnotations(
       tooltip.className = "aa-tooltip";
       tooltip.role = "tooltip";
       tooltip.textContent = trigger.getAttribute("aria-label") ?? "";
-      const rect = trigger.getBoundingClientRect();
-      tooltip.style.left = `${Math.max(4, rect.left)}px`;
-      tooltip.style.top = `${Math.max(4, rect.top - 34)}px`;
       root.append(tooltip);
+      positionTooltip(trigger);
     }, 300);
   };
 
@@ -765,6 +771,30 @@ export async function mountAgentAnnotations(
     positionEditor();
   };
 
+  const positionPanel = () => {
+    const dock = root.querySelector<HTMLElement>(".aa-dock");
+    const panel = root.querySelector<HTMLElement>(".aa-panel");
+    const contribution = registry.getPanels().find(({ id }) => id === openPanel);
+    if (!dock || !panel || !contribution) return;
+    const dockRect = dock.getBoundingClientRect();
+    const panelRect = panel.getBoundingClientRect();
+    const placement = resolveAgentAnnotationsPlacement({
+      trigger: dockRect,
+      viewport: { width: innerWidth, height: innerHeight },
+      width: panelRect.width,
+      maxHeight: panelRect.height,
+      surfaceHeight: panelRect.height,
+      preferredSide: contribution.placement === "auto"
+        ? (dockRect.top >= innerHeight - dockRect.bottom ? "above" : "below")
+        : contribution.placement ?? "above",
+    });
+    Object.assign(panel.style, {
+      left: `${placement.left}px`,
+      top: `${placement.top}px`,
+      bottom: "auto",
+    });
+  };
+
   const renderPanel = () => {
     if (!openPanel) return;
     const contribution = registry.getPanels().find(({ id }) => id === openPanel);
@@ -790,6 +820,7 @@ export async function mountAgentAnnotations(
         })
       )
     );
+    positionPanel();
     if (focusPanel) {
       focusPanel = false;
       scheduleFrame(() => {
@@ -863,6 +894,8 @@ export async function mountAgentAnnotations(
       dock.style.left = `${dockPosition.left}px`;
       dock.style.top = `${dockPosition.top}px`;
       dock.style.bottom = "auto";
+      positionTooltip(grip);
+      positionPanel();
     });
     grip.addEventListener("pointerup", () => { drag = null; });
 
@@ -1198,6 +1231,7 @@ export async function mountAgentAnnotations(
   cleanups.push(stopMarkerTracking);
 
   const onViewport = () => {
+    positionPanel();
     if (markerObserver || editingId || composer) scheduleMarkerRefresh();
   };
   window.addEventListener("resize", onViewport);

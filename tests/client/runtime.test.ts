@@ -488,6 +488,57 @@ describe("client runtime", () => {
     mounted.unmount();
   });
 
+  it("keeps the drag tooltip and toolbar panels anchored to the dock", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(window, "innerWidth", "get").mockReturnValue(1000);
+    vi.spyOn(window, "innerHeight", "get").mockReturnValue(800);
+    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains("aa-dock") ? 420 : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains("aa-dock") ? 50 : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this.classList.contains("aa-dock")) {
+        return new DOMRect(Number.parseFloat(this.style.left) || 290, Number.parseFloat(this.style.top) || 730, 420, 50);
+      }
+      if (this.classList.contains("aa-grip")) {
+        const dock = this.parentElement!.getBoundingClientRect();
+        return new DOMRect(dock.left + 6, dock.top + 6, 34, 34);
+      }
+      if (this.classList.contains("aa-panel")) return new DOMRect(0, 0, 360, 200);
+      return new DOMRect();
+    });
+    const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport() });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    const grip = shadow.querySelector<HTMLButtonElement>(".aa-grip")!;
+    grip.setPointerCapture = vi.fn();
+
+    grip.dispatchEvent(new MouseEvent("mouseenter"));
+    vi.advanceTimersByTime(300);
+    expect({
+      left: shadow.querySelector<HTMLElement>(".aa-tooltip")?.style.left,
+      top: shadow.querySelector<HTMLElement>(".aa-tooltip")?.style.top,
+    }).toEqual({ left: "296px", top: "702px" });
+
+    grip.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, clientX: 300, clientY: 740 }));
+    grip.dispatchEvent(new MouseEvent("pointermove", { bubbles: true, clientX: 400, clientY: 640 }));
+    expect({
+      left: shadow.querySelector<HTMLElement>(".aa-tooltip")?.style.left,
+      top: shadow.querySelector<HTMLElement>(".aa-tooltip")?.style.top,
+    }).toEqual({ left: "396px", top: "602px" });
+
+    for (const label of ["Annotations", "Shortcut help"]) {
+      shadow.querySelector<HTMLButtonElement>(`[aria-label^="${label}"]`)!.click();
+      const panel = shadow.querySelector<HTMLElement>(".aa-panel")!;
+      expect({ left: panel.style.left, top: panel.style.top }).toEqual({
+        left: "390px",
+        top: "422px",
+      });
+    }
+    mounted.unmount();
+  });
+
   it("preserves built-in toolbar state parity", async () => {
     const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport() });
     const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
