@@ -112,6 +112,8 @@ describe("serve-only Vite plugin", () => {
     (plugin.configResolved as Function).call({} as never, { root, base: "/x/main/" });
     const tags = (plugin.transformIndexHtml as Function).call({} as never, "", {} as never);
     expect(tags[0].attrs.src).toBe("/x/main/@id/__x00__virtual:agent-annotations/client");
+    const loaded = (plugin.load as Function).call({} as never, "\0virtual:agent-annotations/client", {} as never);
+    expect(String(loaded)).toContain('"endpoint":"/x/main/__agent-annotations"');
   });
 
   it("serves distinct file URL sources after React transforms", async () => {

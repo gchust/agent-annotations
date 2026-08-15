@@ -106,6 +106,7 @@ export default function agentAnnotations(
   let store = new FileTaskStore(runtimeRoot);
   let closeInstalled = false;
   let viteBase = "/";
+  let resolvedEndpoint = endpoint;
 
   if (allowRemote) {
     console.warn(
@@ -117,7 +118,7 @@ export default function agentAnnotations(
     if (!address || typeof address === "string") return;
     const origin = `http://127.0.0.1:${address.port}`;
     store.writeSession({
-      endpoint,
+      endpoint: resolvedEndpoint,
       origin,
       pid: process.pid,
       startedAt: new Date().toISOString(),
@@ -130,6 +131,7 @@ export default function agentAnnotations(
     apply: "serve",
     configResolved(config) {
       viteBase = config.base;
+      resolvedEndpoint = `${viteBase.replace(/\/$/, "")}${endpoint}`;
       root = path.resolve(options.root ?? config.root);
       realRoot = realpathSync(root);
       runtimeRoot = path.resolve(root, options.dir ?? ".agent-annotations");
@@ -150,7 +152,7 @@ export default function agentAnnotations(
         `import { mountAgentAnnotations } from "@gchust/agent-annotations";`,
         `import { HttpTaskTransport } from "@gchust/agent-annotations/vite/client";`,
         imports,
-        `const config = ${JSON.stringify({ endpoint, token })};`,
+        `const config = ${JSON.stringify({ endpoint: resolvedEndpoint, token })};`,
         `const extensions = [${values}];`,
         "const key = Symbol.for('agent-annotations.mount');",
         "window[key]?.();",
@@ -250,7 +252,7 @@ export default function agentAnnotations(
       }
       server.middlewares.use(async (request, response, next) => {
         const url = new URL(request.url ?? "/", "http://agent-annotations.local");
-        if (!url.pathname.startsWith(`${endpoint}/`) && url.pathname !== endpoint) return next();
+        if (!url.pathname.startsWith(`${resolvedEndpoint}/`) && url.pathname !== resolvedEndpoint) return next();
         if (!isAgentAnnotationsRequestAllowed(
           request.socket.remoteAddress,
           allowRemote,
@@ -259,10 +261,10 @@ export default function agentAnnotations(
           request
         )) return json(response, 404, { error: "not_found" });
         try {
-          if (url.pathname === `${endpoint}/task` && request.method === "GET") {
+          if (url.pathname === `${resolvedEndpoint}/task` && request.method === "GET") {
             return json(response, 200, { task: store.read() ?? store.create() });
           }
-          if (url.pathname === `${endpoint}/task` && request.method === "POST") {
+          if (url.pathname === `${resolvedEndpoint}/task` && request.method === "POST") {
             return json(response, 200, {
               task: await store.mutate(
                 await body(request) as never,
@@ -270,7 +272,7 @@ export default function agentAnnotations(
               ),
             });
           }
-          if (url.pathname === `${endpoint}/revision` && request.method === "GET") {
+          if (url.pathname === `${resolvedEndpoint}/revision` && request.method === "GET") {
             const task = store.read();
             return json(response, 200, {
               taskRevision: task?.taskRevision ?? null,
@@ -278,10 +280,10 @@ export default function agentAnnotations(
               sourceFiles: task ? sourcePaths.files(task) : [],
             });
           }
-          if (url.pathname === `${endpoint}/heartbeat` && request.method === "POST") {
+          if (url.pathname === `${resolvedEndpoint}/heartbeat` && request.method === "POST") {
             return json(response, 200, { ok: true, receivedAt: new Date().toISOString() });
           }
-          if (url.pathname === `${endpoint}/source` && request.method === "POST") {
+          if (url.pathname === `${resolvedEndpoint}/source` && request.method === "POST") {
             const input = await body(request) as { filePath?: unknown };
             return json(response, 200, {
               filePath: typeof input.filePath === "string"
@@ -289,7 +291,7 @@ export default function agentAnnotations(
                 : null,
             });
           }
-          if (url.pathname === `${endpoint}/evidence` && request.method === "POST") {
+          if (url.pathname === `${resolvedEndpoint}/evidence` && request.method === "POST") {
             const input = await body(request, MAX_EVIDENCE_BODY_BYTES) as {
               taskId: string;
               expectedRevision: number;
