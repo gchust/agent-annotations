@@ -67,9 +67,9 @@ export const runArchitectureAudit = (root: string): { ok: boolean; problems: Aud
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const result = runArchitectureAudit(process.cwd());
-  if (result.ok) console.log("[agent-feedback] architecture audit PASS");
+  if (result.ok) console.log("[agent-annotations] architecture audit PASS");
   else {
-    console.error("[agent-feedback] architecture audit FAIL");
+    console.error("[agent-annotations] architecture audit FAIL");
     for (const problem of result.problems) console.error(`  [${problem.check}] ${problem.file}:${problem.line}`);
     process.exitCode = 1;
   }

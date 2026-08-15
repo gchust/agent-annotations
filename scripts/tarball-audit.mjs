@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 const root = process.cwd();
-const directory = mkdtempSync(path.join(tmpdir(), "agent-feedback-pack-audit-"));
+const directory = mkdtempSync(path.join(tmpdir(), "agent-annotations-pack-audit-"));
 try {
   const packed = JSON.parse(execFileSync("pnpm", ["pack", "--json", "--pack-destination", directory], {
     cwd: root,
@@ -33,7 +33,7 @@ try {
   const size = statSync(packed.filename).size;
   if (size > 200_000) throw new Error(`tarball exceeds 200000-byte gate: ${size}`);
   if (JSON.stringify(manifest).includes("workspace:")) throw new Error("workspace protocol in package metadata");
-  console.log(`[agent-feedback] tarball audit PASS (${files.length} files, ${size} bytes)`);
+  console.log(`[agent-annotations] tarball audit PASS (${files.length} files, ${size} bytes)`);
 } finally {
   rmSync(directory, { recursive: true, force: true });
 }

@@ -59,7 +59,7 @@ const sanitize = (source: Element, clone: Element): void => {
   if (!MEDIA.has(source.tagName)) return;
   const rect = source.getBoundingClientRect();
   for (const name of ["src", "srcset", "poster", "data"]) clone.removeAttribute(name);
-  clone.setAttribute("data-agent-feedback-media-placeholder", source.tagName.toLowerCase());
+  clone.setAttribute("data-agent-annotations-media-placeholder", source.tagName.toLowerCase());
   clone.setAttribute(
     "style",
     `${clone.getAttribute("style") ?? ""};display:inline-block;width:${rect.width}px;height:${rect.height}px;background:#e5e7eb`
@@ -79,7 +79,7 @@ export function cloneScreenshotRoot(root: Element): Element {
     clones.push(cloneWalker.currentNode as Element);
   }
   for (let index = 0; index < sources.length; index += 1) sanitize(sources[index]!, clones[index]!);
-  clone.querySelector("#agent-feedback-root")?.remove();
+  clone.querySelector("#agent-annotations-root")?.remove();
   clone.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
   return clone;
 }

@@ -1,4 +1,4 @@
-export function createAgentFeedbackId(): string {
+export function createAgentAnnotationsId(): string {
   if (typeof globalThis.crypto.randomUUID === "function") {
     return globalThis.crypto.randomUUID();
   }

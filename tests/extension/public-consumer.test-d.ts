@@ -1,6 +1,6 @@
 import {
   defineClientExtension,
-  type AgentFeedbackExtensionContext,
+  type AgentAnnotationsExtensionContext,
   type PanelContribution,
   type StudioPublicApi,
   type ToolbarContribution,
@@ -49,7 +49,7 @@ const panel: PanelContribution = {
 defineClientExtension({
   id: "public-consumer",
   apiVersion: 1,
-  setup(context: AgentFeedbackExtensionContext) {
+  setup(context: AgentAnnotationsExtensionContext) {
     useStudio(context.studio);
     void context.transport.read();
   },
@@ -57,7 +57,7 @@ defineClientExtension({
   panels: [panel],
 });
 
-type DispatchLeak = Extract<keyof AgentFeedbackExtensionContext, "dispatch">;
+type DispatchLeak = Extract<keyof AgentAnnotationsExtensionContext, "dispatch">;
 // @ts-expect-error The public context cannot expose React.Dispatch.
 const noDispatch: DispatchLeak = "dispatch";
 void noDispatch;

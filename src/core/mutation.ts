@@ -1,30 +1,30 @@
 import type {
-  AgentFeedbackAnnotation,
-  AgentFeedbackMutationOperation,
-  AgentFeedbackMutationRequest,
-  AgentFeedbackMutationResult,
-  AgentFeedbackTask,
+  AgentAnnotation,
+  AgentAnnotationsMutationOperation,
+  AgentAnnotationsMutationRequest,
+  AgentAnnotationsMutationResult,
+  AgentAnnotationsTask,
 } from "../types/index.js";
 import {
   MAX_ANNOTATIONS,
   MAX_EVIDENCE_REFERENCES,
   setAnnotationExtension,
-  validateAgentFeedbackAnnotation,
-  validateAgentFeedbackTask,
+  validateAgentAnnotation,
+  validateAgentAnnotationsTask,
 } from "./schema.js";
 
 const MAX_MUTATION_OPERATIONS = 100;
 
 const findAnnotation = (
-  annotations: AgentFeedbackAnnotation[],
+  annotations: AgentAnnotation[],
   annotationId: string
 ): number =>
   annotations.findIndex((annotation) => annotation.annotationId === annotationId);
 
 const nextStatus = (
-  annotations: AgentFeedbackAnnotation[],
-  previous: AgentFeedbackTask["status"]
-): AgentFeedbackTask["status"] => {
+  annotations: AgentAnnotation[],
+  previous: AgentAnnotationsTask["status"]
+): AgentAnnotationsTask["status"] => {
   if (annotations.some((annotation) => annotation.status === "open")) {
     return "active";
   }
@@ -32,17 +32,17 @@ const nextStatus = (
 };
 
 const applyOperation = (
-  task: AgentFeedbackTask,
-  operation: AgentFeedbackMutationOperation,
+  task: AgentAnnotationsTask,
+  operation: AgentAnnotationsMutationOperation,
   completedAt: string
-): AgentFeedbackMutationResult => {
+): AgentAnnotationsMutationResult => {
   const annotations = task.annotations;
   switch (operation.op) {
     case "add": {
       if (annotations.length >= MAX_ANNOTATIONS) {
         return { ok: false, error: "annotation_limit" };
       }
-      if (!validateAgentFeedbackAnnotation(operation.annotation).ok) {
+      if (!validateAgentAnnotation(operation.annotation).ok) {
         return { ok: false, error: "invalid_annotation" };
       }
       if (
@@ -64,7 +64,7 @@ const applyOperation = (
       const next = annotations.map((annotation, current) =>
         current === index ? { ...annotation, comment: operation.comment } : annotation
       );
-      return validateAgentFeedbackAnnotation(next[index]).ok
+      return validateAgentAnnotation(next[index]).ok
         ? { ok: true, task: { ...task, annotations: next } }
         : { ok: false, error: "invalid_annotation" };
     }
@@ -81,7 +81,7 @@ const applyOperation = (
               )
             : annotation
         );
-        return validateAgentFeedbackAnnotation(next[index]).ok
+        return validateAgentAnnotation(next[index]).ok
           ? { ok: true, task: { ...task, annotations: next } }
           : { ok: false, error: "invalid_extension" };
       } catch {
@@ -124,7 +124,7 @@ const applyOperation = (
           ? { ...annotation, evidence: [...(annotation.evidence ?? []), operation.evidence] }
           : annotation
       );
-      return validateAgentFeedbackAnnotation(next[index]).ok
+      return validateAgentAnnotation(next[index]).ok
         ? { ok: true, task: { ...task, annotations: next } }
         : { ok: false, error: "invalid_annotation" };
     }
@@ -164,12 +164,12 @@ const applyOperation = (
   }
 };
 
-export function applyAgentFeedbackMutation(
-  task: AgentFeedbackTask,
-  request: AgentFeedbackMutationRequest,
+export function applyAgentAnnotationsMutation(
+  task: AgentAnnotationsTask,
+  request: AgentAnnotationsMutationRequest,
   updatedAt: string
-): AgentFeedbackMutationResult {
-  if (!validateAgentFeedbackTask(task).ok) {
+): AgentAnnotationsMutationResult {
+  if (!validateAgentAnnotationsTask(task).ok) {
     return { ok: false, error: "invalid_task" };
   }
   if (request.taskId !== task.taskId) {
@@ -209,7 +209,7 @@ export function applyAgentFeedbackMutation(
     taskRevision: task.taskRevision + 1,
     updatedAt,
   };
-  return validateAgentFeedbackTask(next).ok
+  return validateAgentAnnotationsTask(next).ok
     ? { ok: true, task: next }
     : { ok: false, error: "invalid_operation" };
 }

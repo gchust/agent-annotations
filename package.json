@@ -1,17 +1,17 @@
 {
   "name": "@gchust/agent-annotations",
-  "displayName": "Agent Feedback",
-  "description": "Developer-only visual annotations and Code Agent feedback for React/Vite applications",
+  "displayName": "Agent Annotations",
+  "description": "Developer-only visual annotations handed to Code Agents in React/Vite applications",
   "version": "0.1.0-alpha.0",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/gchust/agent-feedback.git"
+    "url": "git+https://github.com/gchust/agent-annotations.git"
   },
   "bugs": {
-    "url": "https://github.com/gchust/agent-feedback/issues"
+    "url": "https://github.com/gchust/agent-annotations/issues"
   },
-  "homepage": "https://github.com/gchust/agent-feedback#readme",
+  "homepage": "https://github.com/gchust/agent-annotations#readme",
   "keywords": [
     "agent-annotations",
     "annotations",
@@ -60,7 +60,7 @@
     }
   },
   "bin": {
-    "agent-feedback": "./dist/cli/index.mjs"
+    "agent-annotations": "./dist/cli/index.mjs"
   },
   "scripts": {
     "build": "tsdown",

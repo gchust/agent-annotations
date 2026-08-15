@@ -1,23 +1,23 @@
 import type {
-  AgentFeedbackAnnotation,
-  AgentFeedbackFormatOptions,
-  AgentFeedbackSourceLocation,
-  AgentFeedbackTarget,
-  AgentFeedbackTask,
+  AgentAnnotation,
+  AgentAnnotationsFormatOptions,
+  AgentAnnotationsSourceLocation,
+  AgentAnnotationsTarget,
+  AgentAnnotationsTask,
 } from "../types/index.js";
-import { parseAgentFeedbackTask } from "./schema.js";
+import { parseAgentAnnotationsTask } from "./schema.js";
 import {
-  agentFeedbackAnnotationDisplayNumber,
-  selectAgentFeedbackAnnotations,
+  agentAnnotationsAnnotationDisplayNumber,
+  selectAgentAnnotations,
 } from "./selectors.js";
 
-const formatSource = (source: AgentFeedbackSourceLocation): string =>
+const formatSource = (source: AgentAnnotationsSourceLocation): string =>
   `${source.filePath}:${source.lineNumber}:${source.columnNumber}${
     source.componentName ? ` (${source.componentName})` : ""
   }`;
 
 const formatTarget = (
-  target: AgentFeedbackTarget,
+  target: AgentAnnotationsTarget,
   index: number,
   targetCount: number
 ): string[] => {
@@ -39,11 +39,11 @@ const formatTarget = (
 };
 
 const formatAnnotation = (
-  task: AgentFeedbackTask,
-  annotation: AgentFeedbackAnnotation
+  task: AgentAnnotationsTask,
+  annotation: AgentAnnotation
 ): string[] => {
   const displayNumber =
-    agentFeedbackAnnotationDisplayNumber(task.annotations, annotation.annotationId) ??
+    agentAnnotationsAnnotationDisplayNumber(task.annotations, annotation.annotationId) ??
     1;
   const lines = [
     `### Annotation ${displayNumber}: [${annotation.kind}] ${annotation.annotationId}`,
@@ -77,17 +77,17 @@ const formatAnnotation = (
   return [...lines, ""];
 };
 
-export function formatAgentFeedbackTaskMarkdown(
+export function formatAgentAnnotationsTaskMarkdown(
   input: unknown,
-  options: Omit<AgentFeedbackFormatOptions, "format"> = {}
+  options: Omit<AgentAnnotationsFormatOptions, "format"> = {}
 ): string {
-  const task = parseAgentFeedbackTask(input);
-  const annotations = selectAgentFeedbackAnnotations(
+  const task = parseAgentAnnotationsTask(input);
+  const annotations = selectAgentAnnotations(
     task.annotations,
     options.annotations ?? "open"
   );
   const lines = [
-    `# Agent Feedback Task ${task.taskId}`,
+    `# Agent Annotations Task ${task.taskId}`,
     "",
     `- schema: ${task.schema}`,
     `- schemaVersion: ${task.schemaVersion}`,
@@ -105,15 +105,15 @@ export function formatAgentFeedbackTaskMarkdown(
   return lines.join("\n");
 }
 
-export function formatAgentFeedbackTaskJson(input: unknown): string {
-  return JSON.stringify(parseAgentFeedbackTask(input), null, 2);
+export function formatAgentAnnotationsTaskJson(input: unknown): string {
+  return JSON.stringify(parseAgentAnnotationsTask(input), null, 2);
 }
 
-export function formatAgentFeedbackTask(
+export function formatAgentAnnotationsTask(
   input: unknown,
-  options: AgentFeedbackFormatOptions = {}
+  options: AgentAnnotationsFormatOptions = {}
 ): string {
   return options.format === "json"
-    ? formatAgentFeedbackTaskJson(input)
-    : formatAgentFeedbackTaskMarkdown(input, options);
+    ? formatAgentAnnotationsTaskJson(input)
+    : formatAgentAnnotationsTaskMarkdown(input, options);
 }

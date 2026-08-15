@@ -10,7 +10,7 @@ const roots: string[] = [];
 const SOLE_PRIMITIVES_IMPORTER = "src/client/inspection-engine.ts";
 const primitives = "react-grab" + "/primitives";
 const fixture = (offender?: string) => {
-  const root = mkdtempSync(path.join(tmpdir(), "agent-feedback-audit-"));
+  const root = mkdtempSync(path.join(tmpdir(), "agent-annotations-audit-"));
   roots.push(root);
   for (const [file, content] of Object.entries({
     [SOLE_PRIMITIVES_IMPORTER]: `import { getElementContext } from "${primitives}";`,
@@ -29,7 +29,7 @@ describe("architecture audit", () => {
   it("passes a clean tree", () => expect(runArchitectureAudit(fixture()).ok).toBe(true));
 
   it("passes a packed consumer without package source", () => {
-    const root = mkdtempSync(path.join(tmpdir(), "agent-feedback-audit-packed-"));
+    const root = mkdtempSync(path.join(tmpdir(), "agent-annotations-audit-packed-"));
     roots.push(root);
     writeFileSync(path.join(root, "package.json"), '{"name":"packed-consumer"}');
     mkdirSync(path.join(root, "src"));

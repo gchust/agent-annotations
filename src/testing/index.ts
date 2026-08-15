@@ -1,32 +1,32 @@
-import { applyAgentFeedbackMutation } from "../core/mutation.js";
-import { createAgentFeedbackId } from "../core/ids.js";
-import { createAgentFeedbackTask, parseAgentFeedbackTask } from "../core/schema.js";
+import { applyAgentAnnotationsMutation } from "../core/mutation.js";
+import { createAgentAnnotationsId } from "../core/ids.js";
+import { createAgentAnnotationsTask, parseAgentAnnotationsTask } from "../core/schema.js";
 import type {
-  AgentFeedbackMutationRequest,
-  AgentFeedbackTask,
+  AgentAnnotationsMutationRequest,
+  AgentAnnotationsTask,
   TaskTransport,
 } from "../types/index.js";
 
 export class MemoryTaskTransport implements TaskTransport {
-  #task: AgentFeedbackTask;
+  #task: AgentAnnotationsTask;
 
-  constructor(task?: AgentFeedbackTask) {
+  constructor(task?: AgentAnnotationsTask) {
     const now = new Date().toISOString();
-    this.#task = task ?? createAgentFeedbackTask({ taskId: createAgentFeedbackId(), createdAt: now });
+    this.#task = task ?? createAgentAnnotationsTask({ taskId: createAgentAnnotationsId(), createdAt: now });
   }
 
-  async read(): Promise<AgentFeedbackTask> {
+  async read(): Promise<AgentAnnotationsTask> {
     return structuredClone(this.#task);
   }
 
-  async mutate(request: AgentFeedbackMutationRequest): Promise<AgentFeedbackTask> {
-    const result = applyAgentFeedbackMutation(
+  async mutate(request: AgentAnnotationsMutationRequest): Promise<AgentAnnotationsTask> {
+    const result = applyAgentAnnotationsMutation(
       this.#task,
       request,
       new Date(Math.max(Date.now(), Date.parse(this.#task.updatedAt) + 1)).toISOString()
     );
-    if (!result.ok) throw new Error(`Agent Feedback mutation failed: ${result.error}`);
-    this.#task = parseAgentFeedbackTask(result.task);
+    if (!result.ok) throw new Error(`Agent Annotations mutation failed: ${result.error}`);
+    this.#task = parseAgentAnnotationsTask(result.task);
     return structuredClone(this.#task);
   }
 
@@ -37,7 +37,7 @@ export class MemoryTaskTransport implements TaskTransport {
     png: string;
     width: number;
     height: number;
-  }): Promise<AgentFeedbackTask> {
+  }): Promise<AgentAnnotationsTask> {
     return this.mutate({
       taskId: input.taskId,
       expectedRevision: input.expectedRevision,

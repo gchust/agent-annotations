@@ -4,20 +4,20 @@ import path from "node:path";
 
 import { expect, test } from "@playwright/test";
 
-const runtimeRoot = path.resolve(".agent-feedback");
-const evidenceRoot = process.env.AGENT_FEEDBACK_EVIDENCE;
+const runtimeRoot = path.resolve(".agent-annotations");
+const evidenceRoot = process.env.AGENT_ANNOTATIONS_EVIDENCE;
 const extensionSource = path.resolve("src/demo-extension.ts");
-const cli = (...args: string[]) => execFileSync("pnpm", ["exec", "agent-feedback", ...args], {
+const cli = (...args: string[]) => execFileSync("pnpm", ["exec", "agent-annotations", ...args], {
   encoding: "utf8",
-  env: { ...process.env, AGENT_FEEDBACK_DIR: runtimeRoot },
+  env: { ...process.env, AGENT_ANNOTATIONS_DIR: runtimeRoot },
 });
 const shadow = (page: import("@playwright/test").Page, selector: string) =>
-  page.locator(`#agent-feedback-root >> ${selector}`);
+  page.locator(`#agent-annotations-root >> ${selector}`);
 
 test("packed browser to file to CLI to browser loop, HMR and session security", async ({ page, context }) => {
   await page.goto("/");
-  await expect(page.locator("#agent-feedback-root")).toHaveCount(1);
-  await expect(shadow(page, ".af-dock")).toBeVisible();
+  await expect(page.locator("#agent-annotations-root")).toHaveCount(1);
+  await expect(shadow(page, ".aa-dock")).toBeVisible();
   await expect(shadow(page, '[data-action-id="demo-copy-json"]')).toHaveCount(1);
   expect(await page.evaluate(() => window.__demoExtension?.setupCount)).toBe(1);
   expect(statSync(path.join(runtimeRoot, "session.json")).mode & 0o777).toBe(0o600);
@@ -53,14 +53,14 @@ test("packed browser to file to CLI to browser loop, HMR and session security", 
   expect(JSON.parse(cli("verify"))).toMatchObject({ ok: true, taskRevision: beforeComplete + 1 });
   expect(cli("reopen", id)).toContain(`taskRevision ${beforeComplete + 2}`);
   await expect.poll(() => page.evaluate(() =>
-    document.getElementById("agent-feedback-root")?.shadowRoot
+    document.getElementById("agent-annotations-root")?.shadowRoot
       ?.querySelector('[aria-label="Annotation 1: edit"]')?.getAttribute("data-status")
   )).toBe("open");
 
   if (evidenceRoot) await page.screenshot({ path: path.join(evidenceRoot, "vertical-loop.png") });
   const token = session.token;
   await page.reload();
-  await expect(page.locator("#agent-feedback-root")).toHaveCount(1);
+  await expect(page.locator("#agent-annotations-root")).toHaveCount(1);
   expect(JSON.parse(readFileSync(path.join(runtimeRoot, "session.json"), "utf8")).token).toBe(token);
   const source = extensionSource;
   const before = readFileSync(source, "utf8");
@@ -69,7 +69,7 @@ test("packed browser to file to CLI to browser loop, HMR and session security", 
     await expect.poll(() => page.evaluate(() => ({
       setup: window.__demoExtension?.setupCount,
       dispose: window.__demoExtension?.disposeCount,
-      buttons: document.getElementById("agent-feedback-root")?.shadowRoot
+      buttons: document.getElementById("agent-annotations-root")?.shadowRoot
         ?.querySelectorAll('[data-action-id="demo-copy-json"]').length,
     }))).toEqual({ setup: 2, dispose: 1, buttons: 1 });
     const beforeAction = await page.evaluate(() => window.__demoExtension?.actionCount);
@@ -79,5 +79,5 @@ test("packed browser to file to CLI to browser loop, HMR and session security", 
   } finally {
     writeFileSync(source, before);
   }
-  await expect(page.locator("#agent-feedback-root")).toHaveCount(1);
+  await expect(page.locator("#agent-annotations-root")).toHaveCount(1);
 });

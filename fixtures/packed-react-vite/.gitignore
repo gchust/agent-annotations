@@ -1,7 +1,7 @@
 node_modules/
 pnpm-lock.yaml
 dist/
-.agent-feedback/
+.agent-annotations/
 playwright-report/
 test-results/
 *.tgz

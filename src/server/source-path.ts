@@ -4,9 +4,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type {
-  AgentFeedbackAnnotation,
-  AgentFeedbackSourceLocation,
-  AgentFeedbackTask,
+  AgentAnnotation,
+  AgentAnnotationsSourceLocation,
+  AgentAnnotationsTask,
 } from "../types/index.js";
 
 const WINDOWS_ABSOLUTE = /^[a-zA-Z]:[\\/]/;
@@ -71,7 +71,7 @@ export const createSourcePathService = (workspaceRoot: string) => {
       : null;
   };
 
-  const files = (task: AgentFeedbackTask): string[] => {
+  const files = (task: AgentAnnotationsTask): string[] => {
     const paths = new Set<string>();
     for (const annotation of task.annotations) {
       for (const target of annotation.targets ?? []) {
@@ -83,7 +83,7 @@ export const createSourcePathService = (workspaceRoot: string) => {
     return [...paths].flatMap((file) => canonicalize(file) ?? []).sort();
   };
 
-  const revision = (task: AgentFeedbackTask): string => {
+  const revision = (task: AgentAnnotationsTask): string => {
     const hash = createHash("sha256");
     for (const canonical of files(task)) {
       hash.update(canonical);
@@ -94,8 +94,8 @@ export const createSourcePathService = (workspaceRoot: string) => {
     return hash.digest("hex");
   };
 
-  const canonicalizeAnnotation = (annotation: AgentFeedbackAnnotation): AgentFeedbackAnnotation => {
-    const frame = (source: AgentFeedbackSourceLocation): AgentFeedbackSourceLocation | null => {
+  const canonicalizeAnnotation = (annotation: AgentAnnotation): AgentAnnotation => {
+    const frame = (source: AgentAnnotationsSourceLocation): AgentAnnotationsSourceLocation | null => {
       const filePath = canonicalize(source.filePath);
       return filePath ? { ...source, filePath } : null;
     };

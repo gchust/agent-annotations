@@ -1,23 +1,23 @@
 import type {
-  AgentFeedbackAnnotation,
-  AgentFeedbackCompletionEvidence,
-  AgentFeedbackEvidenceReference,
-  AgentFeedbackExtensionData,
-  AgentFeedbackInspection,
-  AgentFeedbackJsonObject,
-  AgentFeedbackPageContext,
-  AgentFeedbackRect,
-  AgentFeedbackRegion,
-  AgentFeedbackSourceLocation,
-  AgentFeedbackTarget,
-  AgentFeedbackTask,
-  AgentFeedbackValidationIssue,
-  AgentFeedbackValidationResult,
-  CreateAgentFeedbackTaskInput,
+  AgentAnnotation,
+  AgentAnnotationsCompletionEvidence,
+  AgentAnnotationsEvidenceReference,
+  AgentAnnotationsExtensionData,
+  AgentAnnotationsInspection,
+  AgentAnnotationsJsonObject,
+  AgentAnnotationsPageContext,
+  AgentAnnotationsRect,
+  AgentAnnotationsRegion,
+  AgentAnnotationsSourceLocation,
+  AgentAnnotationsTarget,
+  AgentAnnotationsTask,
+  AgentAnnotationsValidationIssue,
+  AgentAnnotationsValidationResult,
+  CreateAgentAnnotationsTaskInput,
 } from "../types/index.js";
 
-export const AGENT_FEEDBACK_TASK_SCHEMA = "agent-feedback.task.v1" as const;
-export const AGENT_FEEDBACK_TASK_SCHEMA_VERSION = 1 as const;
+export const AGENT_ANNOTATIONS_TASK_SCHEMA = "agent-annotations.task.v1" as const;
+export const AGENT_ANNOTATIONS_TASK_SCHEMA_VERSION = 1 as const;
 
 export const MAX_ANNOTATIONS = 50;
 export const MAX_TARGETS_PER_ANNOTATION = 50;
@@ -31,7 +31,7 @@ export const MAX_EXTENSION_DEPTH = 8;
 export const MAX_EXTENSION_ARRAY_ITEMS = 100;
 export const MAX_TASK_BYTES = 256 * 1024;
 
-export const AGENT_FEEDBACK_ID_PATTERN =
+export const AGENT_ANNOTATIONS_ID_PATTERN =
   /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
 export const EXTENSION_ID_PATTERN =
   /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/;
@@ -46,9 +46,9 @@ const MAX_EXTENSION_STRING_LENGTH = 8_000;
 
 const issue = (
   path: string,
-  code: AgentFeedbackValidationIssue["code"],
+  code: AgentAnnotationsValidationIssue["code"],
   message: string
-): AgentFeedbackValidationIssue => ({ path, code, message });
+): AgentAnnotationsValidationIssue => ({ path, code, message });
 
 const isRecord = (value: unknown): value is Record<string, unknown> => {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -60,7 +60,7 @@ const unknownField = (
   value: Record<string, unknown>,
   allowed: readonly string[],
   path: string
-): AgentFeedbackValidationIssue | null => {
+): AgentAnnotationsValidationIssue | null => {
   const key = Object.keys(value).find((candidate) => !allowed.includes(candidate));
   return key
     ? issue(`${path}.${key}`, "unknown_field", `Unknown field: ${key}`)
@@ -72,7 +72,7 @@ const stringIssue = (
   path: string,
   maxLength: number,
   allowEmpty = false
-): AgentFeedbackValidationIssue | null => {
+): AgentAnnotationsValidationIssue | null => {
   if (typeof value !== "string") {
     return issue(path, "invalid_type", "Expected a string");
   }
@@ -86,7 +86,7 @@ const finiteNumberIssue = (
   value: unknown,
   path: string,
   options: { integer?: boolean; min?: number } = {}
-): AgentFeedbackValidationIssue | null => {
+): AgentAnnotationsValidationIssue | null => {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return issue(path, "invalid_type", "Expected a finite number");
   }
@@ -102,7 +102,7 @@ const finiteNumberIssue = (
 const timestampIssue = (
   value: unknown,
   path: string
-): AgentFeedbackValidationIssue | null => {
+): AgentAnnotationsValidationIssue | null => {
   const stringError = stringIssue(value, path, 40);
   if (stringError) return stringError;
   return Number.isNaN(Date.parse(value as string))
@@ -115,7 +115,7 @@ const timestampIssue = (
 const rectIssue = (
   value: unknown,
   path: string
-): AgentFeedbackValidationIssue | null => {
+): AgentAnnotationsValidationIssue | null => {
   if (!isRecord(value)) return issue(path, "invalid_type", "Expected an object");
   const extra = unknownField(value, ["x", "y", "width", "height"], path);
   if (extra) return extra;
@@ -125,7 +125,7 @@ const rectIssue = (
 const rectValuesIssue = (
   value: Record<string, unknown>,
   path: string
-): AgentFeedbackValidationIssue | null => {
+): AgentAnnotationsValidationIssue | null => {
   return (
     finiteNumberIssue(value.x, `${path}.x`) ??
     finiteNumberIssue(value.y, `${path}.y`) ??
@@ -137,7 +137,7 @@ const rectValuesIssue = (
 const sourceLocationIssue = (
   value: unknown,
   path: string
-): AgentFeedbackValidationIssue | null => {
+): AgentAnnotationsValidationIssue | null => {
   if (!isRecord(value)) return issue(path, "invalid_type", "Expected an object");
   const extra = unknownField(
     value,
@@ -166,7 +166,7 @@ const sourceLocationIssue = (
 const inspectionIssue = (
   value: unknown,
   path: string
-): AgentFeedbackValidationIssue | null => {
+): AgentAnnotationsValidationIssue | null => {
   if (!isRecord(value)) return issue(path, "invalid_type", "Expected an object");
   const extra = unknownField(
     value,
@@ -209,14 +209,14 @@ const inspectionIssue = (
       `At most ${MAX_INSPECTION_ATTRIBUTES} attributes are allowed`
     );
   }
-  const attributeIssue = Object.entries(value.attributes).reduce<AgentFeedbackValidationIssue | null>(
+  const attributeIssue = Object.entries(value.attributes).reduce<AgentAnnotationsValidationIssue | null>(
     (found, [key, attribute]) =>
       found ??
       stringIssue(key, `${path}.attributes`, 100) ??
       stringIssue(attribute, `${path}.attributes.${key}`, 500, true),
     null
   );
-  let stackIssue: AgentFeedbackValidationIssue | null = null;
+  let stackIssue: AgentAnnotationsValidationIssue | null = null;
   for (let index = 0; index < value.sourceStack.length; index += 1) {
     stackIssue = sourceLocationIssue(
       value.sourceStack[index],
@@ -253,7 +253,7 @@ const inspectionIssue = (
 const targetIssue = (
   value: unknown,
   path: string
-): AgentFeedbackValidationIssue | null => {
+): AgentAnnotationsValidationIssue | null => {
   if (!isRecord(value)) return issue(path, "invalid_type", "Expected an object");
   const extra = unknownField(value, ["selector", "bounds", "inspection"], path);
   if (extra) return extra;
@@ -267,7 +267,7 @@ const targetIssue = (
 const pageContextIssue = (
   value: unknown,
   path: string
-): AgentFeedbackValidationIssue | null => {
+): AgentAnnotationsValidationIssue | null => {
   if (!isRecord(value)) return issue(path, "invalid_type", "Expected an object");
   const extra = unknownField(
     value,
@@ -307,7 +307,7 @@ const pageContextIssue = (
 const evidenceIssue = (
   value: unknown,
   path: string
-): AgentFeedbackValidationIssue | null => {
+): AgentAnnotationsValidationIssue | null => {
   if (!isRecord(value)) return issue(path, "invalid_type", "Expected an object");
   const extra = unknownField(
     value,
@@ -338,7 +338,7 @@ const evidenceIssue = (
 const completionEvidenceIssue = (
   value: unknown,
   path: string
-): AgentFeedbackValidationIssue | null => {
+): AgentAnnotationsValidationIssue | null => {
   if (!isRecord(value)) return issue(path, "invalid_type", "Expected an object");
   const extra = unknownField(
     value,
@@ -359,7 +359,7 @@ const completionEvidenceIssue = (
 export function validateExtensionId(
   extensionId: unknown,
   path = "extensionId"
-): AgentFeedbackValidationIssue | null {
+): AgentAnnotationsValidationIssue | null {
   const stringError = stringIssue(extensionId, path, 64);
   if (stringError) return stringError;
   return EXTENSION_ID_PATTERN.test(extensionId as string)
@@ -370,7 +370,7 @@ export function validateExtensionId(
 export function validateExtensionData(
   value: unknown,
   path = "extension"
-): AgentFeedbackValidationIssue | null {
+): AgentAnnotationsValidationIssue | null {
   if (!isRecord(value)) {
     return issue(path, "invalid_type", "Extension data must be a JSON object");
   }
@@ -381,7 +381,7 @@ export function validateExtensionData(
     current: unknown,
     currentPath: string,
     depth: number
-  ): AgentFeedbackValidationIssue | null => {
+  ): AgentAnnotationsValidationIssue | null => {
     if (
       current === null ||
       typeof current === "boolean" ||
@@ -464,7 +464,7 @@ export function validateExtensionData(
 const extensionsIssue = (
   value: unknown,
   path: string
-): AgentFeedbackValidationIssue | null => {
+): AgentAnnotationsValidationIssue | null => {
   if (!isRecord(value)) return issue(path, "invalid_type", "Expected an object");
   const entries = Object.entries(value);
   if (entries.length > MAX_EXTENSION_NAMESPACES) {
@@ -483,10 +483,10 @@ const extensionsIssue = (
   return null;
 };
 
-export function validateAgentFeedbackAnnotation(
+export function validateAgentAnnotation(
   input: unknown,
   path = "annotation"
-): AgentFeedbackValidationResult<AgentFeedbackAnnotation> {
+): AgentAnnotationsValidationResult<AgentAnnotation> {
   if (!isRecord(input)) {
     return { ok: false, issue: issue(path, "invalid_type", "Expected an object") };
   }
@@ -511,7 +511,7 @@ export function validateAgentFeedbackAnnotation(
   if (extra) return { ok: false, issue: extra };
   const idError = stringIssue(input.annotationId, `${path}.annotationId`, 64);
   if (idError) return { ok: false, issue: idError };
-  if (!AGENT_FEEDBACK_ID_PATTERN.test(input.annotationId as string)) {
+  if (!AGENT_ANNOTATIONS_ID_PATTERN.test(input.annotationId as string)) {
     return {
       ok: false,
       issue: issue(`${path}.annotationId`, "invalid_value", "Invalid annotation ID"),
@@ -557,7 +557,7 @@ export function validateAgentFeedbackAnnotation(
       );
       if (evidenceError) return { ok: false, issue: evidenceError };
       if (
-        (input.completionEvidence as AgentFeedbackCompletionEvidence).completedAt !==
+        (input.completionEvidence as AgentAnnotationsCompletionEvidence).completedAt !==
         input.completedAt
       ) {
         return {
@@ -653,12 +653,12 @@ export function validateAgentFeedbackAnnotation(
       if (found) return { ok: false, issue: found };
     }
   }
-  return { ok: true, value: input as AgentFeedbackAnnotation };
+  return { ok: true, value: input as AgentAnnotation };
 }
 
-export function validateAgentFeedbackTask(
+export function validateAgentAnnotationsTask(
   input: unknown
-): AgentFeedbackValidationResult<AgentFeedbackTask> {
+): AgentAnnotationsValidationResult<AgentAnnotationsTask> {
   if (!isRecord(input)) {
     return {
       ok: false,
@@ -680,13 +680,13 @@ export function validateAgentFeedbackTask(
     "task"
   );
   if (extra) return { ok: false, issue: extra };
-  if (input.schema !== AGENT_FEEDBACK_TASK_SCHEMA) {
+  if (input.schema !== AGENT_ANNOTATIONS_TASK_SCHEMA) {
     return {
       ok: false,
       issue: issue("task.schema", "invalid_value", "Unknown task schema"),
     };
   }
-  if (input.schemaVersion !== AGENT_FEEDBACK_TASK_SCHEMA_VERSION) {
+  if (input.schemaVersion !== AGENT_ANNOTATIONS_TASK_SCHEMA_VERSION) {
     return {
       ok: false,
       issue: issue("task.schemaVersion", "invalid_value", "Unknown schema version"),
@@ -694,7 +694,7 @@ export function validateAgentFeedbackTask(
   }
   const idError = stringIssue(input.taskId, "task.taskId", 64);
   if (idError) return { ok: false, issue: idError };
-  if (!AGENT_FEEDBACK_ID_PATTERN.test(input.taskId as string)) {
+  if (!AGENT_ANNOTATIONS_ID_PATTERN.test(input.taskId as string)) {
     return {
       ok: false,
       issue: issue("task.taskId", "invalid_value", "Invalid task ID"),
@@ -732,7 +732,7 @@ export function validateAgentFeedbackTask(
   }
   const ids = new Set<string>();
   for (const [index, annotation] of input.annotations.entries()) {
-    const result = validateAgentFeedbackAnnotation(
+    const result = validateAgentAnnotation(
       annotation,
       `task.annotations[${index}]`
     );
@@ -749,7 +749,7 @@ export function validateAgentFeedbackTask(
     }
     ids.add(result.value.annotationId);
   }
-  const hasOpen = (input.annotations as AgentFeedbackAnnotation[]).some(
+  const hasOpen = (input.annotations as AgentAnnotation[]).some(
     (annotation) => annotation.status === "open"
   );
   if (input.status === "completed" && hasOpen) {
@@ -797,35 +797,35 @@ export function validateAgentFeedbackTask(
       ),
     };
   }
-  return { ok: true, value: input as AgentFeedbackTask };
+  return { ok: true, value: input as AgentAnnotationsTask };
 }
 
-export class AgentFeedbackValidationError extends Error {
-  readonly issue: AgentFeedbackValidationIssue;
+export class AgentAnnotationsValidationError extends Error {
+  readonly issue: AgentAnnotationsValidationIssue;
 
-  constructor(validationIssue: AgentFeedbackValidationIssue) {
+  constructor(validationIssue: AgentAnnotationsValidationIssue) {
     super(`${validationIssue.path}: ${validationIssue.message}`);
-    this.name = "AgentFeedbackValidationError";
+    this.name = "AgentAnnotationsValidationError";
     this.issue = validationIssue;
   }
 }
 
-export function parseAgentFeedbackTask(input: unknown): AgentFeedbackTask {
-  const result = validateAgentFeedbackTask(input);
-  if (!result.ok) throw new AgentFeedbackValidationError(result.issue);
+export function parseAgentAnnotationsTask(input: unknown): AgentAnnotationsTask {
+  const result = validateAgentAnnotationsTask(input);
+  if (!result.ok) throw new AgentAnnotationsValidationError(result.issue);
   return result.value;
 }
 
-export const isAgentFeedbackTask = (input: unknown): input is AgentFeedbackTask =>
-  validateAgentFeedbackTask(input).ok;
+export const isAgentAnnotationsTask = (input: unknown): input is AgentAnnotationsTask =>
+  validateAgentAnnotationsTask(input).ok;
 
-export function createAgentFeedbackTask(
-  input: CreateAgentFeedbackTaskInput
-): AgentFeedbackTask {
+export function createAgentAnnotationsTask(
+  input: CreateAgentAnnotationsTaskInput
+): AgentAnnotationsTask {
   const annotations = input.annotations ?? [];
-  const task: AgentFeedbackTask = {
-    schema: AGENT_FEEDBACK_TASK_SCHEMA,
-    schemaVersion: AGENT_FEEDBACK_TASK_SCHEMA_VERSION,
+  const task: AgentAnnotationsTask = {
+    schema: AGENT_ANNOTATIONS_TASK_SCHEMA,
+    schemaVersion: AGENT_ANNOTATIONS_TASK_SCHEMA_VERSION,
     taskId: input.taskId,
     taskRevision: 0,
     status:
@@ -837,22 +837,22 @@ export function createAgentFeedbackTask(
     updatedAt: input.createdAt,
     annotations: [...annotations],
   };
-  return parseAgentFeedbackTask(task);
+  return parseAgentAnnotationsTask(task);
 }
 
 export function setAnnotationExtension(
-  annotation: AgentFeedbackAnnotation,
+  annotation: AgentAnnotation,
   extensionId: string,
-  data: AgentFeedbackJsonObject
-): AgentFeedbackAnnotation {
+  data: AgentAnnotationsJsonObject
+): AgentAnnotation {
   const found =
     validateExtensionId(extensionId) ?? validateExtensionData(data, extensionId);
-  if (found) throw new AgentFeedbackValidationError(found);
+  if (found) throw new AgentAnnotationsValidationError(found);
   const next = {
     ...annotation,
     extensions: { ...annotation.extensions, [extensionId]: data },
   };
-  const result = validateAgentFeedbackAnnotation(next);
-  if (!result.ok) throw new AgentFeedbackValidationError(result.issue);
+  const result = validateAgentAnnotation(next);
+  if (!result.ok) throw new AgentAnnotationsValidationError(result.issue);
   return result.value;
 }

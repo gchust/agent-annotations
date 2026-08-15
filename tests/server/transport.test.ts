@@ -17,7 +17,7 @@ it("does not miss a file revision changed around initial subscription", async ()
       headers: { "content-type": "application/json" },
     })
   ));
-  const transport = new HttpTaskTransport({ endpoint: "/__agent-feedback", token: "test" });
+  const transport = new HttpTaskTransport({ endpoint: "/__agent-annotations", token: "test" });
   await transport.read();
   const listener = vi.fn();
 
@@ -27,7 +27,7 @@ it("does not miss a file revision changed around initial subscription", async ()
 
   expect(listener).toHaveBeenCalledWith(expect.objectContaining({ taskRevision: 1 }));
   expect(fetch).toHaveBeenCalledWith(
-    "/__agent-feedback/task",
+    "/__agent-annotations/task",
     expect.objectContaining({
       cache: "no-store",
       headers: expect.objectContaining({ "cache-control": "no-cache" }),

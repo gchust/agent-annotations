@@ -1,22 +1,22 @@
 import type {
-  AgentFeedbackAnnotation,
-  AgentFeedbackAnnotationFilter,
+  AgentAnnotation,
+  AgentAnnotationFilter,
 } from "../types/index.js";
 
-export const selectAgentFeedbackAnnotations = (
-  annotations: AgentFeedbackAnnotation[],
-  filter: AgentFeedbackAnnotationFilter = "open"
-): AgentFeedbackAnnotation[] =>
+export const selectAgentAnnotations = (
+  annotations: AgentAnnotation[],
+  filter: AgentAnnotationFilter = "open"
+): AgentAnnotation[] =>
   filter === "all"
     ? annotations
     : annotations.filter((annotation) => annotation.status === "open");
 
-export const countOpenAgentFeedbackAnnotations = (
-  annotations: AgentFeedbackAnnotation[]
-): number => selectAgentFeedbackAnnotations(annotations).length;
+export const countOpenAgentAnnotations = (
+  annotations: AgentAnnotation[]
+): number => selectAgentAnnotations(annotations).length;
 
-export function agentFeedbackAnnotationDisplayNumber(
-  annotations: AgentFeedbackAnnotation[],
+export function agentAnnotationsAnnotationDisplayNumber(
+  annotations: AgentAnnotation[],
   annotationId: string
 ): number | undefined {
   const index = annotations.findIndex(

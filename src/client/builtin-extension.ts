@@ -32,7 +32,7 @@ const HelpPanel: PanelContribution["render"] = ({ studio, close }) =>
       "button",
       {
         type: "button",
-        className: "af-button af-icon-button",
+        className: "aa-button aa-icon-button",
         "aria-label": "Close",
         title: "Close",
         onClick: close,
@@ -41,11 +41,11 @@ const HelpPanel: PanelContribution["render"] = ({ studio, close }) =>
     ),
     createElement(
       "ul",
-      { className: "af-help-list" },
+      { className: "aa-help-list" },
       ...studio.getSnapshot().shortcuts.map((entry) =>
         createElement(
           "li",
-          { className: "af-help-row", key: entry.id },
+          { className: "aa-help-row", key: entry.id },
           createElement("span", null, entry.label),
           createElement("kbd", null, entry.formatted)
         )
@@ -60,12 +60,12 @@ const AnnotationList: PanelContribution["render"] = ({ studio, close }) => {
     null,
     createElement(
       "div",
-      { className: "af-filter" },
+      { className: "aa-filter" },
       createElement(
         "button",
         {
           type: "button",
-          className: "af-button",
+          className: "aa-button",
           "aria-pressed": filter === "open",
           onClick: () => setFilter("open"),
         },
@@ -75,7 +75,7 @@ const AnnotationList: PanelContribution["render"] = ({ studio, close }) => {
         "button",
         {
           type: "button",
-          className: "af-button",
+          className: "aa-button",
           "aria-pressed": filter === "all",
           onClick: () => setFilter("all"),
         },
@@ -85,7 +85,7 @@ const AnnotationList: PanelContribution["render"] = ({ studio, close }) => {
         "button",
         {
           type: "button",
-          className: "af-button af-icon-button",
+          className: "aa-button aa-icon-button",
           "aria-label": "Close",
           title: "Close",
           onClick: close,
@@ -95,19 +95,19 @@ const AnnotationList: PanelContribution["render"] = ({ studio, close }) => {
     ),
     createElement(
       "ol",
-      { className: "af-list" },
+      { className: "aa-list" },
       ...studio.getSnapshot().task.annotations.flatMap((annotation, index) =>
         filter === "open" && annotation.status !== "open"
           ? []
           : [
               createElement(
                 "li",
-                { className: "af-list-item", key: annotation.annotationId },
+                { className: "aa-list-item", key: annotation.annotationId },
                 createElement(
                   "button",
                   {
                     type: "button",
-                    className: "af-button",
+                    className: "aa-button",
                     "aria-label": `Edit annotation ${index + 1}`,
                     onClick: () =>
                       studio.commands.markers.focus(annotation.annotationId),
@@ -116,7 +116,7 @@ const AnnotationList: PanelContribution["render"] = ({ studio, close }) => {
                 ),
                 createElement(
                   "span",
-                  { className: "af-muted" },
+                  { className: "aa-muted" },
                   annotation.status
                 )
               ),
@@ -138,7 +138,7 @@ const toolbar: ToolbarContribution[] = [
 ];
 
 export const builtinClientExtension = defineClientExtension({
-  id: "agent-feedback.builtin",
+  id: "agent-annotations.builtin",
   apiVersion: 1,
   toolbar,
   panels: [

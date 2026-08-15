@@ -7,11 +7,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import react from "@vitejs/plugin-react";
 import { createServer } from "vite";
 
-import agentFeedback, { createSourcePathService, isAgentFeedbackRequestAllowed } from "../../src/vite/index.js";
+import agentAnnotations, { createSourcePathService, isAgentAnnotationsRequestAllowed } from "../../src/vite/index.js";
 
 const roots: string[] = [];
 const fixture = () => {
-  const root = mkdtempSync(path.join(tmpdir(), "agent-feedback-vite-"));
+  const root = mkdtempSync(path.join(tmpdir(), "agent-annotations-vite-"));
   roots.push(root);
   const a = path.join(root, "src/duplicate-a/Card.tsx");
   const b = path.join(root, "src/duplicate-b/Card.tsx");
@@ -26,18 +26,18 @@ afterEach(() => roots.splice(0).forEach((root) => rmSync(root, { recursive: true
 
 describe("serve-only Vite plugin", () => {
   it("is serve-only, injects through the namespaced virtual module, and canonicalizes under root", () => {
-    const plugin = agentFeedback({ root: "/tmp/demo", clientExtensions: ["/tmp/demo/extension.ts"] });
+    const plugin = agentAnnotations({ root: "/tmp/demo", clientExtensions: ["/tmp/demo/extension.ts"] });
     const resolveId = plugin.resolveId as Function;
     const load = plugin.load as Function;
     expect(plugin.apply).toBe("serve");
     expect(plugin.transform).toMatchObject({ order: "post" });
-    expect(resolveId.call({} as never, "virtual:agent-feedback/client", undefined, {} as never)).toBe("\0virtual:agent-feedback/client");
-    const loaded = load.call({} as never, "\0virtual:agent-feedback/client", {} as never);
+    expect(resolveId.call({} as never, "virtual:agent-annotations/client", undefined, {} as never)).toBe("\0virtual:agent-annotations/client");
+    const loaded = load.call({} as never, "\0virtual:agent-annotations/client", {} as never);
     expect(String(loaded)).toContain("/tmp/demo/extension.ts");
     expect(String(loaded)).toContain('from "@gchust/agent-annotations"');
     expect(String(loaded)).toContain('from "@gchust/agent-annotations/vite/client"');
-    expect(String(loaded)).toContain("mountAgentFeedback");
-    expect(String(loaded)).toContain("mountAgentFeedback({ transport, extensions })");
+    expect(String(loaded)).toContain("mountAgentAnnotations");
+    expect(String(loaded)).toContain("mountAgentAnnotations({ transport, extensions })");
     expect(String(loaded)).toContain("window[key]?.()");
     expect(String(loaded)).toContain("import.meta.hot.accept()");
     expect(String(loaded)).toContain("import.meta.hot.dispose");
@@ -47,7 +47,7 @@ describe("serve-only Vite plugin", () => {
       tag: "script",
       attrs: {
         type: "module",
-        src: "/@id/__x00__virtual:agent-feedback/client",
+        src: "/@id/__x00__virtual:agent-annotations/client",
       },
       injectTo: "head",
     }]);
@@ -55,13 +55,13 @@ describe("serve-only Vite plugin", () => {
     const source = createSourcePathService("/tmp/demo");
     expect(source.canonicalize("src/App.tsx")).toBeNull();
     expect(source.canonicalize("../outside.ts")).toBeNull();
-    expect(() => agentFeedback({ root: "/tmp/demo", dir: "../outside" })).toThrow("inside root");
-    expect(() => agentFeedback({ endpoint: "https://evil.test" })).toThrow("root-relative");
+    expect(() => agentAnnotations({ root: "/tmp/demo", dir: "../outside" })).toThrow("inside root");
+    expect(() => agentAnnotations({ endpoint: "https://evil.test" })).toThrow("root-relative");
   });
 
   it("normalizes only the post-React single basename sourcemap source to the exact module", () => {
     const { root, a, b } = fixture();
-    const plugin = agentFeedback({ root });
+    const plugin = agentAnnotations({ root });
     const transform = (plugin.transform as { handler: Function }).handler;
     const map = {
       version: 3,
@@ -108,10 +108,10 @@ describe("serve-only Vite plugin", () => {
 
   it("injects the virtual client under the resolved Vite base", () => {
     const { root } = fixture();
-    const plugin = agentFeedback({ root });
+    const plugin = agentAnnotations({ root });
     (plugin.configResolved as Function).call({} as never, { root, base: "/x/main/" });
     const tags = (plugin.transformIndexHtml as Function).call({} as never, "", {} as never);
-    expect(tags[0].attrs.src).toBe("/x/main/@id/__x00__virtual:agent-feedback/client");
+    expect(tags[0].attrs.src).toBe("/x/main/@id/__x00__virtual:agent-annotations/client");
   });
 
   it("serves distinct file URL sources after React transforms", async () => {
@@ -120,7 +120,7 @@ describe("serve-only Vite plugin", () => {
       root,
       logLevel: "silent",
       server: { host: "127.0.0.1", port: 0 },
-      plugins: [react(), agentFeedback({ root })],
+      plugins: [react(), agentAnnotations({ root })],
     });
     await server.listen();
     try {
@@ -141,20 +141,20 @@ describe("serve-only Vite plugin", () => {
 
   it("warns only for explicit remote opt-in", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    agentFeedback();
+    agentAnnotations();
     expect(warn).not.toHaveBeenCalled();
-    agentFeedback({ allowRemote: true });
+    agentAnnotations({ allowRemote: true });
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("remote access enabled"));
     warn.mockRestore();
   });
 
   it("defaults to loopback and always requires the token plus matching host origins", () => {
     const request = { headers: { host: "127.0.0.1:5173", origin: "http://127.0.0.1:5173" } } as never;
-    expect(isAgentFeedbackRequestAllowed("127.0.0.1", false, "token", "token", request)).toBe(true);
-    expect(isAgentFeedbackRequestAllowed("10.0.0.2", false, "token", "token", request)).toBe(false);
-    expect(isAgentFeedbackRequestAllowed("10.0.0.2", true, "token", "token", request)).toBe(true);
-    expect(isAgentFeedbackRequestAllowed("127.0.0.1", false, "wrong", "token", request)).toBe(false);
-    expect(isAgentFeedbackRequestAllowed("127.0.0.1", false, "token", "token", { headers: { host: "127.0.0.1:5173", origin: "http://evil.test" } } as never)).toBe(false);
+    expect(isAgentAnnotationsRequestAllowed("127.0.0.1", false, "token", "token", request)).toBe(true);
+    expect(isAgentAnnotationsRequestAllowed("10.0.0.2", false, "token", "token", request)).toBe(false);
+    expect(isAgentAnnotationsRequestAllowed("10.0.0.2", true, "token", "token", request)).toBe(true);
+    expect(isAgentAnnotationsRequestAllowed("127.0.0.1", false, "wrong", "token", request)).toBe(false);
+    expect(isAgentAnnotationsRequestAllowed("127.0.0.1", false, "token", "token", { headers: { host: "127.0.0.1:5173", origin: "http://evil.test" } } as never)).toBe(false);
   });
 
 });

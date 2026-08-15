@@ -11,10 +11,10 @@ import {
 } from "react-grab/primitives";
 
 import type {
-  AgentFeedbackInspection,
-  AgentFeedbackRect,
-  AgentFeedbackSourceLocation,
-  AgentFeedbackTarget,
+  AgentAnnotationsInspection,
+  AgentAnnotationsRect,
+  AgentAnnotationsSourceLocation,
+  AgentAnnotationsTarget,
   HostIntegration,
 } from "../types/index.js";
 
@@ -37,7 +37,7 @@ const isRegionCandidate = (element: Element): boolean =>
   !ROOTS.has(element.tagName.toLowerCase()) &&
   element.closest(IGNORE) === null;
 
-const boundsOf = (element: Element): AgentFeedbackRect => {
+const boundsOf = (element: Element): AgentAnnotationsRect => {
   const bounds = getElementBounds(element);
   return { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height };
 };
@@ -52,7 +52,7 @@ const source = (value: {
   columnNumber?: number | null;
   functionName?: string | null;
   componentName?: string | null;
-}): AgentFeedbackSourceLocation | null => {
+}): AgentAnnotationsSourceLocation | null => {
   const filePath = value.filePath ?? value.fileName;
   if (!filePath || !value.lineNumber || value.columnNumber == null) return null;
   return {
@@ -112,15 +112,15 @@ export const targetFromEvent = (event: Event): Element | null => {
 export async function inspectTarget(
   element: Element,
   host?: HostIntegration
-): Promise<AgentFeedbackTarget> {
+): Promise<AgentAnnotationsTarget> {
   const context = await getElementContext(element);
   const selector = getElementSelector(element);
   if (!selector) throw new Error("React Grab returned an empty selector");
   const sourceStack = context.stack
     .map((frame) => source(frame))
-    .filter((frame): frame is AgentFeedbackSourceLocation => frame !== null)
+    .filter((frame): frame is AgentAnnotationsSourceLocation => frame !== null)
     .slice(0, 12);
-  const inspection: AgentFeedbackInspection = {
+  const inspection: AgentAnnotationsInspection = {
     tagName: element.tagName.toLowerCase(),
     role: roleOf(element),
     accessibleName: nameOf(element),
@@ -188,7 +188,7 @@ export const resolveTarget = (selector: string): Element | null => {
   return result.status === "resolved" ? result.element : null;
 };
 
-export const targetBounds = (element: Element): AgentFeedbackRect => boundsOf(element);
+export const targetBounds = (element: Element): AgentAnnotationsRect => boundsOf(element);
 
 let frozen = false;
 export const setInspectionFrozen = (active: boolean, elements: Element[] = []): void => {
@@ -198,7 +198,7 @@ export const setInspectionFrozen = (active: boolean, elements: Element[] = []): 
   frozen = active;
 };
 
-const samplePoints = (rect: AgentFeedbackRect): Array<{ x: number; y: number }> => {
+const samplePoints = (rect: AgentAnnotationsRect): Array<{ x: number; y: number }> => {
   const columns = Math.min(8, Math.max(2, Math.ceil(rect.width / 120)));
   const rows = Math.min(8, Math.max(2, Math.ceil(rect.height / 120)));
   const points = [
@@ -219,7 +219,7 @@ const samplePoints = (rect: AgentFeedbackRect): Array<{ x: number; y: number }> 
   return points;
 };
 
-export function sampleRegionTargets(rect: AgentFeedbackRect): Element[] {
+export function sampleRegionTargets(rect: AgentAnnotationsRect): Element[] {
   const candidates: Element[] = [];
   const seen = new Set<Element>();
   const addCandidate = (element: Element): boolean => {

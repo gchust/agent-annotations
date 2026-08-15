@@ -1,6 +1,6 @@
 import type {
-  AgentFeedbackMutationRequest,
-  AgentFeedbackTask,
+  AgentAnnotationsMutationRequest,
+  AgentAnnotationsTask,
   TaskTransport,
 } from "../types/index.js";
 
@@ -10,7 +10,7 @@ export type HttpTaskTransportOptions = {
   pollInterval?: number;
 };
 
-const TOKEN_HEADER = "x-agent-feedback-token";
+const TOKEN_HEADER = "x-agent-annotations-token";
 const HEARTBEAT_INTERVAL = 5_000;
 
 export class HttpTaskTransport implements TaskTransport {
@@ -25,7 +25,7 @@ export class HttpTaskTransport implements TaskTransport {
     this.pollInterval = options.pollInterval ?? 500;
   }
 
-  async #request(init?: RequestInit): Promise<AgentFeedbackTask> {
+  async #request(init?: RequestInit): Promise<AgentAnnotationsTask> {
     const response = await fetch(`${this.endpoint}/task`, {
       ...init,
       cache: "no-store",
@@ -37,19 +37,19 @@ export class HttpTaskTransport implements TaskTransport {
     });
     const payload = (await response.json()) as {
       error?: string;
-      task?: AgentFeedbackTask;
+      task?: AgentAnnotationsTask;
     };
     if (!response.ok || !payload.task) throw new Error(payload.error ?? "request_failed");
     return payload.task;
   }
 
-  async read(): Promise<AgentFeedbackTask> {
+  async read(): Promise<AgentAnnotationsTask> {
     const task = await this.#request();
     this.#lastReadRevision = task.taskRevision;
     return task;
   }
 
-  mutate(request: AgentFeedbackMutationRequest): Promise<AgentFeedbackTask> {
+  mutate(request: AgentAnnotationsMutationRequest): Promise<AgentAnnotationsTask> {
     return this.#request({ method: "POST", body: JSON.stringify(request) });
   }
 
@@ -60,18 +60,18 @@ export class HttpTaskTransport implements TaskTransport {
     png: string;
     width: number;
     height: number;
-  }): Promise<AgentFeedbackTask> {
+  }): Promise<AgentAnnotationsTask> {
     const response = await fetch(`${this.endpoint}/evidence`, {
       method: "POST",
       headers: { [TOKEN_HEADER]: this.token, "content-type": "application/json" },
       body: JSON.stringify(input),
     });
-    const payload = await response.json() as { error?: string; task?: AgentFeedbackTask };
+    const payload = await response.json() as { error?: string; task?: AgentAnnotationsTask };
     if (!response.ok || !payload.task) throw new Error(payload.error ?? "request_failed");
     return payload.task;
   }
 
-  subscribe(listener: (task: AgentFeedbackTask) => void): () => void {
+  subscribe(listener: (task: AgentAnnotationsTask) => void): () => void {
     let revision = this.#lastReadRevision;
     const poll = async () => {
       try {

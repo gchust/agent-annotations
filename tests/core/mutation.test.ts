@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { applyAgentFeedbackMutation } from "../../src/core/index.js";
+import { applyAgentAnnotationsMutation } from "../../src/core/index.js";
 import { annotationFixture, taskFixture } from "./test-data.js";
 
 const updatedAt = "2026-08-12T12:01:00.000Z";
 
 describe("revision-aware mutations", () => {
   it("applies add/update/complete/reopen/remove/removeCompleted", () => {
-    const added = applyAgentFeedbackMutation(
+    const added = applyAgentAnnotationsMutation(
       taskFixture(),
       {
         taskId: "task-1",
@@ -26,7 +26,7 @@ describe("revision-aware mutations", () => {
       "Make this clearer",
     ]);
 
-    const completed = applyAgentFeedbackMutation(
+    const completed = applyAgentAnnotationsMutation(
       added.task,
       {
         taskId: "task-1",
@@ -56,7 +56,7 @@ describe("revision-aware mutations", () => {
       { kind: "screenshot", ref: "evidence/shot.png", mediaType: "image/png" },
     ]);
 
-    const reopened = applyAgentFeedbackMutation(
+    const reopened = applyAgentAnnotationsMutation(
       completed.task,
       {
         taskId: "task-1",
@@ -69,7 +69,7 @@ describe("revision-aware mutations", () => {
     expect(reopened.task.annotations[0]).toMatchObject({ status: "open" });
     expect(reopened.task.annotations[0].completedAt).toBeUndefined();
 
-    const removed = applyAgentFeedbackMutation(
+    const removed = applyAgentAnnotationsMutation(
       reopened.task,
       {
         taskId: "task-1",
@@ -91,7 +91,7 @@ describe("revision-aware mutations", () => {
   it("returns a deterministic conflict without changing the task", () => {
     const task = taskFixture({ taskRevision: 7 });
     expect(
-      applyAgentFeedbackMutation(
+      applyAgentAnnotationsMutation(
         task,
         {
           taskId: "task-1",
@@ -115,7 +115,7 @@ describe("revision-aware mutations", () => {
         annotationFixture({ extensions: { "first.context": { keep: true } } }),
       ],
     });
-    const failed = applyAgentFeedbackMutation(
+    const failed = applyAgentAnnotationsMutation(
       task,
       {
         taskId: "task-1",

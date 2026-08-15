@@ -1,12 +1,12 @@
 import type {
-  AgentFeedbackAnnotation,
-  AgentFeedbackTarget,
-  AgentFeedbackTask,
+  AgentAnnotation,
+  AgentAnnotationsTarget,
+  AgentAnnotationsTask,
 } from "../../src/types/index.js";
 
 export const targetFixture = (
-  overrides: Partial<AgentFeedbackTarget> = {}
-): AgentFeedbackTarget => ({
+  overrides: Partial<AgentAnnotationsTarget> = {}
+): AgentAnnotationsTarget => ({
   selector: "main > button",
   bounds: { x: 10, y: 20, width: 120, height: 32 },
   inspection: {
@@ -37,8 +37,8 @@ export const targetFixture = (
 });
 
 export const annotationFixture = (
-  overrides: Partial<AgentFeedbackAnnotation> = {}
-): AgentFeedbackAnnotation => ({
+  overrides: Partial<AgentAnnotation> = {}
+): AgentAnnotation => ({
   annotationId: "ann-1",
   kind: "element",
   comment: "Make this clearer",
@@ -57,9 +57,9 @@ export const annotationFixture = (
 });
 
 export const taskFixture = (
-  overrides: Partial<AgentFeedbackTask> = {}
-): AgentFeedbackTask => ({
-  schema: "agent-feedback.task.v1",
+  overrides: Partial<AgentAnnotationsTask> = {}
+): AgentAnnotationsTask => ({
+  schema: "agent-annotations.task.v1",
   schemaVersion: 1,
   taskId: "task-1",
   taskRevision: 0,

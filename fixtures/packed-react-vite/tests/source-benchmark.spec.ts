@@ -3,9 +3,9 @@ import path from "node:path";
 
 import { expect, test, type Page } from "@playwright/test";
 
-const runtimeRoot = path.resolve(".agent-feedback");
+const runtimeRoot = path.resolve(".agent-annotations");
 const taskPath = path.join(runtimeRoot, "tasks/active-task.json");
-const shadow = (page: Page, selector: string) => page.locator(`#agent-feedback-root >> ${selector}`);
+const shadow = (page: Page, selector: string) => page.locator(`#agent-annotations-root >> ${selector}`);
 const position = (filePath: string, marker: string) => {
   const lines = readFileSync(path.resolve(filePath), "utf8").split("\n");
   const line = lines.findIndex((value) => value.includes(marker));
@@ -27,8 +27,8 @@ const capture = async (page: Page, selector: string) => {
 };
 
 const revision = async (page: Page, token: string) => page.evaluate(async (value) => {
-  const session = await (await fetch("/__agent-feedback/revision", {
-    headers: { "x-agent-feedback-token": value },
+  const session = await (await fetch("/__agent-annotations/revision", {
+    headers: { "x-agent-annotations-token": value },
   })).json();
   return session;
 }, token);

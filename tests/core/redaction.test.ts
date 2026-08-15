@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  redactAgentFeedbackTask,
-  redactAgentFeedbackText,
+  redactAgentAnnotationsTask,
+  redactAgentAnnotationsText,
 } from "../../src/core/index.js";
 import { annotationFixture, targetFixture, taskFixture } from "./test-data.js";
 
@@ -23,13 +23,13 @@ describe("generic redaction", () => {
       "https://example.test/path?api_key=url-secret&ok=1",
     ];
     for (const value of values) {
-      const result = redactAgentFeedbackText(value);
+      const result = redactAgentAnnotationsText(value);
       expect(result).toContain("[REDACTED]");
       expect(result).not.toContain("secret");
       expect(result).not.toContain(jwt);
     }
     expect(
-      redactAgentFeedbackText(
+      redactAgentAnnotationsText(
         "https://example.test/callback?client_secret=client-value&ok=1"
       )
     ).not.toContain("client-value");
@@ -59,7 +59,7 @@ describe("generic redaction", () => {
         }),
       ],
     });
-    const result = redactAgentFeedbackTask(task, [
+    const result = redactAgentAnnotationsTask(task, [
       {
         extensionId: "first.context",
         redact: (data) => ({

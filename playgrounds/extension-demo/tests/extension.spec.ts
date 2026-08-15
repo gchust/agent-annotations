@@ -3,17 +3,17 @@ import path from "node:path";
 
 import { expect, test, type Page } from "@playwright/test";
 
-const evidenceRoot = process.env.AGENT_FEEDBACK_EVIDENCE;
+const evidenceRoot = process.env.AGENT_ANNOTATIONS_EVIDENCE;
 const extensionSource = path.resolve("src/demo-extension.ts");
 const shadow = (page: Page, selector: string) =>
-  page.locator(`#agent-feedback-root >> ${selector}`);
+  page.locator(`#agent-annotations-root >> ${selector}`);
 
 test("external extension shares the public registry and survives HMR", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await page.goto("/");
-  await expect(shadow(page, ".af-dock")).toBeVisible();
+  await expect(shadow(page, ".aa-dock")).toBeVisible();
 
-  const actionIds = await shadow(page, ".af-action").evaluateAll((buttons) =>
+  const actionIds = await shadow(page, ".aa-action").evaluateAll((buttons) =>
     buttons.map((button) => button.getAttribute("data-action-id"))
   );
   expect(actionIds).toEqual([
@@ -47,10 +47,10 @@ test("external extension shares the public registry and survives HMR", async ({ 
   await shadow(page, '[data-action-id="list"]').click();
   await expect(shadow(page, '[aria-label="Annotation list"]')).toBeVisible();
   await shadow(page, '[data-action-id="demo-panel-action"]').click();
-  await expect(shadow(page, ".af-panel")).toHaveCount(1);
+  await expect(shadow(page, ".aa-panel")).toHaveCount(1);
   await expect(shadow(page, '[aria-label="Demo Extension"]')).toContainText("demo-json");
   await expect.poll(() => page.evaluate(() =>
-    document.getElementById("agent-feedback-root")?.shadowRoot?.activeElement
+    document.getElementById("agent-annotations-root")?.shadowRoot?.activeElement
       ?.getAttribute("data-demo-panel-close")
   )).toBe("Close Demo");
   if (evidenceRoot) {
@@ -59,7 +59,7 @@ test("external extension shares the public registry and survives HMR", async ({ 
   await shadow(page, '[aria-label="Demo Extension"] button:has-text("Close Demo")').click();
   await expect(shadow(page, '[aria-label="Demo Extension"]')).toHaveCount(0);
   await expect.poll(() => page.evaluate(() =>
-    document.getElementById("agent-feedback-root")?.shadowRoot?.activeElement?.getAttribute("data-action-id")
+    document.getElementById("agent-annotations-root")?.shadowRoot?.activeElement?.getAttribute("data-action-id")
   )).toBe("demo-panel-action");
 
   await shadow(page, '[data-action-id="pick"]').click();
@@ -76,7 +76,7 @@ test("external extension shares the public registry and survives HMR", async ({ 
 
   await shadow(page, '[data-action-id="copy"]').click();
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText()))
-    .toContain("# Agent Feedback Task");
+    .toContain("# Agent Annotations Task");
   await page.locator("main").click();
   await page.keyboard.press("Control+Alt+KeyJ");
   await expect.poll(() => page.evaluate(() => window.__demoExtension?.actionCount)).toBe(1);
@@ -109,7 +109,7 @@ test("external extension shares the public registry and survives HMR", async ({ 
     await expect.poll(() => page.evaluate(() => ({
       setup: window.__demoExtension?.setupCount,
       dispose: window.__demoExtension?.disposeCount,
-      buttons: document.getElementById("agent-feedback-root")?.shadowRoot
+      buttons: document.getElementById("agent-annotations-root")?.shadowRoot
         ?.querySelectorAll('[data-action-id="demo-copy-json"]').length,
     }))).toEqual({ setup: 2, dispose: 1, buttons: 1 });
     const beforeAction = await page.evaluate(() => window.__demoExtension?.actionCount);

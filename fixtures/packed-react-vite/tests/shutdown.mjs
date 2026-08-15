@@ -5,7 +5,7 @@ import path from "node:path";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
-const runtimeRoot = path.resolve(".agent-feedback");
+const runtimeRoot = path.resolve(".agent-annotations");
 const sessionPath = path.join(runtimeRoot, "session.json");
 const vite = path.join(path.dirname(require.resolve("vite/package.json")), "bin/vite.js");
 const waitFor = async (predicate, message) => {

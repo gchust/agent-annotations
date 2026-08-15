@@ -1,52 +1,52 @@
-export type AgentFeedbackJsonPrimitive = null | boolean | number | string;
+export type AgentAnnotationsJsonPrimitive = null | boolean | number | string;
 
-export type AgentFeedbackJsonValue =
-  | AgentFeedbackJsonPrimitive
-  | AgentFeedbackJsonValue[]
-  | AgentFeedbackJsonObject;
+export type AgentAnnotationsJsonValue =
+  | AgentAnnotationsJsonPrimitive
+  | AgentAnnotationsJsonValue[]
+  | AgentAnnotationsJsonObject;
 
-export type AgentFeedbackJsonObject = {
-  [key: string]: AgentFeedbackJsonValue;
+export type AgentAnnotationsJsonObject = {
+  [key: string]: AgentAnnotationsJsonValue;
 };
 
-export type AgentFeedbackRect = {
+export type AgentAnnotationsRect = {
   x: number;
   y: number;
   width: number;
   height: number;
 };
 
-export type AgentFeedbackSourceLocation = {
+export type AgentAnnotationsSourceLocation = {
   filePath: string;
   lineNumber: number;
   columnNumber: number;
   componentName: string | null;
 };
 
-export type AgentFeedbackInspection = {
+export type AgentAnnotationsInspection = {
   tagName: string;
   role: string;
   accessibleName: string;
   text: string;
   componentName: string | null;
-  source: AgentFeedbackSourceLocation | null;
-  sourceStack: AgentFeedbackSourceLocation[];
+  source: AgentAnnotationsSourceLocation | null;
+  sourceStack: AgentAnnotationsSourceLocation[];
   htmlPreview: string;
   styleText: string;
   attributes: Record<string, string>;
 };
 
-export type AgentFeedbackTarget = {
+export type AgentAnnotationsTarget = {
   selector: string;
-  bounds: AgentFeedbackRect;
-  inspection: AgentFeedbackInspection;
+  bounds: AgentAnnotationsRect;
+  inspection: AgentAnnotationsInspection;
 };
 
-export type AgentFeedbackRegion = AgentFeedbackRect & {
+export type AgentAnnotationsRegion = AgentAnnotationsRect & {
   coordinateSpace: "document";
 };
 
-export type AgentFeedbackPageContext = {
+export type AgentAnnotationsPageContext = {
   url: string;
   routeKey: string;
   title: string;
@@ -54,7 +54,7 @@ export type AgentFeedbackPageContext = {
   scroll: { x: number; y: number };
 };
 
-export type AgentFeedbackEvidenceReference = {
+export type AgentAnnotationsEvidenceReference = {
   kind: "screenshot" | "attachment";
   ref: string;
   mediaType?: string;
@@ -63,45 +63,45 @@ export type AgentFeedbackEvidenceReference = {
   capturedAt?: string;
 };
 
-export type AgentFeedbackCompletionEvidence = {
+export type AgentAnnotationsCompletionEvidence = {
   verified: boolean;
   summary: string;
   source: string;
   completedAt: string;
 };
 
-export type AgentFeedbackExtensionData = Record<
+export type AgentAnnotationsExtensionData = Record<
   string,
-  AgentFeedbackJsonObject
+  AgentAnnotationsJsonObject
 >;
 
-export type AgentFeedbackAnnotation = {
+export type AgentAnnotation = {
   annotationId: string;
   kind: "element" | "multi" | "region";
   comment: string;
   status: "open" | "completed";
   createdAt: string;
   completedAt?: string;
-  completionEvidence?: AgentFeedbackCompletionEvidence;
-  pageContext: AgentFeedbackPageContext;
-  targets?: AgentFeedbackTarget[];
-  region?: AgentFeedbackRegion;
-  evidence?: AgentFeedbackEvidenceReference[];
-  extensions: AgentFeedbackExtensionData;
+  completionEvidence?: AgentAnnotationsCompletionEvidence;
+  pageContext: AgentAnnotationsPageContext;
+  targets?: AgentAnnotationsTarget[];
+  region?: AgentAnnotationsRegion;
+  evidence?: AgentAnnotationsEvidenceReference[];
+  extensions: AgentAnnotationsExtensionData;
 };
 
-export type AgentFeedbackTask = {
-  schema: "agent-feedback.task.v1";
+export type AgentAnnotationsTask = {
+  schema: "agent-annotations.task.v1";
   schemaVersion: 1;
   taskId: string;
   taskRevision: number;
   status: "active" | "completed";
   createdAt: string;
   updatedAt: string;
-  annotations: AgentFeedbackAnnotation[];
+  annotations: AgentAnnotation[];
 };
 
-export type AgentFeedbackValidationIssue = {
+export type AgentAnnotationsValidationIssue = {
   path: string;
   code:
     | "invalid_type"
@@ -112,46 +112,46 @@ export type AgentFeedbackValidationIssue = {
   message: string;
 };
 
-export type AgentFeedbackValidationResult<T> =
+export type AgentAnnotationsValidationResult<T> =
   | { ok: true; value: T }
-  | { ok: false; issue: AgentFeedbackValidationIssue };
+  | { ok: false; issue: AgentAnnotationsValidationIssue };
 
-export type CreateAgentFeedbackTaskInput = {
+export type CreateAgentAnnotationsTaskInput = {
   taskId: string;
   createdAt: string;
-  annotations?: AgentFeedbackAnnotation[];
+  annotations?: AgentAnnotation[];
 };
 
-export type AgentFeedbackMutationOperation =
-  | { op: "add"; annotation: AgentFeedbackAnnotation }
+export type AgentAnnotationsMutationOperation =
+  | { op: "add"; annotation: AgentAnnotation }
   | { op: "update"; annotationId: string; comment: string }
   | {
       op: "setExtension";
       annotationId: string;
       extensionId: string;
-      data: AgentFeedbackJsonObject;
+      data: AgentAnnotationsJsonObject;
     }
   | {
       op: "complete";
       annotationId: string;
-      evidence?: Omit<AgentFeedbackCompletionEvidence, "completedAt">;
+      evidence?: Omit<AgentAnnotationsCompletionEvidence, "completedAt">;
     }
   | {
       op: "addEvidence";
       annotationId: string;
-      evidence: AgentFeedbackEvidenceReference;
+      evidence: AgentAnnotationsEvidenceReference;
     }
   | { op: "reopen"; annotationId: string }
   | { op: "remove"; annotationId: string }
   | { op: "removeCompleted" };
 
-export type AgentFeedbackMutationRequest = {
+export type AgentAnnotationsMutationRequest = {
   taskId: string;
   expectedRevision: number;
-  operations: AgentFeedbackMutationOperation[];
+  operations: AgentAnnotationsMutationOperation[];
 };
 
-export type AgentFeedbackMutationError =
+export type AgentAnnotationsMutationError =
   | "invalid_task"
   | "invalid_operation"
   | "task_id_mismatch"
@@ -161,49 +161,49 @@ export type AgentFeedbackMutationError =
   | "invalid_annotation"
   | "invalid_extension";
 
-export type AgentFeedbackMutationResult =
-  | { ok: true; task: AgentFeedbackTask }
-  | { ok: false; error: AgentFeedbackMutationError }
+export type AgentAnnotationsMutationResult =
+  | { ok: true; task: AgentAnnotationsTask }
+  | { ok: false; error: AgentAnnotationsMutationError }
   | {
       ok: false;
       error: "revision_conflict";
       expectedRevision: number;
       actualRevision: number;
-      task: AgentFeedbackTask;
+      task: AgentAnnotationsTask;
     };
 
-export type AgentFeedbackAnnotationFilter = "open" | "all";
+export type AgentAnnotationFilter = "open" | "all";
 
-export type AgentFeedbackFormatOptions = {
+export type AgentAnnotationsFormatOptions = {
   format?: "markdown" | "json";
-  annotations?: AgentFeedbackAnnotationFilter;
+  annotations?: AgentAnnotationFilter;
 };
 
-export type AgentFeedbackRedactionManifest = {
+export type AgentAnnotationsRedactionManifest = {
   droppedKeys: string[];
   redactedValues: number;
   truncatedValues: number;
 };
 
-export type AgentFeedbackExtensionRedactor = {
+export type AgentAnnotationsExtensionRedactor = {
   extensionId: string;
   redact(
-    data: AgentFeedbackJsonObject,
+    data: AgentAnnotationsJsonObject,
     context: { annotationId: string; extensionId: string }
-  ): AgentFeedbackJsonObject | null;
+  ): AgentAnnotationsJsonObject | null;
 };
 
-export type AgentFeedbackRedactionResult = {
-  task: AgentFeedbackTask;
-  manifest: AgentFeedbackRedactionManifest;
+export type AgentAnnotationsRedactionResult = {
+  task: AgentAnnotationsTask;
+  manifest: AgentAnnotationsRedactionManifest;
 };
 
-export type AgentFeedbackSelectionState<T> = {
+export type AgentAnnotationsSelectionState<T> = {
   targets: T[];
-  region?: AgentFeedbackRect;
+  region?: AgentAnnotationsRect;
 };
 
-export type AgentFeedbackAnchorRect = {
+export type AgentAnnotationsAnchorRect = {
   left: number;
   top: number;
   right: number;
@@ -212,16 +212,16 @@ export type AgentFeedbackAnchorRect = {
   height: number;
 };
 
-export type AgentFeedbackViewport = { width: number; height: number };
+export type AgentAnnotationsViewport = { width: number; height: number };
 
-export type AgentFeedbackPlacement = {
+export type AgentAnnotationsPlacement = {
   left: number;
   top: number;
   width: number;
   maxHeight: number;
 };
 
-export type AgentFeedbackShortcutDefinition = {
+export type AgentAnnotationsShortcutDefinition = {
   id: string;
   key: string;
   code?: string;
@@ -230,7 +230,7 @@ export type AgentFeedbackShortcutDefinition = {
   shift: boolean;
 };
 
-export type AgentFeedbackShortcutInput = {
+export type AgentAnnotationsShortcutInput = {
   key: string;
   code?: string;
   ctrlKey?: boolean;
@@ -242,11 +242,11 @@ export type AgentFeedbackShortcutInput = {
   editable?: boolean;
 };
 
-export type AgentFeedbackPlatform = "mac" | "other";
+export type AgentAnnotationsPlatform = "mac" | "other";
 
 export interface TaskTransport {
-  read(): Promise<AgentFeedbackTask>;
-  mutate(request: AgentFeedbackMutationRequest): Promise<AgentFeedbackTask>;
+  read(): Promise<AgentAnnotationsTask>;
+  mutate(request: AgentAnnotationsMutationRequest): Promise<AgentAnnotationsTask>;
   writeEvidence?(input: {
     taskId: string;
     expectedRevision: number;
@@ -254,23 +254,23 @@ export interface TaskTransport {
     png: string;
     width: number;
     height: number;
-  }): Promise<AgentFeedbackTask>;
-  subscribe?(listener: (task: AgentFeedbackTask) => void): () => void;
+  }): Promise<AgentAnnotationsTask>;
+  subscribe?(listener: (task: AgentAnnotationsTask) => void): () => void;
 }
 
-export type AgentFeedbackDiagnosticsEntry = {
+export type AgentAnnotationsDiagnosticsEntry = {
   source: "console" | "window" | "promise";
   message: string;
   timestamp: string;
 };
 
-export type AgentFeedbackLocaleMessages = Record<string, string>;
+export type AgentAnnotationsLocaleMessages = Record<string, string>;
 
-export type AgentFeedbackLocalizedText =
+export type AgentAnnotationsLocalizedText =
   | string
   | Readonly<Record<string, string>>;
 
-export type AgentFeedbackIconProps = {
+export type AgentAnnotationsIconProps = {
   className?: string;
   size?: number;
 };
@@ -278,7 +278,7 @@ export type AgentFeedbackIconProps = {
 export interface HostIntegration {
   locale?(): string;
   routeKey?(): string;
-  messages?: AgentFeedbackLocaleMessages;
+  messages?: AgentAnnotationsLocaleMessages;
   identity?(element: Element): Record<string, string>;
 }
 
@@ -286,30 +286,30 @@ export interface TargetEnricher {
   id: string;
   enrich(context: {
     element: Element;
-    inspection: AgentFeedbackInspection;
-  }): AgentFeedbackJsonObject | null | Promise<AgentFeedbackJsonObject | null>;
+    inspection: AgentAnnotationsInspection;
+  }): AgentAnnotationsJsonObject | null | Promise<AgentAnnotationsJsonObject | null>;
 }
 
-export interface FeedbackRedactor {
+export interface AnnotationRedactor {
   id: string;
   redact(
-    data: AgentFeedbackJsonObject,
+    data: AgentAnnotationsJsonObject,
     context: { annotationId: string; extensionId: string }
-  ): AgentFeedbackJsonObject | null;
+  ): AgentAnnotationsJsonObject | null;
 }
 
-export interface FeedbackExporter {
+export interface AnnotationExporter {
   id: string;
   export(context: {
-    task: AgentFeedbackTask;
-    annotations: AgentFeedbackAnnotationFilter;
+    task: AgentAnnotationsTask;
+    annotations: AgentAnnotationFilter;
   }): string | Promise<string>;
 }
 
-export type AgentFeedbackCaptureMode = "idle" | "pick" | "multi" | "area";
+export type AgentAnnotationsCaptureMode = "idle" | "pick" | "multi" | "area";
 
-export type AgentFeedbackToolbarShortcut = Omit<
-  AgentFeedbackShortcutDefinition,
+export type AgentAnnotationsToolbarShortcut = Omit<
+  AgentAnnotationsShortcutDefinition,
   "id"
 >;
 
@@ -318,7 +318,7 @@ export type StudioPublicShortcut = {
   extensionId: string;
   label: string;
   formatted: string;
-  shortcut: AgentFeedbackToolbarShortcut;
+  shortcut: AgentAnnotationsToolbarShortcut;
 };
 
 export type StudioPublicExporter = {
@@ -327,12 +327,12 @@ export type StudioPublicExporter = {
 };
 
 export type StudioPublicSnapshot = {
-  task: AgentFeedbackTask;
-  captureMode: AgentFeedbackCaptureMode;
+  task: AgentAnnotationsTask;
+  captureMode: AgentAnnotationsCaptureMode;
   collapsed: boolean;
   markersVisible: boolean;
   openPanel: string | null;
-  diagnostics: readonly AgentFeedbackDiagnosticsEntry[];
+  diagnostics: readonly AgentAnnotationsDiagnosticsEntry[];
   shortcuts: readonly StudioPublicShortcut[];
   exporters: readonly StudioPublicExporter[];
 };
@@ -369,17 +369,17 @@ export interface StudioPublicApi {
     exporters: {
       format(
         id?: string,
-        annotations?: AgentFeedbackAnnotationFilter
+        annotations?: AgentAnnotationFilter
       ): Promise<string>;
       copy(
         id?: string,
-        annotations?: AgentFeedbackAnnotationFilter
+        annotations?: AgentAnnotationFilter
       ): Promise<void>;
     };
   };
 }
 
-export type AgentFeedbackExtensionContext = {
+export type AgentAnnotationsExtensionContext = {
   readonly transport: TaskTransport;
   readonly studio: StudioPublicApi;
 };
@@ -393,9 +393,9 @@ export interface ToolbarContribution {
   id: string;
   group: "capture" | "handoff" | "view" | "host";
   order?: number;
-  label: AgentFeedbackLocalizedText;
-  icon: import("react").ComponentType<AgentFeedbackIconProps>;
-  shortcut?: AgentFeedbackToolbarShortcut;
+  label: AgentAnnotationsLocalizedText;
+  icon: import("react").ComponentType<AgentAnnotationsIconProps>;
+  shortcut?: AgentAnnotationsToolbarShortcut;
   kind: "action" | "toggle" | "panel";
   isVisible?(snapshot: StudioPublicSnapshot): boolean;
   isEnabled?(snapshot: StudioPublicSnapshot): boolean;
@@ -406,7 +406,7 @@ export interface ToolbarContribution {
 
 export interface PanelContribution {
   id: string;
-  title: AgentFeedbackLocalizedText;
+  title: AgentAnnotationsLocalizedText;
   render: import("react").ComponentType<{
     studio: StudioPublicApi;
     close(): void;
@@ -415,25 +415,25 @@ export interface PanelContribution {
   exclusiveGroup?: string;
 }
 
-export type MountAgentFeedbackOptions = {
+export type MountAgentAnnotationsOptions = {
   transport: TaskTransport;
-  extensions?: readonly AgentFeedbackClientExtension[];
+  extensions?: readonly AgentAnnotationsClientExtension[];
 };
 
-export interface AgentFeedbackClientExtension {
+export interface AgentAnnotationsClientExtension {
   id: string;
   apiVersion: 1;
-  setup?(context: AgentFeedbackExtensionContext): void | (() => void);
+  setup?(context: AgentAnnotationsExtensionContext): void | (() => void);
   toolbar?: readonly ToolbarContribution[];
   panels?: readonly PanelContribution[];
   host?: HostIntegration;
   targetEnrichers?: readonly TargetEnricher[];
-  redactors?: readonly FeedbackRedactor[];
-  exporters?: readonly FeedbackExporter[];
-  messages?: AgentFeedbackLocaleMessages;
+  redactors?: readonly AnnotationRedactor[];
+  exporters?: readonly AnnotationExporter[];
+  messages?: AgentAnnotationsLocaleMessages;
 }
 
-export type MountedAgentFeedback = {
+export type MountedAgentAnnotations = {
   api: StudioPublicApi;
   unmount(): void;
 };

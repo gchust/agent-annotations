@@ -1,26 +1,26 @@
 import type {
-  AgentFeedbackAnchorRect,
-  AgentFeedbackPlacement,
-  AgentFeedbackViewport,
+  AgentAnnotationsAnchorRect,
+  AgentAnnotationsPlacement,
+  AgentAnnotationsViewport,
 } from "../types/index.js";
 
-export const AGENT_FEEDBACK_PLACEMENT_GAP = 8;
-export const AGENT_FEEDBACK_PLACEMENT_MARGIN = 4;
+export const AGENT_ANNOTATIONS_PLACEMENT_GAP = 8;
+export const AGENT_ANNOTATIONS_PLACEMENT_MARGIN = 4;
 
 const clamp = (value: number, min: number, max: number): number =>
   Math.min(Math.max(value, min), max);
 
-export function resolveAgentFeedbackPlacement(input: {
-  trigger: AgentFeedbackAnchorRect;
-  viewport: AgentFeedbackViewport;
+export function resolveAgentAnnotationsPlacement(input: {
+  trigger: AgentAnnotationsAnchorRect;
+  viewport: AgentAnnotationsViewport;
   width: number;
   maxHeight: number;
   gap?: number;
   preferredSide?: "above" | "below";
   surfaceHeight?: number;
-}): AgentFeedbackPlacement {
-  const margin = AGENT_FEEDBACK_PLACEMENT_MARGIN;
-  const gap = input.gap ?? AGENT_FEEDBACK_PLACEMENT_GAP;
+}): AgentAnnotationsPlacement {
+  const margin = AGENT_ANNOTATIONS_PLACEMENT_MARGIN;
+  const gap = input.gap ?? AGENT_ANNOTATIONS_PLACEMENT_GAP;
   const width = Math.min(
     Math.max(0, input.width),
     Math.max(0, input.viewport.width - margin * 2)
@@ -58,12 +58,12 @@ export function resolveAgentFeedbackPlacement(input: {
   };
 }
 
-export const agentFeedbackAnchorRect = (rect: {
+export const agentAnnotationsAnchorRect = (rect: {
   left: number;
   top: number;
   width: number;
   height: number;
-}): AgentFeedbackAnchorRect => ({
+}): AgentAnnotationsAnchorRect => ({
   ...rect,
   right: rect.left + rect.width,
   bottom: rect.top + rect.height,

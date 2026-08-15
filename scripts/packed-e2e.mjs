@@ -6,16 +6,16 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const fixture = path.join(root, "fixtures/packed-react-vite");
-const temporary = mkdtempSync(path.join(tmpdir(), "agent-feedback-packed-e2e-"));
+const temporary = mkdtempSync(path.join(tmpdir(), "agent-annotations-packed-e2e-"));
 const consumer = path.join(temporary, "consumer");
 const tarball = path.join(consumer, "gchust-agent-annotations.tgz");
-const generated = new Set(["node_modules", "dist", ".agent-feedback", "playwright-report", "test-results"]);
+const generated = new Set(["node_modules", "dist", ".agent-annotations", "playwright-report", "test-results"]);
 const bypass = [process.env.NO_PROXY, "localhost", "127.0.0.1"].filter(Boolean).join(",");
 const env = {
   ...process.env,
   NO_PROXY: bypass,
   no_proxy: bypass,
-  AGENT_FEEDBACK_EVIDENCE: path.join(temporary, "evidence"),
+  AGENT_ANNOTATIONS_EVIDENCE: path.join(temporary, "evidence"),
 };
 const run = (args, cwd = root, stdio = "inherit") =>
   execFileSync("pnpm", args, { cwd, env, stdio, encoding: "utf8" });
@@ -41,5 +41,5 @@ try {
   passed = true;
 } finally {
   if (passed) rmSync(temporary, { recursive: true, force: true });
-  else console.error(`[agent-feedback] preserved failed packed E2E consumer: ${consumer}`);
+  else console.error(`[agent-annotations] preserved failed packed E2E consumer: ${consumer}`);
 }

@@ -1,6 +1,6 @@
 node_modules/
 dist/
-.agent-feedback/
+.agent-annotations/
 playwright-report/
 test-results/
 *.png

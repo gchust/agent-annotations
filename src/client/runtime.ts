@@ -1,24 +1,24 @@
 import {
-  createAgentFeedbackId,
-  formatAgentFeedbackShortcut,
-  formatAgentFeedbackTask,
-  matchesAgentFeedbackShortcut,
-  redactAgentFeedbackTask,
-  redactAgentFeedbackText,
-  toAgentFeedbackDocumentRegion,
+  createAgentAnnotationsId,
+  formatAgentAnnotationsShortcut,
+  formatAgentAnnotationsTask,
+  matchesAgentAnnotationsShortcut,
+  redactAgentAnnotationsTask,
+  redactAgentAnnotationsText,
+  toAgentAnnotationsDocumentRegion,
 } from "../core/index.js";
 import { ClientExtensionRegistry } from "../extension/index.js";
 import type {
-  AgentFeedbackAnnotation,
-  AgentFeedbackCaptureMode,
-  AgentFeedbackDiagnosticsEntry,
-  AgentFeedbackIconProps,
-  AgentFeedbackMutationOperation,
-  AgentFeedbackRect,
-  AgentFeedbackTask,
+  AgentAnnotation,
+  AgentAnnotationsCaptureMode,
+  AgentAnnotationsDiagnosticsEntry,
+  AgentAnnotationsIconProps,
+  AgentAnnotationsMutationOperation,
+  AgentAnnotationsRect,
+  AgentAnnotationsTask,
   HostIntegration,
-  MountedAgentFeedback,
-  MountAgentFeedbackOptions,
+  MountedAgentAnnotations,
+  MountAgentAnnotationsOptions,
   StudioPublicApi,
   StudioPublicSnapshot,
   ToolbarCommandContext,
@@ -46,9 +46,9 @@ import {
   SaveIcon,
 } from "./icons.js";
 import { captureViewportPng } from "./screenshot.js";
-import { AGENT_FEEDBACK_STYLES } from "./styles.js";
+import { AGENT_ANNOTATIONS_STYLES } from "./styles.js";
 
-const HOST_ID = "agent-feedback-root";
+const HOST_ID = "agent-annotations-root";
 const IGNORE_ATTRIBUTE = "data-react-grab-ignore";
 type RegisteredToolbarContribution = ReturnType<
   ClientExtensionRegistry["getToolbarContributions"]
@@ -78,9 +78,9 @@ const elementAnnotation = async (
   comment: string,
   host: HostIntegration | undefined,
   enrichers: readonly RegisteredTargetEnricher[]
-): Promise<AgentFeedbackAnnotation> => {
+): Promise<AgentAnnotation> => {
   const targets = await Promise.all(elements.map((element) => inspectTarget(element, host)));
-  const extensions: AgentFeedbackAnnotation["extensions"] = {};
+  const extensions: AgentAnnotation["extensions"] = {};
   for (const enricher of enrichers) {
     const values = await Promise.all(
       elements.map((element, index) =>
@@ -96,7 +96,7 @@ const elementAnnotation = async (
     }
   }
   return {
-    annotationId: createAgentFeedbackId(),
+    annotationId: createAgentAnnotationsId(),
     kind,
     comment,
     status: "open",
@@ -107,11 +107,11 @@ const elementAnnotation = async (
   };
 };
 
-export async function mountAgentFeedback(
-  options: MountAgentFeedbackOptions
-): Promise<MountedAgentFeedback> {
-  if (typeof document === "undefined") throw new Error("Agent Feedback requires a browser document");
-  if (document.getElementById(HOST_ID)) throw new Error("Agent Feedback is already mounted");
+export async function mountAgentAnnotations(
+  options: MountAgentAnnotationsOptions
+): Promise<MountedAgentAnnotations> {
+  if (typeof document === "undefined") throw new Error("Agent Annotations requires a browser document");
+  if (document.getElementById(HOST_ID)) throw new Error("Agent Annotations is already mounted");
 
   const registry = new ClientExtensionRegistry();
   const registrations: Array<() => void> = [];
@@ -125,14 +125,14 @@ export async function mountAgentFeedback(
   }
   const host = registry.getHostIntegration();
 
-  let task: AgentFeedbackTask;
+  let task: AgentAnnotationsTask;
   try {
     task = await options.transport.read();
   } catch (error) {
     for (const unregister of registrations.reverse()) unregister();
     throw error;
   }
-  let captureMode: AgentFeedbackCaptureMode = "idle";
+  let captureMode: AgentAnnotationsCaptureMode = "idle";
   let collapsed = false;
   let markersVisible = true;
   let openPanel: StudioPublicSnapshot["openPanel"] = null;
@@ -140,11 +140,11 @@ export async function mountAgentFeedback(
   let hover: Element | null = null;
   let composer:
     | { kind: "element" | "multi"; elements: Element[] }
-    | { kind: "region"; rect: AgentFeedbackRect; sampled: number }
+    | { kind: "region"; rect: AgentAnnotationsRect; sampled: number }
     | null = null;
   let editingId: string | null = null;
   let areaStart: { x: number; y: number } | null = null;
-  let areaRect: AgentFeedbackRect | null = null;
+  let areaRect: AgentAnnotationsRect | null = null;
   let status = "";
   let copyFallback = "";
   let dockPosition: { left: number; top: number } | null = null;
@@ -155,7 +155,7 @@ export async function mountAgentFeedback(
   let iconRoots: Root[] = [];
   let destroyed = false;
   const listeners = new Set<(snapshot: StudioPublicSnapshot) => void>();
-  const diagnostics: AgentFeedbackDiagnosticsEntry[] = [];
+  const diagnostics: AgentAnnotationsDiagnosticsEntry[] = [];
   const cleanups: Array<() => void> = [];
   const timers = new Set<number>();
   const frames = new Set<number>();
@@ -201,12 +201,12 @@ export async function mountAgentFeedback(
 
   const hostElement = document.createElement("div");
   hostElement.id = HOST_ID;
-  hostElement.setAttribute("data-agent-feedback-root", "");
+  hostElement.setAttribute("data-agent-annotations-root", "");
   hostElement.setAttribute(IGNORE_ATTRIBUTE, "");
   document.body.append(hostElement);
   const shadow = hostElement.attachShadow({ mode: "open" });
   const style = document.createElement("style");
-  style.textContent = AGENT_FEEDBACK_STYLES;
+  style.textContent = AGENT_ANNOTATIONS_STYLES;
   shadow.append(style);
   const root = document.createElement("div");
   shadow.append(root);
@@ -231,7 +231,7 @@ export async function mountAgentFeedback(
           id: contribution.id,
           extensionId: contribution.extensionId,
           label: localized(contribution.label),
-          formatted: formatAgentFeedbackShortcut(
+          formatted: formatAgentAnnotationsShortcut(
             { id: contribution.id, ...contribution.shortcut },
             platform
           ),
@@ -257,10 +257,10 @@ export async function mountAgentFeedback(
     for (const listener of listeners) listener(value);
   };
   const renderStatus = () => {
-    root.querySelector(".af-status")?.remove();
+    root.querySelector(".aa-status")?.remove();
     if (!status) return;
     const toast = document.createElement("div");
-    toast.className = "af-status";
+    toast.className = "aa-status";
     toast.setAttribute("role", "status");
     toast.textContent = status;
     root.append(toast);
@@ -276,7 +276,7 @@ export async function mountAgentFeedback(
       }
     }, 1800);
   };
-  const mutate = async (operations: AgentFeedbackMutationOperation[]): Promise<AgentFeedbackTask | undefined> => {
+  const mutate = async (operations: AgentAnnotationsMutationOperation[]): Promise<AgentAnnotationsTask | undefined> => {
     if (destroyed) return undefined;
     const redactors = registry.getRedactors().map((redactor) => ({
       extensionId: redactor.extensionId,
@@ -286,7 +286,7 @@ export async function mountAgentFeedback(
       operation.op === "add"
         ? {
             ...operation,
-            annotation: redactAgentFeedbackTask(
+            annotation: redactAgentAnnotationsTask(
               { ...task, annotations: [operation.annotation] },
               redactors
             ).task.annotations[0],
@@ -304,7 +304,7 @@ export async function mountAgentFeedback(
     emit();
     return next;
   };
-  const mutateCommand = async (operations: AgentFeedbackMutationOperation[]): Promise<void> => {
+  const mutateCommand = async (operations: AgentAnnotationsMutationOperation[]): Promise<void> => {
     await mutate(operations);
   };
 
@@ -312,7 +312,7 @@ export async function mountAgentFeedback(
     filter: "open" | "all",
     exporterId?: string
   ): Promise<string> => {
-    const redacted = redactAgentFeedbackTask(
+    const redacted = redactAgentAnnotationsTask(
       task,
       registry.getRedactors().map((redactor) => ({
         extensionId: redactor.extensionId,
@@ -327,7 +327,7 @@ export async function mountAgentFeedback(
     }
     return exporter
       ? exporter.export({ task: redacted, annotations: filter })
-      : formatAgentFeedbackTask(redacted, { annotations: filter });
+      : formatAgentAnnotationsTask(redacted, { annotations: filter });
   };
   const copyOutput = async (
     exporterId?: string,
@@ -380,7 +380,7 @@ export async function mountAgentFeedback(
     render();
     emit();
   };
-  const startCapture = (mode: Exclude<AgentFeedbackCaptureMode, "idle">) => {
+  const startCapture = (mode: Exclude<AgentAnnotationsCaptureMode, "idle">) => {
     captureMode = mode;
     selected = [];
     composer = null;
@@ -395,7 +395,7 @@ export async function mountAgentFeedback(
     editingId = id;
     openPanel = null;
     render();
-    scheduleFrame(() => root.querySelector<HTMLElement>(".af-editor textarea")?.focus());
+    scheduleFrame(() => root.querySelector<HTMLElement>(".aa-editor textarea")?.focus());
   };
 
   const api: StudioPublicApi = {
@@ -486,25 +486,25 @@ export async function mountAgentFeedback(
 
   const renderIcon = (
     node: HTMLElement,
-    Icon: ComponentType<AgentFeedbackIconProps>
+    Icon: ComponentType<AgentAnnotationsIconProps>
   ): void => {
     const mount = document.createElement("span");
-    mount.className = "af-icon-slot";
+    mount.className = "aa-icon-slot";
     node.append(mount);
     const iconRoot = createRoot(mount);
     iconRoots.push(iconRoot);
-    flushSync(() => iconRoot.render(createElement(Icon, { className: "af-icon" })));
+    flushSync(() => iconRoot.render(createElement(Icon, { className: "aa-icon" })));
   };
 
   const iconButton = (
     label: string,
-    Icon: ComponentType<AgentFeedbackIconProps>,
+    Icon: ComponentType<AgentAnnotationsIconProps>,
     action?: () => void,
     attributes: Record<string, string> = {}
   ): HTMLButtonElement => {
     const node = document.createElement("button");
     node.type = "button";
-    node.className = "af-action";
+    node.className = "aa-action";
     node.setAttribute("aria-label", attributes["aria-label"] ?? label);
     for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, value);
     renderIcon(node, Icon);
@@ -516,11 +516,11 @@ export async function mountAgentFeedback(
 
   const submitButton = (
     label: string,
-    Icon: ComponentType<AgentFeedbackIconProps>
+    Icon: ComponentType<AgentAnnotationsIconProps>
   ): HTMLButtonElement => {
     const node = iconButton(label, Icon);
     node.type = "submit";
-    node.className = "af-button af-icon-button af-primary";
+    node.className = "aa-button aa-icon-button aa-primary";
     return node;
   };
 
@@ -528,14 +528,14 @@ export async function mountAgentFeedback(
   const hideTooltip = () => {
     if (tooltipTimer !== null) cancelTimer(tooltipTimer);
     tooltipTimer = null;
-    root.querySelector(".af-tooltip")?.remove();
+    root.querySelector(".aa-tooltip")?.remove();
   };
   const showTooltip = (trigger: HTMLElement) => {
     hideTooltip();
     tooltipTimer = scheduleTimer(() => {
       tooltipTimer = null;
       const tooltip = document.createElement("div");
-      tooltip.className = "af-tooltip";
+      tooltip.className = "aa-tooltip";
       tooltip.role = "tooltip";
       tooltip.textContent = trigger.getAttribute("aria-label") ?? "";
       const rect = trigger.getBoundingClientRect();
@@ -545,9 +545,9 @@ export async function mountAgentFeedback(
     }, 300);
   };
 
-  const addOutline = (rect: AgentFeedbackRect, region = false) => {
+  const addOutline = (rect: AgentAnnotationsRect, region = false) => {
     const node = document.createElement("div");
-    node.className = region ? "af-outline" : "af-outline";
+    node.className = region ? "aa-outline" : "aa-outline";
     if (region) node.dataset.region = "true";
     Object.assign(node.style, {
       left: `${rect.x}px`, top: `${rect.y}px`, width: `${rect.width}px`, height: `${rect.height}px`,
@@ -580,7 +580,7 @@ export async function mountAgentFeedback(
           : null;
       const marker = document.createElement("button");
       marker.type = "button";
-      marker.className = "af-marker";
+      marker.className = "aa-marker";
       marker.dataset.status = annotation.status;
       marker.dataset.annotationId = annotation.annotationId;
       marker.setAttribute("aria-label", `Annotation ${index + 1}: edit`);
@@ -596,20 +596,20 @@ export async function mountAgentFeedback(
   const renderComposer = () => {
     if (!composer) return;
     const surface = document.createElement("form");
-    surface.className = "af-composer";
+    surface.className = "aa-composer";
     surface.setAttribute("aria-label", "Annotation composer");
     const title = document.createElement("strong");
     title.textContent = composer.kind === "region"
       ? `Area (${composer.sampled} sampled targets)`
       : `${composer.kind === "multi" ? "Multi" : "Pick"} annotation`;
     const textarea = document.createElement("textarea");
-    textarea.className = "af-textarea";
+    textarea.className = "aa-textarea";
     textarea.setAttribute("aria-label", "Annotation comment");
     textarea.placeholder = "Describe the requested change";
     const actions = document.createElement("div");
-    actions.className = "af-actions";
+    actions.className = "aa-actions";
     const cancel = iconButton("Cancel", CloseIcon, cancelCapture);
-    cancel.className = "af-button af-icon-button";
+    cancel.className = "aa-button aa-icon-button";
     const save = submitButton("Save annotation", SaveIcon);
     actions.append(cancel, save);
     surface.append(title, textarea, actions);
@@ -621,13 +621,13 @@ export async function mountAgentFeedback(
       try {
         const annotation = composer?.kind === "region"
           ? {
-              annotationId: createAgentFeedbackId(),
+              annotationId: createAgentAnnotationsId(),
               kind: "region" as const,
               comment,
               status: "open" as const,
               createdAt: now(),
               pageContext: pageContext(host),
-              region: toAgentFeedbackDocumentRegion(composer.rect, { x: scrollX, y: scrollY }),
+              region: toAgentAnnotationsDocumentRegion(composer.rect, { x: scrollX, y: scrollY }),
               extensions: {},
             }
           : await elementAnnotation(
@@ -675,7 +675,7 @@ export async function mountAgentFeedback(
     scheduleFrame(() => textarea.focus());
   };
 
-  const positionSurface = (surface: HTMLElement, anchor: AgentFeedbackRect) => {
+  const positionSurface = (surface: HTMLElement, anchor: AgentAnnotationsRect) => {
     const surfaceRect = surface.getBoundingClientRect();
     const edge = 8;
     const maxLeft = Math.max(edge, innerWidth - surfaceRect.width - edge);
@@ -689,7 +689,7 @@ export async function mountAgentFeedback(
   };
 
   function positionComposer(): void {
-    const surface = root.querySelector<HTMLElement>(".af-composer");
+    const surface = root.querySelector<HTMLElement>(".aa-composer");
     if (!surface || !composer) return;
     const anchor = composer.kind === "region"
       ? composer.rect
@@ -700,8 +700,8 @@ export async function mountAgentFeedback(
   }
 
   const positionEditor = () => {
-    const surface = root.querySelector<HTMLElement>(".af-editor");
-    const marker = Array.from(root.querySelectorAll<HTMLElement>(".af-marker"))
+    const surface = root.querySelector<HTMLElement>(".aa-editor");
+    const marker = Array.from(root.querySelectorAll<HTMLElement>(".aa-marker"))
       .find((node) => node.dataset.annotationId === editingId);
     if (!surface || !marker || marker.hidden) return;
     const markerRect = marker.getBoundingClientRect();
@@ -717,15 +717,15 @@ export async function mountAgentFeedback(
     const annotation = task.annotations.find((entry) => entry.annotationId === editingId);
     if (!annotation) return;
     const surface = document.createElement("form");
-    surface.className = "af-editor";
+    surface.className = "aa-editor";
     surface.setAttribute("role", "dialog");
     surface.setAttribute("aria-label", "Annotation editor");
     const textarea = document.createElement("textarea");
-    textarea.className = "af-textarea";
+    textarea.className = "aa-textarea";
     textarea.setAttribute("aria-label", "Annotation comment");
     textarea.value = annotation.comment;
     const actions = document.createElement("div");
-    actions.className = "af-actions";
+    actions.className = "aa-actions";
     const save = submitButton("Save comment", SaveIcon);
     const statusButton = iconButton(
       annotation.status === "open" ? "Complete" : "Reopen",
@@ -734,16 +734,16 @@ export async function mountAgentFeedback(
       await mutate([{ op: annotation.status === "open" ? "complete" : "reopen", annotationId: annotation.annotationId }]);
       }
     );
-    statusButton.className = "af-button af-icon-button";
+    statusButton.className = "aa-button aa-icon-button";
     const remove = iconButton("Delete", DeleteIcon, async () => {
       await mutate([{ op: "remove", annotationId: annotation.annotationId }]);
       if (destroyed) return;
       editingId = null;
       render();
     });
-    remove.className = "af-button af-icon-button af-danger";
+    remove.className = "aa-button aa-icon-button aa-danger";
     const close = iconButton("Close", CloseIcon, () => { editingId = null; render(); });
-    close.className = "af-button af-icon-button";
+    close.className = "aa-button aa-icon-button";
     actions.append(save, statusButton, remove, close);
     surface.append(textarea, actions);
     surface.addEventListener("submit", async (event) => {
@@ -770,7 +770,7 @@ export async function mountAgentFeedback(
     const contribution = registry.getPanels().find(({ id }) => id === openPanel);
     if (!contribution) return;
     const panel = document.createElement("section");
-    panel.className = "af-panel";
+    panel.className = "aa-panel";
     panel.setAttribute("role", "dialog");
     panel.setAttribute("aria-modal", "false");
     panel.tabIndex = -1;
@@ -810,7 +810,7 @@ export async function mountAgentFeedback(
     for (const iconRoot of iconRoots.splice(0)) iconRoot.unmount();
     root.replaceChildren();
     const dock = document.createElement("div");
-    dock.className = "af-dock";
+    dock.className = "aa-dock";
     dock.dataset.collapsed = String(collapsed);
     if (dockPosition) {
       Object.assign(dock.style, {
@@ -820,7 +820,7 @@ export async function mountAgentFeedback(
       });
     }
     const grip = iconButton("Drag toolbar", GripIcon);
-    grip.className = "af-grip";
+    grip.className = "aa-grip";
     dock.append(grip);
     for (const contribution of toolbar) {
       const current = snapshot();
@@ -871,7 +871,7 @@ export async function mountAgentFeedback(
     for (const element of selected) addOutline(element.getBoundingClientRect());
     if (areaRect) {
       const node = document.createElement("div");
-      node.className = "af-area";
+      node.className = "aa-area";
       Object.assign(node.style, { left: `${areaRect.x}px`, top: `${areaRect.y}px`, width: `${areaRect.width}px`, height: `${areaRect.height}px` });
       root.append(node);
     }
@@ -880,15 +880,15 @@ export async function mountAgentFeedback(
     renderPanel();
     if (copyFallback) {
       const fallback = document.createElement("div");
-      fallback.className = "af-copy-fallback";
+      fallback.className = "aa-copy-fallback";
       fallback.setAttribute("role", "dialog");
       fallback.setAttribute("aria-label", "Manual copy fallback");
       const textarea = document.createElement("textarea");
-      textarea.className = "af-textarea";
+      textarea.className = "aa-textarea";
       textarea.readOnly = true;
       textarea.value = copyFallback;
       const close = iconButton("Close", CloseIcon, () => { copyFallback = ""; render(); });
-      close.className = "af-button af-icon-button";
+      close.className = "aa-button aa-icon-button";
       fallback.append(textarea, close);
       root.append(fallback);
       scheduleFrame(() => textarea.select());
@@ -986,7 +986,7 @@ export async function mountAgentFeedback(
       setInspectionFrozen(true, selected);
       return render();
     }
-    const shortcut = shortcuts.find((entry) => matchesAgentFeedbackShortcut({
+    const shortcut = shortcuts.find((entry) => matchesAgentAnnotationsShortcut({
       id: entry.id,
       ...entry.shortcut,
     }, {
@@ -1005,11 +1005,11 @@ export async function mountAgentFeedback(
     const contribution = toolbar.find(({ id }) => id === shortcut.id);
     if (contribution) executeContribution(contribution);
   };
-  const record = (source: AgentFeedbackDiagnosticsEntry["source"], value: unknown) => {
+  const record = (source: AgentAnnotationsDiagnosticsEntry["source"], value: unknown) => {
     if (destroyed) return;
     diagnostics.push({
       source,
-      message: redactAgentFeedbackText(String(value), { maxLength: 500 }),
+      message: redactAgentAnnotationsText(String(value), { maxLength: 500 }),
       timestamp: now(),
     });
     if (diagnostics.length > 20) diagnostics.shift();
@@ -1106,7 +1106,7 @@ export async function mountAgentFeedback(
       markerFrame = null;
       const resolved: Element[] = [];
       for (const annotation of task.annotations) {
-        const marker = Array.from(root.querySelectorAll<HTMLElement>(".af-marker"))
+        const marker = Array.from(root.querySelectorAll<HTMLElement>(".aa-marker"))
           .find((node) => node.dataset.annotationId === annotation.annotationId);
         if (!marker) continue;
         const target = annotation.targets?.[0]

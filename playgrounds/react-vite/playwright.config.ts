@@ -1,6 +1,6 @@
 import { defineConfig } from "@playwright/test";
 
-const artifactRoot = process.env.AGENT_FEEDBACK_ARTIFACT_DIR ?? "/tmp/agent-feedback-g03";
+const artifactRoot = process.env.AGENT_ANNOTATIONS_ARTIFACT_DIR ?? "/tmp/agent-annotations-g03";
 
 export default defineConfig({
   testDir: "./tests",

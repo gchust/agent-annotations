@@ -12,19 +12,19 @@ import {
 import path from "node:path";
 
 import {
-  applyAgentFeedbackMutation,
-  createAgentFeedbackTask,
-  parseAgentFeedbackTask,
+  applyAgentAnnotationsMutation,
+  createAgentAnnotationsTask,
+  parseAgentAnnotationsTask,
 } from "../core/index.js";
 import type {
-  AgentFeedbackAnnotation,
-  AgentFeedbackMutationRequest,
-  AgentFeedbackTask,
+  AgentAnnotation,
+  AgentAnnotationsMutationRequest,
+  AgentAnnotationsTask,
 } from "../types/index.js";
 
 export const ACTIVE_TASK_FILE = "tasks/active-task.json";
 
-export type AgentFeedbackSession = {
+export type AgentAnnotationsSession = {
   endpoint: string;
   origin: string;
   pid: number;
@@ -80,33 +80,33 @@ export class FileTaskStore {
     this.sessionPath = path.join(this.root, "session.json");
   }
 
-  read(): AgentFeedbackTask | null {
+  read(): AgentAnnotationsTask | null {
     try {
-      return parseAgentFeedbackTask(readJson(this.taskPath));
+      return parseAgentAnnotationsTask(readJson(this.taskPath));
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
       throw error;
     }
   }
 
-  readOrCreate(): AgentFeedbackTask {
+  readOrCreate(): AgentAnnotationsTask {
     const existing = this.read();
     if (existing) return existing;
     return this.create();
   }
 
-  create(): AgentFeedbackTask {
+  create(): AgentAnnotationsTask {
     const createdAt = new Date().toISOString();
-    const task = createAgentFeedbackTask({ taskId: randomUUID(), createdAt });
+    const task = createAgentAnnotationsTask({ taskId: randomUUID(), createdAt });
     atomicWrite(this.taskPath, task);
     return task;
   }
 
   mutate(
-    request: AgentFeedbackMutationRequest,
-    mapAnnotation: (annotation: AgentFeedbackAnnotation) => AgentFeedbackAnnotation = (annotation) => annotation
-  ): Promise<AgentFeedbackTask> {
-    const write = async (): Promise<AgentFeedbackTask> => {
+    request: AgentAnnotationsMutationRequest,
+    mapAnnotation: (annotation: AgentAnnotation) => AgentAnnotation = (annotation) => annotation
+  ): Promise<AgentAnnotationsTask> {
+    const write = async (): Promise<AgentAnnotationsTask> => {
       const unlock = await acquireLock(path.join(this.root, "tasks/.write.lock"));
       try {
         const task = this.read();
@@ -118,7 +118,7 @@ export class FileTaskStore {
         const updatedAt = new Date(
           Math.max(Date.now(), Date.parse(task.updatedAt) + 1)
         ).toISOString();
-        const result = applyAgentFeedbackMutation(task, {
+        const result = applyAgentAnnotationsMutation(task, {
           ...request,
           operations: request.operations.map((operation) => operation.op === "add"
             ? { ...operation, annotation: mapAnnotation(operation.annotation) }
@@ -127,7 +127,7 @@ export class FileTaskStore {
         if (!result.ok) {
           const error = new Error(result.error) as Error & {
             code: string;
-            task?: AgentFeedbackTask;
+            task?: AgentAnnotationsTask;
           };
           error.code = result.error;
           if (result.error === "revision_conflict") error.task = result.task;
@@ -145,9 +145,9 @@ export class FileTaskStore {
   }
 
   async writeEvidence(
-    request: AgentFeedbackMutationRequest,
+    request: AgentAnnotationsMutationRequest,
     input: { annotationId: string; bytes: Buffer; mediaType: "image/png"; width?: number; height?: number }
-  ): Promise<AgentFeedbackTask> {
+  ): Promise<AgentAnnotationsTask> {
     if (!input.bytes.subarray(0, 8).equals(Buffer.from("89504e470d0a1a0a", "hex"))) {
       throw new Error("invalid_png");
     }
@@ -178,7 +178,7 @@ export class FileTaskStore {
     }
   }
 
-  writeSession(session: AgentFeedbackSession): void {
+  writeSession(session: AgentAnnotationsSession): void {
     atomicWrite(this.sessionPath, session);
   }
 

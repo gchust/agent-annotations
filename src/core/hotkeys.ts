@@ -1,10 +1,10 @@
 import type {
-  AgentFeedbackPlatform,
-  AgentFeedbackShortcutDefinition,
-  AgentFeedbackShortcutInput,
+  AgentAnnotationsPlatform,
+  AgentAnnotationsShortcutDefinition,
+  AgentAnnotationsShortcutInput,
 } from "../types/index.js";
 
-export const AGENT_FEEDBACK_SHORTCUTS = [
+export const AGENT_ANNOTATIONS_SHORTCUTS = [
   { id: "pick", key: "P", code: "KeyP", primary: true, alt: true, shift: false },
   { id: "multi", key: "M", code: "KeyM", primary: true, alt: true, shift: false },
   { id: "area", key: "A", code: "KeyA", primary: true, alt: true, shift: false },
@@ -13,11 +13,11 @@ export const AGENT_FEEDBACK_SHORTCUTS = [
   { id: "list", key: "L", code: "KeyL", primary: true, alt: true, shift: false },
   { id: "help", key: "/", code: "Slash", primary: false, alt: false, shift: true },
   { id: "toggle", key: "K", code: "KeyK", primary: true, alt: true, shift: false },
-] as const satisfies readonly AgentFeedbackShortcutDefinition[];
+] as const satisfies readonly AgentAnnotationsShortcutDefinition[];
 
-export function formatAgentFeedbackShortcut(
-  shortcut: AgentFeedbackShortcutDefinition,
-  platform: AgentFeedbackPlatform
+export function formatAgentAnnotationsShortcut(
+  shortcut: AgentAnnotationsShortcutDefinition,
+  platform: AgentAnnotationsPlatform
 ): string {
   return [
     shortcut.primary ? (platform === "mac" ? "⌘" : "Ctrl") : null,
@@ -29,10 +29,10 @@ export function formatAgentFeedbackShortcut(
     .join(platform === "mac" ? "" : "+");
 }
 
-export function matchesAgentFeedbackShortcut(
-  shortcut: AgentFeedbackShortcutDefinition,
-  input: AgentFeedbackShortcutInput,
-  platform: AgentFeedbackPlatform
+export function matchesAgentAnnotationsShortcut(
+  shortcut: AgentAnnotationsShortcutDefinition,
+  input: AgentAnnotationsShortcutInput,
+  platform: AgentAnnotationsPlatform
 ): boolean {
   if (input.editable || input.repeat || input.isComposing) return false;
   const primary = platform === "mac" ? input.metaKey === true : input.ctrlKey === true;

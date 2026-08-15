@@ -1,23 +1,23 @@
 import type {
-  AgentFeedbackRect,
-  AgentFeedbackRegion,
-  AgentFeedbackSelectionState,
+  AgentAnnotationsRect,
+  AgentAnnotationsRegion,
+  AgentAnnotationsSelectionState,
 } from "../types/index.js";
 import { MAX_TARGETS_PER_ANNOTATION } from "./schema.js";
 
-export const emptyAgentFeedbackSelection = <T>(): AgentFeedbackSelectionState<T> => ({
+export const emptyAgentAnnotationsSelection = <T>(): AgentAnnotationsSelectionState<T> => ({
   targets: [],
 });
 
-export const replaceAgentFeedbackSelection = <T>(
+export const replaceAgentAnnotationsSelection = <T>(
   target: T
-): AgentFeedbackSelectionState<T> => ({ targets: [target] });
+): AgentAnnotationsSelectionState<T> => ({ targets: [target] });
 
-export function toggleAgentFeedbackSelection<T>(
-  state: AgentFeedbackSelectionState<T>,
+export function toggleAgentAnnotationsSelection<T>(
+  state: AgentAnnotationsSelectionState<T>,
   target: T,
   equals: (left: T, right: T) => boolean = Object.is
-): AgentFeedbackSelectionState<T> {
+): AgentAnnotationsSelectionState<T> {
   const index = state.targets.findIndex((candidate) => equals(candidate, target));
   if (index !== -1) {
     return {
@@ -30,10 +30,10 @@ export function toggleAgentFeedbackSelection<T>(
     : { ...state, targets: [...state.targets, target] };
 }
 
-export function normalizeAgentFeedbackRegion(
-  raw: AgentFeedbackRect,
+export function normalizeAgentAnnotationsRegion(
+  raw: AgentAnnotationsRect,
   viewport: { width: number; height: number }
-): AgentFeedbackRect {
+): AgentAnnotationsRect {
   const x = Math.min(Math.max(0, Math.round(raw.x)), Math.max(0, viewport.width));
   const y = Math.min(Math.max(0, Math.round(raw.y)), Math.max(0, viewport.height));
   return {
@@ -50,10 +50,10 @@ export function normalizeAgentFeedbackRegion(
   };
 }
 
-export function toAgentFeedbackDocumentRegion(
-  rect: AgentFeedbackRect,
+export function toAgentAnnotationsDocumentRegion(
+  rect: AgentAnnotationsRect,
   scroll: { x: number; y: number }
-): AgentFeedbackRegion {
+): AgentAnnotationsRegion {
   return {
     coordinateSpace: "document",
     x: Math.round(rect.x + scroll.x),

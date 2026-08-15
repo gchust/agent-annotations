@@ -1,10 +1,10 @@
-# Agent Feedback
+# Agent Annotations
 
-Developer-only visual annotations and Code Agent feedback for React/Vite applications.
+Developer-only visual annotations handed to Code Agents in React/Vite applications.
 
 ## Install
 
-Agent Feedback requires Node 20 or newer, React 19, React DOM 19, and Vite 6:
+Agent Annotations requires Node 20 or newer, React 19, React DOM 19, and Vite 6:
 
 ```sh
 pnpm add -D @gchust/agent-annotations
@@ -16,25 +16,25 @@ with a custom `TaskTransport`.
 ## Vite
 
 Register the development-only plugin; it injects the client automatically, so
-the application entry point needs no Agent Feedback code:
+the application entry point needs no Agent Annotations code:
 
 ```ts
-import agentFeedback from "@gchust/agent-annotations/vite";
+import agentAnnotations from "@gchust/agent-annotations/vite";
 import { defineConfig } from "vite";
 
 export default defineConfig({
-  plugins: [agentFeedback()],
+  plugins: [agentAnnotations()],
 });
 ```
 
-The package root exports the host-neutral `agent-feedback.task.v1` core and
-`mountAgentFeedback()` browser runtime. Public contracts are also available
+The package root exports the host-neutral `agent-annotations.task.v1` core and
+`mountAgentAnnotations()` browser runtime. Public contracts are also available
 from `@gchust/agent-annotations/types`; `MemoryTaskTransport` is available only
 from `@gchust/agent-annotations/testing` for tests and playgrounds.
 
 ## Minimal client extension
 
-Create `src/feedback-extension.ts` using only the public extension entry:
+Create `src/annotation-extension.ts` using only the public extension entry:
 
 ```ts
 import { defineClientExtension } from "@gchust/agent-annotations/extension";
@@ -45,7 +45,7 @@ export default defineClientExtension({
   toolbar: [{
     id: "copy-open",
     group: "handoff",
-    label: "Copy open feedback",
+    label: "Copy open annotations",
     icon: () => null,
     kind: "action",
     execute: ({ studio }) => studio.commands.annotations.copyOpen(),
@@ -57,29 +57,29 @@ Register its absolute browser-module path with the Vite plugin:
 
 ```ts
 import path from "node:path";
-import agentFeedback from "@gchust/agent-annotations/vite";
+import agentAnnotations from "@gchust/agent-annotations/vite";
 import { defineConfig } from "vite";
 
 export default defineConfig({
-  plugins: [agentFeedback({
-    clientExtensions: [path.resolve(import.meta.dirname, "src/feedback-extension.ts")],
+  plugins: [agentAnnotations({
+    clientExtensions: [path.resolve(import.meta.dirname, "src/annotation-extension.ts")],
   })],
 });
 ```
 
 ## CLI
 
-The CLI reads `.agent-feedback/tasks/active-task.json`, which always uses
-`agent-feedback.task.v1`:
+The CLI reads `.agent-annotations/tasks/active-task.json`, which always uses
+`agent-annotations.task.v1`:
 
 ```text
-agent-feedback list
-agent-feedback complete <annotation-id> --verified --summary <text>
-agent-feedback reopen <annotation-id>
-agent-feedback print [--json|--markdown]
-agent-feedback verify
-agent-feedback mcp
-agent-feedback audit
+agent-annotations list
+agent-annotations complete <annotation-id> --verified --summary <text>
+agent-annotations reopen <annotation-id>
+agent-annotations print [--json|--markdown]
+agent-annotations verify
+agent-annotations mcp
+agent-annotations audit
 ```
 
 The MCP server is read-only. It exposes annotation/task reads, diagnostics,
@@ -93,7 +93,7 @@ built-in Registry bypasses.
 
 The Vite API binds to loopback by default, requires a random private session
 token, and validates Host plus Origin/Referer. Set `allowRemote: true` only on a
-trusted development network. Runtime data is stored under `.agent-feedback`;
+trusted development network. Runtime data is stored under `.agent-annotations`;
 do not commit it. The client does not collect form values, cookies,
 Authorization headers, request bodies, or response bodies, and generic
 redaction runs before persistence. The CLI is scoped to that runtime directory
@@ -112,5 +112,5 @@ browser-transport entries.
   and cross-origin frames are reported unresolved.
 - Screenshot evidence is best-effort structural evidence, not pixel-perfect
   page capture.
-- This alpha uses only `agent-feedback.task.v1`; it does not read or migrate
+- This alpha uses only `agent-annotations.task.v1`; it does not read or migrate
   previous host-specific schemas, directories, endpoints, or capture tools.

@@ -5,17 +5,17 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createAgentFeedbackTask } from "../../src/core/index.js";
+import { createAgentAnnotationsTask } from "../../src/core/index.js";
 import { createSourcePathService } from "../../src/server/source-path.js";
 import { annotationFixture, targetFixture } from "../core/test-data.js";
 
 const script = path.resolve("dist/cli/index.mjs");
 const roots: string[] = [];
 const fixture = () => {
-  const root = mkdtempSync(path.join(tmpdir(), "agent-feedback-cli-"));
+  const root = mkdtempSync(path.join(tmpdir(), "agent-annotations-cli-"));
   roots.push(root);
   mkdirSync(path.join(root, "tasks"), { recursive: true });
-  const task = createAgentFeedbackTask({
+  const task = createAgentAnnotationsTask({
     taskId: "task-cli",
     createdAt: "2026-08-12T12:00:00.000Z",
     annotations: [annotationFixture()],
@@ -28,13 +28,13 @@ afterEach(() => roots.splice(0).forEach((root) => rmSync(root, { recursive: true
 
 const run = (root: string, args: string[]) => execFileSync(process.execPath, [script, ...args], {
   encoding: "utf8",
-  env: { ...process.env, AGENT_FEEDBACK_DIR: root },
+  env: { ...process.env, AGENT_ANNOTATIONS_DIR: root },
 });
 
 const sourceFixture = () => {
-  const workspace = mkdtempSync(path.join(tmpdir(), "agent-feedback-cli-source-"));
+  const workspace = mkdtempSync(path.join(tmpdir(), "agent-annotations-cli-source-"));
   roots.push(workspace);
-  const runtime = path.join(workspace, ".agent-feedback");
+  const runtime = path.join(workspace, ".agent-annotations");
   const selected = path.join(workspace, "src/a/Card.tsx");
   const wrong = path.join(workspace, "src/b/Card.tsx");
   mkdirSync(path.dirname(selected), { recursive: true });
@@ -42,7 +42,7 @@ const sourceFixture = () => {
   mkdirSync(path.join(runtime, "tasks"), { recursive: true });
   writeFileSync(selected, "export const A = 1;\n");
   writeFileSync(wrong, "export const B = 1;\n");
-  const task = createAgentFeedbackTask({
+  const task = createAgentAnnotationsTask({
     taskId: "task-source",
     createdAt: "2026-08-12T12:00:00.000Z",
     annotations: [annotationFixture({
@@ -61,26 +61,26 @@ const sourceFixture = () => {
 
 describe("public CLI processes", () => {
   it("shows help from the built public binary", () => {
-    expect(run(fixture(), ["--help"])).toContain("Usage: agent-feedback");
+    expect(run(fixture(), ["--help"])).toContain("Usage: agent-annotations");
   });
 
   it("runs every command help plus list, complete, reopen, print, and verify", () => {
     const root = fixture();
     for (const command of ["list", "complete", "reopen", "print", "verify", "mcp", "audit"]) {
-      expect(run(root, [command, "--help"])).toContain("Agent Feedback");
+      expect(run(root, [command, "--help"])).toContain("Agent Annotations");
     }
     expect(run(root, ["list"])).toContain("ann-1");
     expect(run(root, ["complete", "ann-1", "--verified", "--summary", "browser checked"])).toContain("taskRevision 1");
     expect(run(root, ["reopen", "ann-1"])).toContain("taskRevision 2");
-    expect(JSON.parse(run(root, ["print", "--json"]))).toMatchObject({ schema: "agent-feedback.task.v1", taskRevision: 2 });
-    expect(run(root, ["print", "--markdown"])).toContain("# Agent Feedback Task task-cli");
+    expect(JSON.parse(run(root, ["print", "--json"]))).toMatchObject({ schema: "agent-annotations.task.v1", taskRevision: 2 });
+    expect(run(root, ["print", "--markdown"])).toContain("# Agent Annotations Task task-cli");
     expect(JSON.parse(run(root, ["verify"]))).toMatchObject({ ok: true, taskId: "task-cli", taskRevision: 2 });
   });
 
   it("offers read-only MCP initialize, tools/list, and task reads", async () => {
     const root = fixture();
     const child = spawn(process.execPath, [script, "mcp"], {
-      env: { ...process.env, AGENT_FEEDBACK_DIR: root },
+      env: { ...process.env, AGENT_ANNOTATIONS_DIR: root },
       stdio: ["pipe", "pipe", "pipe"],
     });
     const requests = [
@@ -102,7 +102,7 @@ describe("public CLI processes", () => {
       for (const request of requests) child.stdin.write(`${JSON.stringify(request)}\n`);
     });
     child.kill();
-    expect(responses[0].result.serverInfo.name).toBe("agent-feedback");
+    expect(responses[0].result.serverInfo.name).toBe("agent-annotations");
     const tools = responses[1].result.tools;
     expect(tools.map((tool: { name: string }) => tool.name)).toEqual([
       "list_annotations",
@@ -113,10 +113,10 @@ describe("public CLI processes", () => {
       "wait_verification",
     ]);
     expect(JSON.stringify(tools)).not.toMatch(/capture_task|portal.studio|schema v[2-9]/i);
-    expect(responses[2].result.content[0].text).toContain("agent-feedback.task.v1");
+    expect(responses[2].result.content[0].text).toContain("agent-annotations.task.v1");
 
     const unknown = spawn(process.execPath, [script, "mcp"], {
-      env: { ...process.env, AGENT_FEEDBACK_DIR: root },
+      env: { ...process.env, AGENT_ANNOTATIONS_DIR: root },
       stdio: ["pipe", "pipe", "pipe"],
     });
     const failed = await new Promise<any>((resolve) => {
@@ -132,7 +132,7 @@ describe("public CLI processes", () => {
     const baseline = createSourcePathService(workspace).revision(task);
     const child = spawn(process.execPath, [script, "mcp"], {
       cwd: workspace,
-      env: { ...process.env, AGENT_FEEDBACK_DIR: runtime },
+      env: { ...process.env, AGENT_ANNOTATIONS_DIR: runtime },
       stdio: ["pipe", "pipe", "pipe"],
     });
     let settled = false;

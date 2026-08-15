@@ -3,10 +3,10 @@ import path from "node:path";
 
 import { expect, test } from "@playwright/test";
 
-const runtimeRoot = path.resolve(".agent-feedback");
+const runtimeRoot = path.resolve(".agent-annotations");
 const taskPath = path.join(runtimeRoot, "tasks/active-task.json");
 const shadow = (page: import("@playwright/test").Page, selector: string) =>
-  page.locator(`#agent-feedback-root >> ${selector}`);
+  page.locator(`#agent-annotations-root >> ${selector}`);
 const save = async (page: import("@playwright/test").Page, target: import("@playwright/test").Locator, comment: string) => {
   const expected = JSON.parse(readFileSync(taskPath, "utf8")).annotations.length + 1;
   await shadow(page, '[aria-label^="Pick"]').click();
@@ -123,19 +123,19 @@ test("region is bounded and semantic target survives wrapper-heavy sampling", as
 test("dynamic marker refresh stays rAF-bounded and observers stop with hidden markers", async ({ page }) => {
   await page.goto("/");
   await save(page, page.locator("#dynamic-target"), "Dynamic marker");
-  const marker = shadow(page, ".af-marker").last();
+  const marker = shadow(page, ".aa-marker").last();
   await expect(marker).toBeVisible();
   const before = await marker.boundingBox();
   await page.waitForTimeout(10_000);
   const after = await marker.boundingBox();
   expect(after).not.toBeNull();
   expect(before?.x).toBe(after?.x);
-  const refreshes = Number(await page.locator("#agent-feedback-root").getAttribute("data-marker-refreshes"));
+  const refreshes = Number(await page.locator("#agent-annotations-root").getAttribute("data-marker-refreshes"));
   console.log(`dynamic-dom markerRefreshes10s=${refreshes}`);
   expect(refreshes).toBeLessThan(60);
   await shadow(page, '[aria-label^="Markers"]').click();
-  await expect(shadow(page, ".af-marker")).toHaveCount(0);
-  const stopped = Number(await page.locator("#agent-feedback-root").getAttribute("data-marker-refreshes"));
+  await expect(shadow(page, ".aa-marker")).toHaveCount(0);
+  const stopped = Number(await page.locator("#agent-annotations-root").getAttribute("data-marker-refreshes"));
   await page.waitForTimeout(500);
-  expect(Number(await page.locator("#agent-feedback-root").getAttribute("data-marker-refreshes"))).toBe(stopped);
+  expect(Number(await page.locator("#agent-annotations-root").getAttribute("data-marker-refreshes"))).toBe(stopped);
 });

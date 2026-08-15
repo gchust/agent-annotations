@@ -1,14 +1,14 @@
-# Agent Feedback migration baseline
+# Agent Annotations migration baseline
 
 Captured fresh on 2026-08-12 UTC before moving or changing any Default Portal Studio production source.
 
 ## Source repositories
 
 - Default Portal: `/root/work/portal-template-default`
-- Branch: `feat-agent-feedback`
+- Branch: `feat-agent-annotations`
 - Commit: `cdfbfb4c959ee660379b7510d89ce506c15f4817`
-- Standalone package: `/root/work/agent-feedback`, initialized as an independent Git repository on branch `main`.
-- Initial Default Portal `git status --short`: modified `AGENTS.md`; untracked `docs/exec-plans/agent-feedback-npm-extraction-v1/`.
+- Standalone package: `/root/work/agent-annotations`, initialized as an independent Git repository on branch `main`.
+- Initial Default Portal `git status --short`: modified `AGENTS.md`; untracked `docs/exec-plans/agent-annotations-npm-extraction-v1/`.
 - Initial Default Portal `git diff --stat`: `AGENTS.md | 19 +++++++++++++++++++`; no `src/`, `scripts/`, `vite.config.ts`, `package.json`, or lockfile diff.
 
 ## Current embedded Studio inventory

@@ -1,22 +1,22 @@
 import type {
-  AgentFeedbackClientExtension,
-  AgentFeedbackLocaleMessages,
-  FeedbackExporter,
-  FeedbackRedactor,
+  AgentAnnotationsClientExtension,
+  AgentAnnotationsLocaleMessages,
+  AnnotationExporter,
+  AnnotationRedactor,
   HostIntegration,
   PanelContribution,
   TargetEnricher,
   ToolbarContribution,
 } from "../types/index.js";
 
-export const agentFeedbackExtensionApiVersion = 1 as const;
+export const agentAnnotationsExtensionApiVersion = 1 as const;
 
 type Registered<T> = T & { readonly extensionId: string };
 type RegisteredToolbarContribution = Registered<ToolbarContribution>;
 type RegisteredPanelContribution = Registered<PanelContribution>;
 type RegisteredTargetEnricher = Registered<TargetEnricher>;
-type RegisteredFeedbackExporter = Registered<FeedbackExporter>;
-type RegisteredFeedbackRedactor = Registered<FeedbackRedactor>;
+type RegisteredAnnotationExporter = Registered<AnnotationExporter>;
+type RegisteredAnnotationRedactor = Registered<AnnotationRedactor>;
 
 const GROUP_ORDER = ["capture", "handoff", "view", "host"] as const;
 const ID_PATTERN = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
@@ -89,12 +89,12 @@ const assertList = <T extends { id: string }>(
   }
 };
 
-const validateExtension = (extension: AgentFeedbackClientExtension): void => {
+const validateExtension = (extension: AgentAnnotationsClientExtension): void => {
   if (!extension || typeof extension !== "object") {
     throw new TypeError("Invalid client extension");
   }
   assertId("extension", extension.id);
-  if (extension.apiVersion !== agentFeedbackExtensionApiVersion) {
+  if (extension.apiVersion !== agentAnnotationsExtensionApiVersion) {
     throw new TypeError(
       `Unsupported client extension API version: ${String(extension.apiVersion)}`
     );
@@ -191,16 +191,16 @@ const byId = <T extends { id: string }>(left: T, right: T): number =>
   left.id.localeCompare(right.id);
 
 export class ClientExtensionRegistry {
-  readonly #extensions = new Map<string, AgentFeedbackClientExtension>();
+  readonly #extensions = new Map<string, AgentAnnotationsClientExtension>();
   readonly #toolbar = new Map<string, RegisteredToolbarContribution>();
   readonly #panels = new Map<string, RegisteredPanelContribution>();
   readonly #enrichers = new Map<string, RegisteredTargetEnricher>();
-  readonly #exporters = new Map<string, RegisteredFeedbackExporter>();
-  readonly #redactors = new Map<string, RegisteredFeedbackRedactor>();
+  readonly #exporters = new Map<string, RegisteredAnnotationExporter>();
+  readonly #redactors = new Map<string, RegisteredAnnotationRedactor>();
   readonly #shortcuts = new Map<string, string>();
   #host: { extensionId: string; value: HostIntegration } | undefined;
 
-  register(extension: AgentFeedbackClientExtension): () => void {
+  register(extension: AgentAnnotationsClientExtension): () => void {
     validateExtension(extension);
     if (this.#extensions.has(extension.id)) {
       throw new TypeError(`Duplicate extension ID: ${extension.id}`);
@@ -294,7 +294,7 @@ export class ClientExtensionRegistry {
     };
   }
 
-  getExtensions(): readonly AgentFeedbackClientExtension[] {
+  getExtensions(): readonly AgentAnnotationsClientExtension[] {
     return [...this.#extensions.values()].sort(byId);
   }
 
@@ -315,15 +315,15 @@ export class ClientExtensionRegistry {
     return [...this.#enrichers.values()].sort(byId);
   }
 
-  getExporters(): readonly RegisteredFeedbackExporter[] {
+  getExporters(): readonly RegisteredAnnotationExporter[] {
     return [...this.#exporters.values()].sort(byId);
   }
 
-  getRedactors(): readonly RegisteredFeedbackRedactor[] {
+  getRedactors(): readonly RegisteredAnnotationRedactor[] {
     return [...this.#redactors.values()].sort(byId);
   }
 
-  getMessages(): AgentFeedbackLocaleMessages {
+  getMessages(): AgentAnnotationsLocaleMessages {
     return Object.assign(
       {},
       ...this.getExtensions().map((extension) => extension.messages ?? {})
@@ -337,22 +337,22 @@ export class ClientExtensionRegistry {
 
 export const registerClientExtension = (
   registry: ClientExtensionRegistry,
-  extension: AgentFeedbackClientExtension
+  extension: AgentAnnotationsClientExtension
 ): (() => void) => registry.register(extension);
 
-export const defineClientExtension = <T extends AgentFeedbackClientExtension>(
+export const defineClientExtension = <T extends AgentAnnotationsClientExtension>(
   extension: T
 ): T => extension;
 
 export type {
-  AgentFeedbackClientExtension,
-  AgentFeedbackExtensionContext,
-  AgentFeedbackIconProps as IconProps,
-  AgentFeedbackLocalizedText as LocalizedText,
-  AgentFeedbackLocaleMessages as LocaleMessages,
-  AgentFeedbackToolbarShortcut as ShortcutDefinition,
-  FeedbackExporter,
-  FeedbackRedactor,
+  AgentAnnotationsClientExtension,
+  AgentAnnotationsExtensionContext,
+  AgentAnnotationsIconProps as IconProps,
+  AgentAnnotationsLocalizedText as LocalizedText,
+  AgentAnnotationsLocaleMessages as LocaleMessages,
+  AgentAnnotationsToolbarShortcut as ShortcutDefinition,
+  AnnotationExporter,
+  AnnotationRedactor,
   HostIntegration,
   PanelContribution,
   StudioPublicApi,

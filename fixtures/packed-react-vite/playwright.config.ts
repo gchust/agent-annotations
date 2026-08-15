@@ -3,8 +3,8 @@ import path from "node:path";
 
 import { defineConfig } from "@playwright/test";
 
-const artifactRoot = process.env.AGENT_FEEDBACK_EVIDENCE
-  ?? path.join(tmpdir(), "agent-feedback-packed-react-vite-evidence");
+const artifactRoot = process.env.AGENT_ANNOTATIONS_EVIDENCE
+  ?? path.join(tmpdir(), "agent-annotations-packed-react-vite-evidence");
 
 export default defineConfig({
   testDir: "./tests",
@@ -19,7 +19,7 @@ export default defineConfig({
     trace: "on",
   },
   webServer: {
-    command: "node -e \"require('node:fs').rmSync('.agent-feedback',{recursive:true,force:true})\" && pnpm dev --port 4179",
+    command: "node -e \"require('node:fs').rmSync('.agent-annotations',{recursive:true,force:true})\" && pnpm dev --port 4179",
     port: 4179,
     reuseExistingServer: false,
     stdout: "pipe",

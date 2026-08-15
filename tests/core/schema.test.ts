@@ -1,29 +1,29 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  AGENT_FEEDBACK_TASK_SCHEMA,
-  AGENT_FEEDBACK_TASK_SCHEMA_VERSION,
-  createAgentFeedbackTask,
+  AGENT_ANNOTATIONS_TASK_SCHEMA,
+  AGENT_ANNOTATIONS_TASK_SCHEMA_VERSION,
+  createAgentAnnotationsTask,
   MAX_EXTENSION_BYTES,
   MAX_EXTENSION_KEYS,
   MAX_EXTENSION_NAMESPACES,
   MAX_TASK_BYTES,
-  parseAgentFeedbackTask,
+  parseAgentAnnotationsTask,
   setAnnotationExtension,
-  validateAgentFeedbackTask,
+  validateAgentAnnotationsTask,
 } from "../../src/core/index.js";
 import { annotationFixture, targetFixture, taskFixture } from "./test-data.js";
 
-describe("agent-feedback.task.v1 schema", () => {
+describe("agent-annotations.task.v1 schema", () => {
   it("uses the frozen schema constants and creates a valid task", () => {
-    expect(AGENT_FEEDBACK_TASK_SCHEMA).toBe("agent-feedback.task.v1");
-    expect(AGENT_FEEDBACK_TASK_SCHEMA_VERSION).toBe(1);
-    const task = createAgentFeedbackTask({
+    expect(AGENT_ANNOTATIONS_TASK_SCHEMA).toBe("agent-annotations.task.v1");
+    expect(AGENT_ANNOTATIONS_TASK_SCHEMA_VERSION).toBe(1);
+    const task = createAgentAnnotationsTask({
       taskId: "task-new",
       createdAt: "2026-08-12T12:00:00.000Z",
     });
     expect(task).toMatchObject({
-      schema: "agent-feedback.task.v1",
+      schema: "agent-annotations.task.v1",
       schemaVersion: 1,
       taskRevision: 0,
       status: "active",
@@ -32,17 +32,17 @@ describe("agent-feedback.task.v1 schema", () => {
   });
 
   it("accepts a complete legal task", () => {
-    expect(parseAgentFeedbackTask(taskFixture())).toEqual(taskFixture());
+    expect(parseAgentAnnotationsTask(taskFixture())).toEqual(taskFixture());
   });
 
   it("rejects unknown top-level fields and any other schema version", () => {
-    expect(validateAgentFeedbackTask({ ...taskFixture(), extra: true })).toMatchObject({
+    expect(validateAgentAnnotationsTask({ ...taskFixture(), extra: true })).toMatchObject({
       ok: false,
       issue: { code: "unknown_field", path: "task.extra" },
     });
     for (const schemaVersion of [0, 2, 6]) {
       expect(
-        validateAgentFeedbackTask({ ...taskFixture(), schemaVersion })
+        validateAgentAnnotationsTask({ ...taskFixture(), schemaVersion })
       ).toMatchObject({
         ok: false,
         issue: { path: "task.schemaVersion" },
@@ -60,22 +60,22 @@ describe("agent-feedback.task.v1 schema", () => {
         },
       ],
     });
-    expect(validateAgentFeedbackTask(withExtension({ bad: undefined }))).toMatchObject({
+    expect(validateAgentAnnotationsTask(withExtension({ bad: undefined }))).toMatchObject({
       ok: false,
       issue: { code: "non_json_value" },
     });
-    expect(validateAgentFeedbackTask(withExtension({ bad: Number.NaN }))).toMatchObject({
+    expect(validateAgentAnnotationsTask(withExtension({ bad: Number.NaN }))).toMatchObject({
       ok: false,
       issue: { code: "non_json_value" },
     });
     const cyclic: Record<string, unknown> = {};
     cyclic.self = cyclic;
-    expect(validateAgentFeedbackTask(withExtension(cyclic))).toMatchObject({
+    expect(validateAgentAnnotationsTask(withExtension(cyclic))).toMatchObject({
       ok: false,
       issue: { code: "non_json_value" },
     });
     expect(
-      validateAgentFeedbackTask(
+      validateAgentAnnotationsTask(
         withExtension(
           Object.fromEntries(
             Array.from({ length: MAX_EXTENSION_KEYS + 1 }, (_, index) => [
@@ -87,7 +87,7 @@ describe("agent-feedback.task.v1 schema", () => {
       )
     ).toMatchObject({ ok: false, issue: { code: "limit_exceeded" } });
     expect(
-      validateAgentFeedbackTask(
+      validateAgentAnnotationsTask(
         withExtension({
           first: "x".repeat(7_000),
           second: "y".repeat(7_000),
@@ -106,7 +106,7 @@ describe("agent-feedback.task.v1 schema", () => {
   it("rejects values that cannot round-trip through the JSON task contract", () => {
     const sourceStack = new Array(1);
     expect(
-      validateAgentFeedbackTask(
+      validateAgentAnnotationsTask(
         taskFixture({
           annotations: [
             annotationFixture({
@@ -124,7 +124,7 @@ describe("agent-feedback.task.v1 schema", () => {
       issue: { path: "task.annotations[0].targets[0].inspection.sourceStack[0]" },
     });
     expect(
-      validateAgentFeedbackTask({
+      validateAgentAnnotationsTask({
         ...taskFixture(),
         taskRevision: Number.MAX_SAFE_INTEGER + 1,
       })
@@ -154,7 +154,7 @@ describe("agent-feedback.task.v1 schema", () => {
     expect(new TextEncoder().encode(JSON.stringify(oversized)).byteLength).toBeGreaterThan(
       MAX_TASK_BYTES
     );
-    expect(validateAgentFeedbackTask(oversized)).toMatchObject({
+    expect(validateAgentAnnotationsTask(oversized)).toMatchObject({
       ok: false,
       issue: { code: "limit_exceeded" },
     });
@@ -180,7 +180,7 @@ describe("agent-feedback.task.v1 schema", () => {
       ])
     );
     expect(
-      validateAgentFeedbackTask(
+      validateAgentAnnotationsTask(
         taskFixture({ annotations: [annotationFixture({ extensions })] })
       )
     ).toMatchObject({ ok: false, issue: { code: "limit_exceeded" } });

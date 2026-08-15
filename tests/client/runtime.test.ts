@@ -29,14 +29,14 @@ vi.mock("react-grab/primitives", () => ({
   unfreeze: primitives.unfreeze,
 }));
 
-import { mountAgentFeedback } from "../../src/client/index.js";
+import { mountAgentAnnotations } from "../../src/client/index.js";
 import { defineClientExtension } from "../../src/extension/index.js";
 import { MemoryTaskTransport } from "../../src/testing/index.js";
-import type { AgentFeedbackTask, TaskTransport } from "../../src/types/index.js";
+import type { AgentAnnotationsTask, TaskTransport } from "../../src/types/index.js";
 import { annotationFixture, targetFixture, taskFixture } from "../core/test-data.js";
 
 afterEach(() => {
-  document.getElementById("agent-feedback-root")?.remove();
+  document.getElementById("agent-annotations-root")?.remove();
   primitives.getElementAtPoint.mockReset();
   primitives.getElementAtPoint.mockReturnValue(null);
   primitives.getElementBounds.mockReset();
@@ -49,8 +49,8 @@ afterEach(() => {
 
 describe("client runtime", () => {
   it("marks the shadow host ignored before mounting and cleans it up", async () => {
-    const mounted = await mountAgentFeedback({ transport: new MemoryTaskTransport() });
-    const host = document.getElementById("agent-feedback-root");
+    const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport() });
+    const host = document.getElementById("agent-annotations-root");
     expect(host?.hasAttribute("data-react-grab-ignore")).toBe(true);
     const pick = host?.shadowRoot?.querySelector('[aria-label^="Pick"]');
     expect(pick?.querySelector("svg")).not.toBeNull();
@@ -59,12 +59,12 @@ describe("client runtime", () => {
 
     mounted.unmount();
     mounted.unmount();
-    expect(document.getElementById("agent-feedback-root")).toBeNull();
+    expect(document.getElementById("agent-annotations-root")).toBeNull();
   });
 
   it("freezes capture symmetrically while leaving the ignored toolbar usable", async () => {
-    const mounted = await mountAgentFeedback({ transport: new MemoryTaskTransport() });
-    const shadow = document.getElementById("agent-feedback-root")!.shadowRoot!;
+    const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport() });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
     shadow.querySelector<HTMLButtonElement>('[aria-label^="Pick"]')!.click();
     expect(primitives.freeze).not.toHaveBeenCalled();
     const target = document.createElement("button");
@@ -92,7 +92,7 @@ describe("client runtime", () => {
     });
     vi.stubGlobal("MutationObserver", Mutation);
     vi.stubGlobal("ResizeObserver", Resize);
-    const empty = await mountAgentFeedback({ transport: new MemoryTaskTransport() });
+    const empty = await mountAgentAnnotations({ transport: new MemoryTaskTransport() });
     expect(Mutation).not.toHaveBeenCalled();
     expect(Resize).not.toHaveBeenCalled();
     empty.unmount();
@@ -102,7 +102,7 @@ describe("client runtime", () => {
   it("recovers an unresolved nested iframe marker after the outer document is populated", async () => {
     vi.useFakeTimers();
     document.body.innerHTML = '<div id="root"></div>';
-    const mounted = await mountAgentFeedback({
+    const mounted = await mountAgentAnnotations({
       transport: new MemoryTaskTransport(taskFixture({
         annotations: [annotationFixture({
           targets: [targetFixture({
@@ -112,8 +112,8 @@ describe("client runtime", () => {
       })),
     });
     try {
-      const marker = document.getElementById("agent-feedback-root")!
-        .shadowRoot!.querySelector<HTMLButtonElement>(".af-marker")!;
+      const marker = document.getElementById("agent-annotations-root")!
+        .shadowRoot!.querySelector<HTMLButtonElement>(".aa-marker")!;
       expect(marker.hidden).toBe(true);
       await vi.runAllTimersAsync();
 
@@ -140,7 +140,7 @@ describe("client runtime", () => {
   });
 
   it("exposes snapshot subscriptions and commands without React setters", async () => {
-    const mounted = await mountAgentFeedback({ transport: new MemoryTaskTransport() });
+    const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport() });
     const listener = vi.fn();
     const unsubscribe = mounted.api.subscribe(listener);
 
@@ -166,7 +166,7 @@ describe("client runtime", () => {
   it("applies subscribed file revisions and disposes the transport poll", async () => {
     vi.useFakeTimers();
     const task = await new MemoryTaskTransport().read();
-    let publish!: (task: AgentFeedbackTask) => void;
+    let publish!: (task: AgentAnnotationsTask) => void;
     const unsubscribe = vi.fn();
     const transport: TaskTransport = {
       read: async () => task,
@@ -176,7 +176,7 @@ describe("client runtime", () => {
         return unsubscribe;
       },
     };
-    const mounted = await mountAgentFeedback({ transport });
+    const mounted = await mountAgentAnnotations({ transport });
     publish({ ...task, taskRevision: 1 });
     await vi.runAllTimersAsync();
     expect(mounted.api.getSnapshot().task.taskRevision).toBe(1);
@@ -185,12 +185,12 @@ describe("client runtime", () => {
   });
 
   it("does not render markers for completed annotations", async () => {
-    const mounted = await mountAgentFeedback({
+    const mounted = await mountAgentAnnotations({
       transport: new MemoryTaskTransport(taskFixture({
         annotations: [{ ...taskFixture().annotations[0]!, status: "completed" }],
       })),
     });
-    expect(document.getElementById("agent-feedback-root")!.shadowRoot!.querySelector(".af-marker"))
+    expect(document.getElementById("agent-annotations-root")!.shadowRoot!.querySelector(".aa-marker"))
       .toBeNull();
     mounted.unmount();
   });
@@ -201,14 +201,14 @@ describe("client runtime", () => {
     vi.spyOn(window, "innerHeight", "get").mockReturnValue(800);
     let markerRect = new DOMRect(422, 88, 28, 28);
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
-      if (this.classList.contains("af-marker")) return markerRect;
-      if (this.classList.contains("af-editor")) return new DOMRect(0, 0, 310, 174);
+      if (this.classList.contains("aa-marker")) return markerRect;
+      if (this.classList.contains("aa-editor")) return new DOMRect(0, 0, 310, 174);
       return new DOMRect();
     });
     const target = document.createElement("button");
     target.id = "position-target";
     document.body.append(target);
-    const mounted = await mountAgentFeedback({
+    const mounted = await mountAgentAnnotations({
       transport: new MemoryTaskTransport(taskFixture({
         annotations: [annotationFixture({
           targets: [targetFixture({ selector: "#position-target" })],
@@ -218,8 +218,8 @@ describe("client runtime", () => {
 
     try {
       mounted.api.commands.markers.focus("ann-1");
-      const editor = document.getElementById("agent-feedback-root")!
-        .shadowRoot!.querySelector<HTMLElement>(".af-editor")!;
+      const editor = document.getElementById("agent-annotations-root")!
+        .shadowRoot!.querySelector<HTMLElement>(".aa-editor")!;
       expect([...editor.querySelectorAll("button")].map((button) => button.getAttribute("aria-label")))
         .toEqual(["Save comment", "Complete", "Delete", "Close"]);
       expect([...editor.querySelectorAll("button")].every((button) =>
@@ -248,19 +248,19 @@ describe("client runtime", () => {
     vi.spyOn(window, "innerWidth", "get").mockReturnValue(1000);
     vi.spyOn(window, "innerHeight", "get").mockReturnValue(800);
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
-      if (this.classList.contains("af-composer")) return new DOMRect(0, 0, 310, 160);
+      if (this.classList.contains("aa-composer")) return new DOMRect(0, 0, 310, 160);
       return new DOMRect();
     });
     primitives.getElementBounds.mockReturnValue({ x: 420, y: 90, width: 120, height: 30 });
     const target = document.createElement("button");
     document.body.append(target);
-    const mounted = await mountAgentFeedback({ transport: new MemoryTaskTransport() });
+    const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport() });
 
     try {
       mounted.api.commands.capture.startPick();
       target.click();
-      const composer = document.getElementById("agent-feedback-root")!
-        .shadowRoot!.querySelector<HTMLElement>(".af-composer")!;
+      const composer = document.getElementById("agent-annotations-root")!
+        .shadowRoot!.querySelector<HTMLElement>(".aa-composer")!;
       expect({ left: composer.style.left, top: composer.style.top }).toEqual({
         left: "420px",
         top: "128px",
@@ -288,11 +288,11 @@ describe("client runtime", () => {
     const transport = new MemoryTaskTransport(taskFixture());
     const mutate = vi.spyOn(transport, "mutate")
       .mockRejectedValueOnce(new Error("revision conflict"));
-    const mounted = await mountAgentFeedback({ transport });
-    const shadow = document.getElementById("agent-feedback-root")!.shadowRoot!;
+    const mounted = await mountAgentAnnotations({ transport });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
 
     mounted.api.commands.markers.focus("ann-1");
-    const form = shadow.querySelector<HTMLFormElement>(".af-editor")!;
+    const form = shadow.querySelector<HTMLFormElement>(".aa-editor")!;
     const textarea = form.querySelector<HTMLTextAreaElement>("textarea")!;
     const save = form.querySelector<HTMLButtonElement>('[type="submit"]')!;
     textarea.value = "Retained draft";
@@ -301,12 +301,12 @@ describe("client runtime", () => {
 
     await vi.waitFor(() => expect(shadow.querySelector('[role="status"]')?.textContent)
       .toBe("revision conflict"));
-    expect(shadow.querySelector<HTMLTextAreaElement>(".af-editor textarea")?.value)
+    expect(shadow.querySelector<HTMLTextAreaElement>(".aa-editor textarea")?.value)
       .toBe("Retained draft");
     expect(save.disabled).toBe(false);
 
     form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-    await vi.waitFor(() => expect(shadow.querySelector(".af-editor")).toBeNull());
+    await vi.waitFor(() => expect(shadow.querySelector(".aa-editor")).toBeNull());
     expect(shadow.querySelector('[role="status"]')?.textContent).toBe("Comment saved");
     expect((await transport.read()).annotations[0]?.comment).toBe("Retained draft");
     expect(mutate).toHaveBeenCalledTimes(2);
@@ -317,10 +317,10 @@ describe("client runtime", () => {
     const pageTarget = document.createElement("button");
     document.body.append(pageTarget);
     primitives.getElementAtPoint.mockReturnValue(pageTarget);
-    const mounted = await mountAgentFeedback({ transport: new MemoryTaskTransport() });
+    const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport() });
     mounted.api.commands.capture.startPick();
 
-    const shadow = document.getElementById("agent-feedback-root")!.shadowRoot!;
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
     const annotations = shadow.querySelector<HTMLButtonElement>('[aria-label^="Annotations"]')!;
     annotations.dispatchEvent(new MouseEvent("click", {
       bubbles: true,
@@ -337,7 +337,7 @@ describe("client runtime", () => {
     expect(primitives.getElementAtPoint).not.toHaveBeenCalled();
     expect(mounted.api.getSnapshot().captureMode).toBe("pick");
     expect(mounted.api.getSnapshot().openPanel).toBe("list");
-    expect(document.getElementById("agent-feedback-root")!.shadowRoot!.querySelector(".af-composer")).toBeNull();
+    expect(document.getElementById("agent-annotations-root")!.shadowRoot!.querySelector(".aa-composer")).toBeNull();
     shadow.querySelector<HTMLButtonElement>('[aria-label^="Annotations"]')!.click();
     shadow.querySelector<HTMLButtonElement>('[aria-label^="Annotations"]')!
       .dispatchEvent(new KeyboardEvent("keydown", {
@@ -353,16 +353,16 @@ describe("client runtime", () => {
   it("cancels scheduled work and ignores mutation completion after unmount", async () => {
     vi.useFakeTimers();
     const task = await new MemoryTaskTransport().read();
-    let resolveMutation!: (task: AgentFeedbackTask) => void;
+    let resolveMutation!: (task: AgentAnnotationsTask) => void;
     const transport: TaskTransport = {
       read: async () => task,
       mutate: () => new Promise((resolve) => { resolveMutation = resolve; }),
     };
-    const mounted = await mountAgentFeedback({ transport });
+    const mounted = await mountAgentAnnotations({ transport });
     const listener = vi.fn();
     mounted.api.subscribe(listener);
     const pick = document
-      .getElementById("agent-feedback-root")!
+      .getElementById("agent-annotations-root")!
       .shadowRoot!
       .querySelector<HTMLButtonElement>('[aria-label^="Pick"]')!;
     pick.dispatchEvent(new MouseEvent("mouseenter"));
@@ -375,13 +375,13 @@ describe("client runtime", () => {
     resolveMutation(task);
     await pending;
     expect(listener).not.toHaveBeenCalled();
-    expect(document.getElementById("agent-feedback-root")).toBeNull();
+    expect(document.getElementById("agent-annotations-root")).toBeNull();
   });
 
   it("captures bounded redacted console, window, and promise diagnostics", async () => {
     const originalConsoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const restoredConsoleError = console.error;
-    const mounted = await mountAgentFeedback({ transport: new MemoryTaskTransport() });
+    const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport() });
 
     console.error("token=console-secret");
     window.dispatchEvent(new ErrorEvent("error", { message: "password=window-secret" }));
@@ -436,11 +436,11 @@ describe("client runtime", () => {
       redactors: [{ id: "redact", redact: () => ({ safe: true }) }],
       exporters: [{ id: "json", export: ({ task }) => JSON.stringify(task) }],
     });
-    const mounted = await mountAgentFeedback({
+    const mounted = await mountAgentAnnotations({
       transport: new MemoryTaskTransport(),
       extensions: [extension],
     });
-    const shadow = document.getElementById("agent-feedback-root")!.shadowRoot!;
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
     const action = shadow.querySelector<HTMLButtonElement>('[aria-label^="Runtime action"]')!;
     expect(action.getAttribute("aria-label")).toContain("Ctrl+Alt+R");
     expect(action.querySelector("[data-runtime-icon]")).not.toBeNull();
@@ -456,12 +456,12 @@ describe("client runtime", () => {
     expect(execute).toHaveBeenCalledTimes(2);
     expect(setup).toHaveBeenCalledOnce();
     expect(mounted.api.getSnapshot().exporters).toContainEqual({ id: "json", extensionId: "runtime-test" });
-    expect(await mounted.api.commands.exporters.format()).toContain("# Agent Feedback Task");
-    expect(await mounted.api.commands.exporters.format("json")).toContain('"schema":"agent-feedback.task.v1"');
+    expect(await mounted.api.commands.exporters.format()).toContain("# Agent Annotations Task");
+    expect(await mounted.api.commands.exporters.format("json")).toContain('"schema":"agent-annotations.task.v1"');
     mounted.api.commands.panels.open("runtime-panel");
     vi.runAllTimers();
-    expect(shadow.activeElement).toBe(shadow.querySelector(".af-panel button"));
-    shadow.querySelector<HTMLButtonElement>(".af-panel button")!.click();
+    expect(shadow.activeElement).toBe(shadow.querySelector(".aa-panel button"));
+    shadow.querySelector<HTMLButtonElement>(".aa-panel button")!.click();
     expect(mounted.api.getSnapshot().openPanel).toBeNull();
     mounted.unmount();
     mounted.unmount();
@@ -470,8 +470,8 @@ describe("client runtime", () => {
 
   it("keeps panels exclusive and returns focus to the opening action", async () => {
     vi.useFakeTimers();
-    const mounted = await mountAgentFeedback({ transport: new MemoryTaskTransport() });
-    const shadow = document.getElementById("agent-feedback-root")!.shadowRoot!;
+    const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport() });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
     const list = shadow.querySelector<HTMLButtonElement>('[aria-label^="Annotations"]')!;
     list.focus();
     list.click();
@@ -479,7 +479,7 @@ describe("client runtime", () => {
     expect(mounted.api.getSnapshot().openPanel).toBe("list");
     mounted.api.commands.panels.open("help");
     expect(mounted.api.getSnapshot().openPanel).toBe("help");
-    expect(shadow.querySelectorAll(".af-panel")).toHaveLength(1);
+    expect(shadow.querySelectorAll(".aa-panel")).toHaveLength(1);
     mounted.api.commands.panels.close("help");
     vi.runAllTimers();
     expect(shadow.activeElement).toBe(
@@ -489,8 +489,8 @@ describe("client runtime", () => {
   });
 
   it("preserves built-in toolbar state parity", async () => {
-    const mounted = await mountAgentFeedback({ transport: new MemoryTaskTransport() });
-    const shadow = document.getElementById("agent-feedback-root")!.shadowRoot!;
+    const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport() });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
     const markers = shadow.querySelector<HTMLButtonElement>('[aria-label^="Markers"]')!;
     markers.click();
     expect(mounted.api.getSnapshot().markersVisible).toBe(false);
@@ -502,13 +502,13 @@ describe("client runtime", () => {
     const collapse = shadow.querySelector<HTMLButtonElement>('[aria-label^="Collapse toolbar"]')!;
     collapse.click();
     expect(mounted.api.getSnapshot().collapsed).toBe(true);
-    expect(shadow.querySelectorAll(".af-action:not([data-toggle=true])")).toHaveLength(7);
-    expect(shadow.querySelector(".af-dock")?.getAttribute("data-collapsed")).toBe("true");
+    expect(shadow.querySelectorAll(".aa-action:not([data-toggle=true])")).toHaveLength(7);
+    expect(shadow.querySelector(".aa-dock")?.getAttribute("data-collapsed")).toBe("true");
     shadow
       .querySelector<HTMLButtonElement>('[aria-label^="Collapse toolbar"]')!
       .click();
     expect(mounted.api.getSnapshot().collapsed).toBe(false);
-    expect(shadow.querySelectorAll(".af-action").length).toBeGreaterThan(1);
+    expect(shadow.querySelectorAll(".aa-action").length).toBeGreaterThan(1);
     mounted.unmount();
   });
 
@@ -519,7 +519,7 @@ describe("client runtime", () => {
     primitives.getElementAtPoint.mockReturnValue(pageTarget);
     const transport = new MemoryTaskTransport();
     const mutate = vi.spyOn(transport, "mutate");
-    const mounted = await mountAgentFeedback({
+    const mounted = await mountAgentAnnotations({
       transport,
       extensions: [defineClientExtension({
         id: "runtime-data",
@@ -534,10 +534,10 @@ describe("client runtime", () => {
       clientX: 10,
       clientY: 10,
     }));
-    const shadow = document.getElementById("agent-feedback-root")!.shadowRoot!;
-    const textarea = shadow.querySelector<HTMLTextAreaElement>(".af-composer textarea")!;
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    const textarea = shadow.querySelector<HTMLTextAreaElement>(".aa-composer textarea")!;
     textarea.value = "Change it";
-    shadow.querySelector<HTMLFormElement>(".af-composer")!.dispatchEvent(
+    shadow.querySelector<HTMLFormElement>(".aa-composer")!.dispatchEvent(
       new Event("submit", { bubbles: true, cancelable: true })
     );
     await vi.waitFor(() => expect(mutate).toHaveBeenCalledOnce());
@@ -551,7 +551,7 @@ describe("client runtime", () => {
 
   it("cleans partial setup and leaves no mount when setup fails", async () => {
     const dispose = vi.fn();
-    await expect(mountAgentFeedback({
+    await expect(mountAgentAnnotations({
       transport: new MemoryTaskTransport(),
       extensions: [
         defineClientExtension({
@@ -569,6 +569,6 @@ describe("client runtime", () => {
       ],
     })).rejects.toThrow("setup failed");
     expect(dispose).toHaveBeenCalledOnce();
-    expect(document.getElementById("agent-feedback-root")).toBeNull();
+    expect(document.getElementById("agent-annotations-root")).toBeNull();
   });
 });

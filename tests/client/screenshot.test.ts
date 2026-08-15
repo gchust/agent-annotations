@@ -39,7 +39,7 @@ describe("best-effort screenshot evidence", () => {
       });
     }
     const clone = cloneScreenshotRoot(main);
-    expect(clone.querySelectorAll("[data-agent-feedback-media-placeholder]")).toHaveLength(3);
+    expect(clone.querySelectorAll("[data-agent-annotations-media-placeholder]")).toHaveLength(3);
     expect(clone.querySelector("img")?.hasAttribute("src")).toBe(false);
     expect(clone.querySelector("#after")?.textContent).toBe("After");
   });

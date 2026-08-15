@@ -1,9 +1,9 @@
 import { createElement } from "react";
 
-import type { AgentFeedbackIconProps } from "../types/index.js";
+import type { AgentAnnotationsIconProps } from "../types/index.js";
 
 const icon = (...paths: string[]) =>
-  ({ className, size = 18 }: AgentFeedbackIconProps) =>
+  ({ className, size = 18 }: AgentAnnotationsIconProps) =>
     createElement(
       "svg",
       {

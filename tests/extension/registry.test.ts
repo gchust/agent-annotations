@@ -4,9 +4,9 @@ import {
   ClientExtensionRegistry,
   defineClientExtension,
   registerClientExtension,
-  type AgentFeedbackClientExtension,
-  type FeedbackExporter,
-  type FeedbackRedactor,
+  type AgentAnnotationsClientExtension,
+  type AnnotationExporter,
+  type AnnotationRedactor,
   type HostIntegration,
   type PanelContribution,
   type TargetEnricher,
@@ -24,11 +24,11 @@ const action = (id: string, key = id[0].toUpperCase()): ToolbarContribution => (
 });
 const panel = (id: string): PanelContribution => ({ id, title: id, render: () => null });
 const enricher = (id: string): TargetEnricher => ({ id, enrich: () => ({ ready: true }) });
-const exporter = (id: string): FeedbackExporter => ({ id, export: () => "{}" });
-const redactor = (id: string): FeedbackRedactor => ({ id, redact: (task) => task });
+const exporter = (id: string): AnnotationExporter => ({ id, export: () => "{}" });
+const redactor = (id: string): AnnotationRedactor => ({ id, redact: (task) => task });
 const extension = (
   id: string,
-  values: Omit<AgentFeedbackClientExtension, "id" | "apiVersion"> = {}
+  values: Omit<AgentAnnotationsClientExtension, "id" | "apiVersion"> = {}
 ) => defineClientExtension({ id, apiVersion: 1, ...values });
 
 describe("ClientExtensionRegistry", () => {

@@ -7,16 +7,16 @@ vi.mock("react-grab/primitives", () => ({
   getElementsAtPoint: vi.fn(() => []), isElementGrabbable: vi.fn(() => true),
 }));
 
-import { mountAgentFeedback } from "../../src/client/index.js";
+import { mountAgentAnnotations } from "../../src/client/index.js";
 import { MemoryTaskTransport } from "../../src/testing/index.js";
 
-afterEach(() => document.getElementById("agent-feedback-root")?.remove());
+afterEach(() => document.getElementById("agent-annotations-root")?.remove());
 
 describe("toolbar accessibility", () => {
   it("shares shortcut labels with buttons and Help and collapses accessibly", async () => {
     vi.useFakeTimers();
-    const mounted = await mountAgentFeedback({ transport: new MemoryTaskTransport() });
-    const shadow = document.getElementById("agent-feedback-root")!.shadowRoot!;
+    const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport() });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
     const pick = shadow.querySelector<HTMLButtonElement>('[aria-label^="Pick"]')!;
     expect(pick.getAttribute("aria-label")).toContain("Ctrl+Alt+P");
     pick.dispatchEvent(new MouseEvent("mouseenter"));
@@ -27,7 +27,7 @@ describe("toolbar accessibility", () => {
     expect(shadow.querySelector('[aria-label="Shortcut help"]')?.textContent).toContain("Ctrl+Alt+P");
     const collapse = [...shadow.querySelectorAll<HTMLButtonElement>("button")].find((node) => node.getAttribute("aria-label")?.startsWith("Collapse toolbar"))!;
     collapse.click();
-    expect(shadow.querySelector(".af-dock")?.getAttribute("data-collapsed")).toBe("true");
+    expect(shadow.querySelector(".aa-dock")?.getAttribute("data-collapsed")).toBe("true");
     expect([...shadow.querySelectorAll<HTMLButtonElement>("button")].find((node) => node.getAttribute("aria-label")?.startsWith("Collapse toolbar"))?.getAttribute("aria-pressed")).toBe("true");
 
     mounted.unmount();

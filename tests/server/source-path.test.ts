@@ -10,7 +10,7 @@ import { taskFixture } from "../core/test-data.js";
 
 const roots: string[] = [];
 const fixture = () => {
-  const parent = mkdtempSync(path.join(tmpdir(), "agent-feedback-source-"));
+  const parent = mkdtempSync(path.join(tmpdir(), "agent-annotations-source-"));
   roots.push(parent);
   const root = path.join(parent, "workspace");
   mkdirSync(path.join(root, "src", "a"), { recursive: true });

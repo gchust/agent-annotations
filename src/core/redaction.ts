@@ -1,12 +1,12 @@
 import type {
-  AgentFeedbackExtensionRedactor,
-  AgentFeedbackJsonObject,
-  AgentFeedbackJsonValue,
-  AgentFeedbackRedactionManifest,
-  AgentFeedbackRedactionResult,
-  AgentFeedbackTask,
+  AgentAnnotationsExtensionRedactor,
+  AgentAnnotationsJsonObject,
+  AgentAnnotationsJsonValue,
+  AgentAnnotationsRedactionManifest,
+  AgentAnnotationsRedactionResult,
+  AgentAnnotationsTask,
 } from "../types/index.js";
-import { parseAgentFeedbackTask, validateExtensionData } from "./schema.js";
+import { parseAgentAnnotationsTask, validateExtensionData } from "./schema.js";
 
 export const REDACTED_VALUE = "[REDACTED]";
 export const DEFAULT_REDACTION_STRING_LIMIT = 2_000;
@@ -34,13 +34,13 @@ const createRecorder = (): RedactionRecorder => ({
   truncatedValues: 0,
 });
 
-const manifest = (recorder: RedactionRecorder): AgentFeedbackRedactionManifest => ({
+const manifest = (recorder: RedactionRecorder): AgentAnnotationsRedactionManifest => ({
   droppedKeys: [...recorder.droppedKeys].sort(),
   redactedValues: recorder.redactedValues,
   truncatedValues: recorder.truncatedValues,
 });
 
-export function redactAgentFeedbackText(
+export function redactAgentAnnotationsText(
   value: string,
   options: { maxLength?: number } = {}
 ): string {
@@ -74,15 +74,15 @@ function redactText(
 }
 
 function redactJsonValue(
-  value: AgentFeedbackJsonValue,
+  value: AgentAnnotationsJsonValue,
   recorder: RedactionRecorder
-): AgentFeedbackJsonValue {
+): AgentAnnotationsJsonValue {
   if (typeof value === "string") return redactText(value, {}, recorder);
   if (Array.isArray(value)) {
     return value.map((entry) => redactJsonValue(entry, recorder));
   }
   if (value && typeof value === "object") {
-    const result: AgentFeedbackJsonObject = {};
+    const result: AgentAnnotationsJsonObject = {};
     for (const [key, entry] of Object.entries(value)) {
       if (SECRET_KEY_PATTERN.test(key)) {
         recorder.droppedKeys.add(key);
@@ -110,13 +110,13 @@ const redactStringMap = (
   return result;
 };
 
-export function redactAgentFeedbackTask(
+export function redactAgentAnnotationsTask(
   input: unknown,
-  redactors: readonly AgentFeedbackExtensionRedactor[] = []
-): AgentFeedbackRedactionResult {
-  const task = parseAgentFeedbackTask(input);
+  redactors: readonly AgentAnnotationsExtensionRedactor[] = []
+): AgentAnnotationsRedactionResult {
+  const task = parseAgentAnnotationsTask(input);
   const recorder = createRecorder();
-  const byExtension = new Map<string, AgentFeedbackExtensionRedactor>();
+  const byExtension = new Map<string, AgentAnnotationsExtensionRedactor>();
   for (const redactor of redactors) {
     if (byExtension.has(redactor.extensionId)) {
       throw new TypeError(`Duplicate extension redactor: ${redactor.extensionId}`);
@@ -124,9 +124,9 @@ export function redactAgentFeedbackTask(
     byExtension.set(redactor.extensionId, redactor);
   }
   const annotations = task.annotations.map((annotation) => {
-    const extensions: Record<string, AgentFeedbackJsonObject> = {};
+    const extensions: Record<string, AgentAnnotationsJsonObject> = {};
     for (const [extensionId, rawData] of Object.entries(annotation.extensions)) {
-      const genericData = redactJsonValue(rawData, recorder) as AgentFeedbackJsonObject;
+      const genericData = redactJsonValue(rawData, recorder) as AgentAnnotationsJsonObject;
       const extensionData = byExtension.get(extensionId)?.redact(genericData, {
         annotationId: annotation.annotationId,
         extensionId,
@@ -137,7 +137,7 @@ export function redactAgentFeedbackTask(
       if (extensionIssue) {
         throw new TypeError(`${extensionIssue.path}: ${extensionIssue.message}`);
       }
-      extensions[extensionId] = redactJsonValue(data, recorder) as AgentFeedbackJsonObject;
+      extensions[extensionId] = redactJsonValue(data, recorder) as AgentAnnotationsJsonObject;
     }
     return {
       ...annotation,
@@ -192,6 +192,6 @@ export function redactAgentFeedbackTask(
       extensions,
     };
   });
-  const redactedTask: AgentFeedbackTask = { ...task, annotations };
-  return { task: parseAgentFeedbackTask(redactedTask), manifest: manifest(recorder) };
+  const redactedTask: AgentAnnotationsTask = { ...task, annotations };
+  return { task: parseAgentAnnotationsTask(redactedTask), manifest: manifest(recorder) };
 }

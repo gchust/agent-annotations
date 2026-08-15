@@ -9,14 +9,14 @@ import type { Plugin } from "vite";
 import { FileTaskStore } from "../server/store.js";
 import { createSourcePathService } from "../server/source-path.js";
 
-const VIRTUAL_ID = "virtual:agent-feedback/client";
+const VIRTUAL_ID = "virtual:agent-annotations/client";
 const RESOLVED_VIRTUAL_ID = `\0${VIRTUAL_ID}`;
-const TOKEN_HEADER = "x-agent-feedback-token";
+const TOKEN_HEADER = "x-agent-annotations-token";
 const MAX_BODY_BYTES = 256 * 1024;
 const MAX_EVIDENCE_BODY_BYTES = 3 * 1024 * 1024;
 const SOURCE_MODULE = /\.[cm]?[jt]sx?$/i;
 
-export type AgentFeedbackPluginOptions = {
+export type AgentAnnotationsPluginOptions = {
   root?: string;
   dir?: string;
   endpoint?: string;
@@ -24,8 +24,8 @@ export type AgentFeedbackPluginOptions = {
   clientExtensions?: string[];
 };
 
-export const agentFeedbackViteEntry = true;
-export const isAgentFeedbackRequestAllowed = (
+export const agentAnnotationsViteEntry = true;
+export const isAgentAnnotationsRequestAllowed = (
   remoteAddress: string | undefined,
   allowRemote: boolean,
   providedToken: string | undefined,
@@ -83,22 +83,22 @@ const body = async (request: IncomingMessage, limit = MAX_BODY_BYTES): Promise<u
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 };
 
-export default function agentFeedback(
-  options: AgentFeedbackPluginOptions = {}
+export default function agentAnnotations(
+  options: AgentAnnotationsPluginOptions = {}
 ): Plugin {
-  if (!/^\/[a-zA-Z0-9/_-]*$/.test(options.endpoint ?? "/__agent-feedback")) {
-    throw new Error("agentFeedback endpoint must be a root-relative path");
+  if (!/^\/[a-zA-Z0-9/_-]*$/.test(options.endpoint ?? "/__agent-annotations")) {
+    throw new Error("agentAnnotations endpoint must be a root-relative path");
   }
   let root = path.resolve(options.root ?? process.cwd());
   let realRoot = existsSync(root) ? realpathSync(root) : root;
-  let runtimeRoot = path.resolve(root, options.dir ?? ".agent-feedback");
+  let runtimeRoot = path.resolve(root, options.dir ?? ".agent-annotations");
   const assertRuntimeRoot = (): void => {
     if (runtimeRoot !== root && !runtimeRoot.startsWith(`${root}${path.sep}`)) {
-      throw new Error("agentFeedback dir must stay inside root");
+      throw new Error("agentAnnotations dir must stay inside root");
     }
   };
   assertRuntimeRoot();
-  const endpoint = options.endpoint ?? "/__agent-feedback";
+  const endpoint = options.endpoint ?? "/__agent-annotations";
   const allowRemote = options.allowRemote === true;
   const extensions = options.clientExtensions ?? [];
   const token = randomBytes(32).toString("hex");
@@ -109,7 +109,7 @@ export default function agentFeedback(
 
   if (allowRemote) {
     console.warn(
-      "[agent-feedback] remote access enabled: dev endpoints accept non-loopback clients; the session token is still required"
+      "[agent-annotations] remote access enabled: dev endpoints accept non-loopback clients; the session token is still required"
     );
   }
 
@@ -126,13 +126,13 @@ export default function agentFeedback(
   };
 
   const serverPlugin: Plugin = {
-    name: "agent-feedback",
+    name: "agent-annotations",
     apply: "serve",
     configResolved(config) {
       viteBase = config.base;
       root = path.resolve(options.root ?? config.root);
       realRoot = realpathSync(root);
-      runtimeRoot = path.resolve(root, options.dir ?? ".agent-feedback");
+      runtimeRoot = path.resolve(root, options.dir ?? ".agent-annotations");
       assertRuntimeRoot();
       store = new FileTaskStore(runtimeRoot);
       sourcePaths = createSourcePathService(root);
@@ -147,15 +147,15 @@ export default function agentFeedback(
         .join("\n");
       const values = extensions.map((_, index) => `extension${index}.default ?? extension${index}`).join(", ");
       return [
-        `import { mountAgentFeedback } from "@gchust/agent-annotations";`,
+        `import { mountAgentAnnotations } from "@gchust/agent-annotations";`,
         `import { HttpTaskTransport } from "@gchust/agent-annotations/vite/client";`,
         imports,
         `const config = ${JSON.stringify({ endpoint, token })};`,
         `const extensions = [${values}];`,
-        "const key = Symbol.for('agent-feedback.mount');",
+        "const key = Symbol.for('agent-annotations.mount');",
         "window[key]?.();",
         "const transport = new HttpTaskTransport(config);",
-        "const mounted = await mountAgentFeedback({ transport, extensions });",
+        "const mounted = await mountAgentAnnotations({ transport, extensions });",
         "window[key] = () => { mounted.unmount(); delete window[key]; };",
         "if (import.meta.hot) {",
         "  import.meta.hot.accept();",
@@ -222,7 +222,7 @@ export default function agentFeedback(
         tag: "script",
         attrs: {
           type: "module",
-          src: `${viteBase}@id/__x00__virtual:agent-feedback/client`,
+          src: `${viteBase}@id/__x00__virtual:agent-annotations/client`,
         },
         injectTo: "head",
       }];
@@ -249,9 +249,9 @@ export default function agentFeedback(
         });
       }
       server.middlewares.use(async (request, response, next) => {
-        const url = new URL(request.url ?? "/", "http://agent-feedback.local");
+        const url = new URL(request.url ?? "/", "http://agent-annotations.local");
         if (!url.pathname.startsWith(`${endpoint}/`) && url.pathname !== endpoint) return next();
-        if (!isAgentFeedbackRequestAllowed(
+        if (!isAgentAnnotationsRequestAllowed(
           request.socket.remoteAddress,
           allowRemote,
           typeof request.headers[TOKEN_HEADER] === "string" ? request.headers[TOKEN_HEADER] : undefined,

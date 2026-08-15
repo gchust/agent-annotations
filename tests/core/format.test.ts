@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  formatAgentFeedbackTask,
-  formatAgentFeedbackTaskMarkdown,
+  formatAgentAnnotationsTask,
+  formatAgentAnnotationsTaskMarkdown,
 } from "../../src/core/index.js";
 import { annotationFixture, targetFixture, taskFixture } from "./test-data.js";
 
@@ -38,10 +38,10 @@ describe("shared formatter", () => {
   });
 
   it("goldens open single/multi/region output", () => {
-    expect(formatAgentFeedbackTaskMarkdown(task)).toMatchInlineSnapshot(`
-      "# Agent Feedback Task task-1
+    expect(formatAgentAnnotationsTaskMarkdown(task)).toMatchInlineSnapshot(`
+      "# Agent Annotations Task task-1
 
-      - schema: agent-feedback.task.v1
+      - schema: agent-annotations.task.v1
       - schemaVersion: 1
       - revision: 0
       - status: active
@@ -102,11 +102,11 @@ describe("shared formatter", () => {
       ],
     });
     expect(
-      formatAgentFeedbackTaskMarkdown(single, { annotations: "all" })
+      formatAgentAnnotationsTaskMarkdown(single, { annotations: "all" })
     ).toMatchInlineSnapshot(`
-      "# Agent Feedback Task task-1
+      "# Agent Annotations Task task-1
 
-      - schema: agent-feedback.task.v1
+      - schema: agent-annotations.task.v1
       - schemaVersion: 1
       - revision: 0
       - status: completed
@@ -140,6 +140,6 @@ describe("shared formatter", () => {
   });
 
   it("supports the JSON public formatter", () => {
-    expect(JSON.parse(formatAgentFeedbackTask(task, { format: "json" }))).toEqual(task);
+    expect(JSON.parse(formatAgentAnnotationsTask(task, { format: "json" }))).toEqual(task);
   });
 });

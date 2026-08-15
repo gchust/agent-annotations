@@ -1,6 +1,6 @@
 # Third-party notices
 
-Agent Feedback depends on `react-grab@0.1.50` as its sole generic element
+Agent Annotations depends on `react-grab@0.1.50` as its sole generic element
 inspection engine. React, React DOM, and Vite are peer dependencies supplied by
 the host application. Their respective licenses apply to those packages.
 

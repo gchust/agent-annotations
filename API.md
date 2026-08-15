@@ -2,21 +2,21 @@
 
 ## `@gchust/agent-annotations`
 
-- `mountAgentFeedback(options)` mounts the React runtime and returns
+- `mountAgentAnnotations(options)` mounts the React runtime and returns
   `{ api, unmount }`. `options.transport` implements `TaskTransport`; optional
   `options.extensions` uses public client extensions.
-- `createAgentFeedbackTask`, `parseAgentFeedbackTask`,
-  `validateAgentFeedbackTask`, and `isAgentFeedbackTask` own schema v1.
-- `applyAgentFeedbackMutation` applies revision-checked task operations.
-- `formatAgentFeedbackTask` emits Markdown or JSON.
-- `redactAgentFeedbackTask` and `redactAgentFeedbackText` remove generic secret
+- `createAgentAnnotationsTask`, `parseAgentAnnotationsTask`,
+  `validateAgentAnnotationsTask`, and `isAgentAnnotationsTask` own schema v1.
+- `applyAgentAnnotationsMutation` applies revision-checked task operations.
+- `formatAgentAnnotationsTask` emits Markdown or JSON.
+- `redactAgentAnnotationsTask` and `redactAgentAnnotationsText` remove generic secret
   material before persistence or export.
 - The remaining root exports are pure ID, selection, placement, selector, and
   shortcut helpers plus their public types.
 
 ## `@gchust/agent-annotations/vite`
 
-The default export is `agentFeedback(options)`. Options are `root`, `dir`,
+The default export is `agentAnnotations(options)`. Options are `root`, `dir`,
 `endpoint`, `allowRemote`, and absolute browser-module paths in
 `clientExtensions`. The plugin applies only to Vite's development server.
 `FileTaskStore` and `createSourcePathService` are exported for controlled Node

@@ -3,16 +3,16 @@ import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 
 import {
-  formatAgentFeedbackTask,
-  parseAgentFeedbackTask,
+  formatAgentAnnotationsTask,
+  parseAgentAnnotationsTask,
 } from "../core/index.js";
 import { FileTaskStore } from "../server/store.js";
 import { createSourcePathService } from "../server/source-path.js";
-import type { AgentFeedbackMutationOperation, AgentFeedbackTask } from "../types/index.js";
+import type { AgentAnnotationsMutationOperation, AgentAnnotationsTask } from "../types/index.js";
 
-const HELP = `Agent Feedback 0.1.0-alpha.0
+const HELP = `Agent Annotations 0.1.0-alpha.0
 
-Usage: agent-feedback <command> [options]
+Usage: agent-annotations <command> [options]
 
 Commands:
   list
@@ -25,28 +25,28 @@ Commands:
 `;
 
 const runtimeRoot = (): string => path.resolve(
-  process.env.AGENT_FEEDBACK_DIR ?? path.join(process.cwd(), ".agent-feedback")
+  process.env.AGENT_ANNOTATIONS_DIR ?? path.join(process.cwd(), ".agent-annotations")
 );
 
 const fail = (message: string, code = 1): never => {
-  process.stderr.write(`[agent-feedback] ${message}\n`);
+  process.stderr.write(`[agent-annotations] ${message}\n`);
   process.exitCode = code;
   throw new Error("__handled__");
 };
 
-const task = (): AgentFeedbackTask => {
+const task = (): AgentAnnotationsTask => {
   const found = new FileTaskStore(runtimeRoot()).read();
   if (!found) return fail(`no task found at ${path.join(runtimeRoot(), "tasks", "active-task.json")}`);
   return found;
 };
 
-const readMcpTask = (): AgentFeedbackTask => {
+const readMcpTask = (): AgentAnnotationsTask => {
   const found = new FileTaskStore(runtimeRoot()).read();
   if (!found) throw new Error(`no task found at ${path.join(runtimeRoot(), "tasks", "active-task.json")}`);
   return found;
 };
 
-const sourceRevision = (current: AgentFeedbackTask): string =>
+const sourceRevision = (current: AgentAnnotationsTask): string =>
   createSourcePathService(process.cwd()).revision(current);
 
 const readDiagnostics = (): unknown => {
@@ -70,7 +70,7 @@ const screenshots = (): string[] => {
 
 const parseMutationArgs = (command: "complete" | "reopen", args: string[]): {
   annotationId: string;
-  operation: AgentFeedbackMutationOperation;
+  operation: AgentAnnotationsMutationOperation;
 } => {
   const annotationId = args.shift();
   if (!annotationId) return fail(`${command} requires an annotation id`, 2);
@@ -116,22 +116,22 @@ const mutate = async (command: "complete" | "reopen", args: string[]): Promise<v
 const TOOLS = [
   {
     name: "list_annotations",
-    description: "Read the active Agent Feedback task and list its annotations.",
+    description: "Read the active Agent Annotations task and list its annotations.",
     inputSchema: { type: "object", properties: {} },
   },
   {
     name: "print_task",
-    description: "Read the active Agent Feedback task as schema v1 JSON.",
+    description: "Read the active Agent Annotations task as schema v1 JSON.",
     inputSchema: { type: "object", properties: {} },
   },
   {
     name: "verify_task",
-    description: "Read and validate the active agent-feedback.task.v1 task without changing it.",
+    description: "Read and validate the active agent-annotations.task.v1 task without changing it.",
     inputSchema: { type: "object", properties: {} },
   },
   {
     name: "read_diagnostics",
-    description: "Read the persisted Agent Feedback runtime diagnostics without changing state.",
+    description: "Read the persisted Agent Annotations runtime diagnostics without changing state.",
     inputSchema: { type: "object", properties: {} },
   },
   {
@@ -141,7 +141,7 @@ const TOOLS = [
   },
   {
     name: "wait_verification",
-    description: "Boundedly wait until the exact source revision for the active agent-feedback.task.v1 differs from a caller-provided revision.",
+    description: "Boundedly wait until the exact source revision for the active agent-annotations.task.v1 differs from a caller-provided revision.",
     inputSchema: {
       type: "object",
       properties: { sourceRevision: { type: "string" }, timeoutMs: { type: "number" } },
@@ -170,7 +170,7 @@ const mcp = async (): Promise<void> => {
       try {
         let result: unknown;
         if (request.method === "initialize") {
-          result = { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "agent-feedback", version: "0.1.0-alpha.0" } };
+          result = { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "agent-annotations", version: "0.1.0-alpha.0" } };
         } else if (request.method === "tools/list") {
           result = { tools: TOOLS };
         } else if (request.method === "tools/call") {
@@ -233,11 +233,11 @@ const main = async (): Promise<void> => {
   if (command === "complete" || command === "reopen") return mutate(command, args);
   if (command === "print") {
     const format = args[0] === "--markdown" ? "markdown" : args[0] === "--json" || !args.length ? "json" : fail(`unknown option: ${args[0]}`, 2);
-    process.stdout.write(`${formatAgentFeedbackTask(task(), { format, annotations: "all" })}\n`);
+    process.stdout.write(`${formatAgentAnnotationsTask(task(), { format, annotations: "all" })}\n`);
     return;
   }
   if (command === "verify") {
-    const verified = parseAgentFeedbackTask(JSON.parse(readFileSync(path.join(runtimeRoot(), "tasks", "active-task.json"), "utf8")));
+    const verified = parseAgentAnnotationsTask(JSON.parse(readFileSync(path.join(runtimeRoot(), "tasks", "active-task.json"), "utf8")));
     process.stdout.write(`${JSON.stringify({ ok: true, taskId: verified.taskId, taskRevision: verified.taskRevision })}\n`);
     return;
   }
@@ -246,7 +246,7 @@ const main = async (): Promise<void> => {
     const { runArchitectureAudit } = await import("../audit/index.js");
     const result = runArchitectureAudit(process.cwd());
     if (!result.ok) fail(`architecture audit failed: ${result.problems.map(({ check, file, line }) => `${check}:${file}:${line}`).join(", ")}`);
-    process.stdout.write("[agent-feedback] architecture audit PASS\n");
+    process.stdout.write("[agent-annotations] architecture audit PASS\n");
     return;
   }
   fail(`unknown command: ${command}`, 2);
@@ -254,7 +254,7 @@ const main = async (): Promise<void> => {
 
 main().catch((error) => {
   if ((error as Error).message !== "__handled__") {
-    process.stderr.write(`[agent-feedback] ${(error as Error).message}\n`);
+    process.stderr.write(`[agent-annotations] ${(error as Error).message}\n`);
     process.exitCode = 1;
   }
 });

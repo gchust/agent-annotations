@@ -1,4 +1,4 @@
-import { mountAgentFeedback, type MountedAgentFeedback } from "@gchust/agent-annotations";
+import { mountAgentAnnotations, type MountedAgentAnnotations } from "@gchust/agent-annotations";
 import { MemoryTaskTransport } from "@gchust/agent-annotations/testing";
 import React, { forwardRef, memo, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -7,10 +7,10 @@ import "./styles.css";
 
 declare global {
   interface Window {
-    __agentFeedback?: MountedAgentFeedback;
-    __agentFeedbackTransport?: MemoryTaskTransport;
-    __unmountAgentFeedback?: () => void;
-    __remountAgentFeedback?: () => Promise<void>;
+    __agentAnnotations?: MountedAgentAnnotations;
+    __agentAnnotationsTransport?: MemoryTaskTransport;
+    __unmountAgentAnnotations?: () => void;
+    __remountAgentAnnotations?: () => Promise<void>;
   }
 }
 
@@ -53,15 +53,15 @@ function App() {
 }
 
 const transport = new MemoryTaskTransport();
-window.__agentFeedbackTransport = transport;
-window.__remountAgentFeedback = async () => {
-  window.__agentFeedback?.unmount();
-  window.__agentFeedback = await mountAgentFeedback({ transport });
+window.__agentAnnotationsTransport = transport;
+window.__remountAgentAnnotations = async () => {
+  window.__agentAnnotations?.unmount();
+  window.__agentAnnotations = await mountAgentAnnotations({ transport });
 };
-window.__unmountAgentFeedback = () => {
-  window.__agentFeedback?.unmount();
-  window.__agentFeedback = undefined;
+window.__unmountAgentAnnotations = () => {
+  window.__agentAnnotations?.unmount();
+  window.__agentAnnotations = undefined;
 };
 
 createRoot(document.getElementById("root")!).render(<App />);
-void window.__remountAgentFeedback();
+void window.__remountAgentAnnotations();
