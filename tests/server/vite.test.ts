@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import react from "@vitejs/plugin-react";
 import { createServer } from "vite";
 
+import pkg from "../../package.json" with { type: "json" };
 import agentAnnotations, { createSourcePathService, isAgentAnnotationsRequestAllowed } from "../../src/vite/index.js";
 
 const roots: string[] = [];
@@ -34,8 +35,8 @@ describe("serve-only Vite plugin", () => {
     expect(resolveId.call({} as never, "virtual:agent-annotations/client", undefined, {} as never)).toBe("\0virtual:agent-annotations/client");
     const loaded = load.call({} as never, "\0virtual:agent-annotations/client", {} as never);
     expect(String(loaded)).toContain("/tmp/demo/extension.ts");
-    expect(String(loaded)).toContain('from "@gchust/agent-annotations"');
-    expect(String(loaded)).toContain('from "@gchust/agent-annotations/vite/client"');
+    expect(String(loaded)).toContain(`from ${JSON.stringify(pkg.name)}`);
+    expect(String(loaded)).toContain(`from ${JSON.stringify(`${pkg.name}/vite/client`)}`);
     expect(String(loaded)).toContain("mountAgentAnnotations");
     expect(String(loaded)).toContain("mountAgentAnnotations({ transport, extensions })");
     expect(String(loaded)).toContain("window[key]?.()");

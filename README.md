@@ -78,12 +78,7 @@ agent-annotations complete <annotation-id> --verified --summary <text>
 agent-annotations reopen <annotation-id>
 agent-annotations print [--json|--markdown]
 agent-annotations verify
-agent-annotations audit
 ```
-
-`audit` enforces the package's single React Grab engine and bans legacy source
-fallbacks, basename lookup, old schemas, host coupling, and built-in Registry
-bypasses.
 
 ## Security
 
@@ -94,6 +89,14 @@ do not commit it. The client does not collect form values, cookies,
 Authorization headers, request bodies, or response bodies, and generic
 redaction runs before persistence. The CLI is scoped to that runtime directory
 and does not execute shell commands or expose arbitrary file reads.
+
+## Release verification
+
+`pnpm release:verify` runs the full release gate: typecheck, unit tests,
+architecture audit, docs smoke, package checks, tarball audit, and a packed
+consumer E2E. `pnpm pack` always rebuilds and verifies the required `dist`
+entries first through the `prepack` lifecycle, so a clean checkout without
+`dist` still produces a complete tarball.
 
 ## API reference
 

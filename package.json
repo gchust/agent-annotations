@@ -68,7 +68,10 @@
     "pretest": "pnpm build",
     "test": "vitest run",
     "test:e2e": "node scripts/packed-e2e.mjs",
-    "audit": "pnpm build && node dist/audit/index.mjs",
+    "prepack": "pnpm build && node scripts/verify-dist.mjs",
+    "prepublishOnly": "pnpm release:verify",
+    "release:verify": "pnpm typecheck && pnpm test && pnpm check:architecture && pnpm check:docs && pnpm check:package && pnpm check:tarball && pnpm test:e2e",
+    "check:architecture": "vitest run tests/audit/architecture-audit.test.ts",
     "check:package": "publint && attw --pack . --profile esm-only",
     "check:docs": "node scripts/docs-smoke.mjs",
     "check:tarball": "node scripts/tarball-audit.mjs"

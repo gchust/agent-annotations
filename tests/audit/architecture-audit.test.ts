@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -26,6 +27,12 @@ const fixture = (offender?: string) => {
 afterEach(() => roots.splice(0).forEach((root) => rmSync(root, { recursive: true, force: true })));
 
 describe("architecture audit", () => {
+  it("passes the repository itself", () => {
+    const repo = fileURLToPath(new URL("../..", import.meta.url));
+    const result = runArchitectureAudit(repo);
+    expect(result.ok).toBe(true);
+  });
+
   it("passes a clean tree", () => expect(runArchitectureAudit(fixture()).ok).toBe(true));
 
   it("passes a packed consumer without package source", () => {

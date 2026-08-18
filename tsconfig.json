@@ -5,6 +5,7 @@
     "moduleResolution": "NodeNext",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "strict": true,
+    "resolveJsonModule": true,
     "declaration": true,
     "declarationMap": false,
     "sourceMap": false,

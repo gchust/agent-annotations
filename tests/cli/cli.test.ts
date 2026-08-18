@@ -5,6 +5,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import pkg from "../../package.json" with { type: "json" };
 import { createAgentAnnotationsTask } from "../../src/core/index.js";
 import { annotationFixture } from "../core/test-data.js";
 
@@ -47,7 +48,9 @@ describe("public CLI processes", () => {
   it("shows help from the built public binary", () => {
     const help = run(fixture(), ["--help"]);
     expect(help).toContain("Usage: agent-annotations");
+    expect(help).toContain(`Agent Annotations ${pkg.version}`);
     expect(help).not.toContain("mcp");
+    expect(help).not.toContain("audit");
   });
 
   it("runs every command help plus list, complete, reopen, print, and verify", () => {

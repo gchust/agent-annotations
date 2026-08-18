@@ -6,16 +6,29 @@ import path from "node:path";
 const root = process.cwd();
 const directory = mkdtempSync(path.join(tmpdir(), "agent-annotations-pack-audit-"));
 try {
-  const packed = JSON.parse(execFileSync("pnpm", ["pack", "--json", "--pack-destination", directory], {
-    cwd: root,
-    encoding: "utf8",
-  }));
-  const files = packed.files.map(({ path: file }) => file).sort();
+  execFileSync("pnpm", ["pack", "--pack-destination", directory], { cwd: root, encoding: "utf8" });
+  const tarball = readdirSync(directory).find((file) => file.endsWith(".tgz"));
+  if (!tarball) throw new Error("pnpm pack did not produce a tarball");
+  const files = execFileSync("tar", ["-tf", path.join(directory, tarball)], { encoding: "utf8" })
+    .split("\n").map((file) => file.trim().replace(/^package\//, "")).filter(Boolean).sort();
   const manifest = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
   for (const file of manifest.files) {
     if (!files.some((packedFile) => packedFile === file || packedFile.startsWith(`${file}/`))) {
       throw new Error(`files whitelist entry missing from tarball: ${file}`);
     }
+  }
+  const requirePacked = (file) => {
+    if (typeof file !== "string" || !file.startsWith("./dist/")) return;
+    const packedFile = file.replace(/^\.\//, "");
+    if (!files.includes(packedFile)) throw new Error(`exported entry missing from tarball: ${packedFile}`);
+  };
+  for (const conditions of Object.values(manifest.exports ?? {})) {
+    if (typeof conditions === "string") requirePacked(conditions);
+    else for (const value of Object.values(conditions)) requirePacked(value);
+  }
+  for (const file of Object.values(manifest.bin ?? {})) requirePacked(file);
+  if (files.some((file) => file.startsWith("dist/audit/"))) {
+    throw new Error("internal architecture audit artifact must not be shipped");
   }
   const allowed = /^(?:package\.json|LICENSE|README\.md|API\.md|CHANGELOG\.md|THIRD_PARTY_NOTICES\.md|dist\/)/;
   const unexpected = files.filter((file) => !allowed.test(file));
@@ -30,7 +43,7 @@ try {
       throw new Error(`internal import path in declaration: dist/${file}`);
     }
   }
-  const size = statSync(packed.filename).size;
+  const size = statSync(path.join(directory, tarball)).size;
   if (size > 200_000) throw new Error(`tarball exceeds 200000-byte gate: ${size}`);
   if (JSON.stringify(manifest).includes("workspace:")) throw new Error("workspace protocol in package metadata");
   console.log(`[agent-annotations] tarball audit PASS (${files.length} files, ${size} bytes)`);

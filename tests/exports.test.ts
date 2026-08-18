@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+
+import pkg from "../package.json" with { type: "json" };
 import { agentAnnotationsVersion } from "../src/client/index.js";
 import { agentAnnotationsExtensionApiVersion } from "../src/extension/index.js";
 import { agentAnnotationsViteEntry } from "../src/vite/index.js";
@@ -15,7 +17,7 @@ describe("public entry skeleton", () => {
       value,
       testing: new MemoryTaskTransport().constructor.name,
     }).toEqual({
-      agentAnnotationsVersion: "0.1.0-alpha.0",
+      agentAnnotationsVersion: pkg.version,
       agentAnnotationsExtensionApiVersion: 1,
       agentAnnotationsViteEntry: true,
       value: { ready: true },

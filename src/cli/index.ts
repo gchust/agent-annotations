@@ -7,9 +7,10 @@ import {
   parseAgentAnnotationsTask,
 } from "../core/index.js";
 import { FileTaskStore } from "../server/store.js";
+import { PACKAGE_VERSION } from "../metadata.js";
 import type { AgentAnnotationsMutationOperation, AgentAnnotationsTask } from "../types/index.js";
 
-const HELP = `Agent Annotations 0.1.0-alpha.0
+const HELP = `Agent Annotations ${PACKAGE_VERSION}
 
 Usage: agent-annotations <command> [options]
 
@@ -19,7 +20,6 @@ Commands:
   reopen <annotation-id>
   print [--json|--markdown]
   verify
-  audit
 `;
 
 const runtimeRoot = (): string => path.resolve(
@@ -108,13 +108,6 @@ const main = async (): Promise<void> => {
   if (command === "verify") {
     const verified = parseAgentAnnotationsTask(JSON.parse(readFileSync(path.join(runtimeRoot(), "tasks", "active-task.json"), "utf8")));
     process.stdout.write(`${JSON.stringify({ ok: true, taskId: verified.taskId, taskRevision: verified.taskRevision })}\n`);
-    return;
-  }
-  if (command === "audit") {
-    const { runArchitectureAudit } = await import("../audit/index.js");
-    const result = runArchitectureAudit(process.cwd());
-    if (!result.ok) fail(`architecture audit failed: ${result.problems.map(({ check, file, line }) => `${check}:${file}:${line}`).join(", ")}`);
-    process.stdout.write("[agent-annotations] architecture audit PASS\n");
     return;
   }
   fail(`unknown command: ${command}`, 2);

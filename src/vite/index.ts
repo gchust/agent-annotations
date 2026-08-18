@@ -8,6 +8,7 @@ import type { Plugin } from "vite";
 
 import { FileTaskStore } from "../server/store.js";
 import { createSourcePathService } from "../server/source-path.js";
+import { PACKAGE_NAME } from "../metadata.js";
 
 const VIRTUAL_ID = "virtual:agent-annotations/client";
 const RESOLVED_VIRTUAL_ID = `\0${VIRTUAL_ID}`;
@@ -149,8 +150,8 @@ export default function agentAnnotations(
         .join("\n");
       const values = extensions.map((_, index) => `extension${index}.default ?? extension${index}`).join(", ");
       return [
-        `import { mountAgentAnnotations } from "@gchust/agent-annotations";`,
-        `import { HttpTaskTransport } from "@gchust/agent-annotations/vite/client";`,
+        `import { mountAgentAnnotations } from ${JSON.stringify(PACKAGE_NAME)};`,
+        `import { HttpTaskTransport } from ${JSON.stringify(`${PACKAGE_NAME}/vite/client`)};`,
         imports,
         `const config = ${JSON.stringify({ endpoint: resolvedEndpoint, token })};`,
         `const extensions = [${values}];`,

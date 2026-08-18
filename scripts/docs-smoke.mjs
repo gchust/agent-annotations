@@ -1,16 +1,18 @@
 import { readFileSync } from "node:fs";
 
+const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+const name = manifest.name;
+const bin = Object.keys(manifest.bin)[0];
 const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
 for (const text of [
-  "pnpm add -D @gchust/agent-annotations",
-  'import agentAnnotations from "@gchust/agent-annotations/vite"',
-  'import { defineClientExtension } from "@gchust/agent-annotations/extension"',
-  "agent-annotations list",
-  "agent-annotations complete <annotation-id> --verified --summary <text>",
-  "agent-annotations reopen <annotation-id>",
-  "agent-annotations print [--json|--markdown]",
-  "agent-annotations verify",
-  "agent-annotations audit",
+  `pnpm add -D ${name}`,
+  `import agentAnnotations from "${name}/vite"`,
+  `import { defineClientExtension } from "${name}/extension"`,
+  `${bin} list`,
+  `${bin} complete <annotation-id> --verified --summary <text>`,
+  `${bin} reopen <annotation-id>`,
+  `${bin} print [--json|--markdown]`,
+  `${bin} verify`,
 ]) {
   if (!readme.includes(text)) throw new Error(`README example missing: ${text}`);
 }

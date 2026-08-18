@@ -64,13 +64,3 @@ export const runArchitectureAudit = (root: string): { ok: boolean; problems: Aud
   }
   return { ok: problems.length === 0, problems, importerFiles };
 };
-
-if (import.meta.url === `file://${process.argv[1]}`) {
-  const result = runArchitectureAudit(process.cwd());
-  if (result.ok) console.log("[agent-annotations] architecture audit PASS");
-  else {
-    console.error("[agent-annotations] architecture audit FAIL");
-    for (const problem of result.problems) console.error(`  [${problem.check}] ${problem.file}:${problem.line}`);
-    process.exitCode = 1;
-  }
-}
