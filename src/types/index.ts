@@ -187,6 +187,7 @@ export type AgentAnnotationsRedactionManifest = {
 
 export type AgentAnnotationsExtensionRedactor = {
   extensionId: string;
+  id: string;
   redact(
     data: AgentAnnotationsJsonObject,
     context: { annotationId: string; extensionId: string }
@@ -380,7 +381,6 @@ export interface StudioPublicApi {
 }
 
 export type AgentAnnotationsExtensionContext = {
-  readonly transport: TaskTransport;
   readonly studio: StudioPublicApi;
 };
 

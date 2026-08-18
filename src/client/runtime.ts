@@ -281,6 +281,7 @@ export async function mountAgentAnnotations(
     if (destroyed) return undefined;
     const redactors = registry.getRedactors().map((redactor) => ({
       extensionId: redactor.extensionId,
+      id: redactor.id,
       redact: redactor.redact,
     }));
     const redactedOperations = operations.map((operation) =>
@@ -317,6 +318,7 @@ export async function mountAgentAnnotations(
       task,
       registry.getRedactors().map((redactor) => ({
         extensionId: redactor.extensionId,
+        id: redactor.id,
         redact: redactor.redact,
       }))
     ).task;
@@ -1242,7 +1244,7 @@ export async function mountAgentAnnotations(
   const setupCleanups: Array<() => void> = [];
   try {
     for (const extension of registry.getExtensions()) {
-      const dispose = extension.setup?.({ studio: api, transport: options.transport });
+      const dispose = extension.setup?.({ studio: api });
       if (dispose) setupCleanups.push(dispose);
     }
   } catch (error) {

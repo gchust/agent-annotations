@@ -320,7 +320,11 @@ export class ClientExtensionRegistry {
   }
 
   getRedactors(): readonly RegisteredAnnotationRedactor[] {
-    return [...this.#redactors.values()].sort(byId);
+    return [...this.#redactors.values()].sort(
+      (left, right) =>
+        left.extensionId.localeCompare(right.extensionId) ||
+        byId(left, right)
+    );
   }
 
   getMessages(): AgentAnnotationsLocaleMessages {

@@ -1,3 +1,7 @@
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
 /** @vitest-environment jsdom */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
@@ -31,6 +35,7 @@ vi.mock("react-grab/primitives", () => ({
 
 import { mountAgentAnnotations } from "../../src/client/index.js";
 import { defineClientExtension } from "../../src/extension/index.js";
+import { FileTaskStore } from "../../src/server/store.js";
 import { MemoryTaskTransport } from "../../src/testing/index.js";
 import type { AgentAnnotationsTask, TaskTransport } from "../../src/types/index.js";
 import { annotationFixture, targetFixture, taskFixture } from "../core/test-data.js";
@@ -621,5 +626,113 @@ describe("client runtime", () => {
     })).rejects.toThrow("setup failed");
     expect(dispose).toHaveBeenCalledOnce();
     expect(document.getElementById("agent-annotations-root")).toBeNull();
+  });
+
+  it("does not expose the raw transport in the extension setup context", async () => {
+    let resolveContext!: (value: { studio: unknown; transport: unknown }) => void;
+    const context = new Promise<{ studio: unknown; transport: unknown }>((resolve) => {
+      resolveContext = resolve;
+    });
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(),
+      extensions: [
+        defineClientExtension({
+          id: "no-transport",
+          apiVersion: 1,
+          setup: (value) => {
+            resolveContext(value as { studio: unknown; transport: unknown });
+          },
+        }),
+      ],
+    });
+    const value = await context;
+    expect(value).not.toHaveProperty("transport");
+    expect(value.studio).toBeDefined();
+    mounted.unmount();
+  });
+
+  it("fails closed when an extension redactor throws before transport persistence", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "agent-annotations-runtime-throw-"));
+    const store = new FileTaskStore(root);
+    const task = store.readOrCreate();
+    const transport: TaskTransport = {
+      read: () => Promise.resolve(store.readOrCreate()),
+      mutate: (request) => store.mutate(request),
+    };
+    const mutate = vi.spyOn(transport, "mutate");
+    const before = readFileSync(path.join(root, "tasks/active-task.json"), "utf8");
+    const pageTarget = document.createElement("button");
+    document.body.append(pageTarget);
+    primitives.getElementAtPoint.mockReturnValue(pageTarget);
+    const mounted = await mountAgentAnnotations({
+      transport,
+      extensions: [
+        defineClientExtension({
+          id: "throwing-redactor",
+          apiVersion: 1,
+          targetEnrichers: [{ id: "target", enrich: () => ({ ready: true }) }],
+          redactors: [{
+            id: "explode",
+            redact: () => {
+              throw new Error("redactor exploded");
+            },
+          }],
+        }),
+      ],
+    });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      mounted.api.commands.capture.startPick();
+      document.dispatchEvent(new MouseEvent("click", {
+        bubbles: true,
+        clientX: 10,
+        clientY: 10,
+      }));
+      const textarea = shadow.querySelector<HTMLTextAreaElement>(".aa-composer textarea")!;
+      textarea.value = "Secret comment";
+      shadow.querySelector<HTMLFormElement>(".aa-composer")!.dispatchEvent(
+        new Event("submit", { bubbles: true, cancelable: true })
+      );
+      await vi.waitFor(() => expect(shadow.querySelector('[role="status"]')?.textContent)
+        .toBe("redactor exploded"));
+      expect(mutate).not.toHaveBeenCalled();
+      expect(store.read()).toEqual(task);
+      expect(readFileSync(path.join(root, "tasks/active-task.json"), "utf8")).toBe(before);
+    } finally {
+      mounted.unmount();
+      pageTarget.remove();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("redacts secrets through the browser mutation path before persistence", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "agent-annotations-runtime-redact-"));
+    const store = new FileTaskStore(root);
+    const task = store.readOrCreate();
+    await store.mutate({
+      taskId: task.taskId,
+      expectedRevision: 0,
+      operations: [{ op: "add", annotation: annotationFixture() }],
+    });
+    const transport: TaskTransport = {
+      read: () => Promise.resolve(store.readOrCreate()),
+      mutate: (request) => store.mutate(request),
+    };
+    const mounted = await mountAgentAnnotations({ transport });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      mounted.api.commands.markers.focus("ann-1");
+      const form = shadow.querySelector<HTMLFormElement>(".aa-editor")!;
+      const textarea = form.querySelector<HTMLTextAreaElement>("textarea")!;
+      textarea.value = "Bearer UNIQUE_SECRET_SENTINEL_runtime_update";
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      await vi.waitFor(() => expect(shadow.querySelector(".aa-editor")).toBeNull());
+      const persisted = store.read()!;
+      expect(persisted.annotations[0].comment).not.toContain("UNIQUE_SECRET_SENTINEL_runtime_update");
+      expect(persisted.annotations[0].comment).toContain("[REDACTED]");
+    } finally {
+      mounted.unmount();
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

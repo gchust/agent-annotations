@@ -116,22 +116,41 @@ export function redactAgentAnnotationsTask(
 ): AgentAnnotationsRedactionResult {
   const task = parseAgentAnnotationsTask(input);
   const recorder = createRecorder();
-  const byExtension = new Map<string, AgentAnnotationsExtensionRedactor>();
-  for (const redactor of redactors) {
-    if (byExtension.has(redactor.extensionId)) {
-      throw new TypeError(`Duplicate extension redactor: ${redactor.extensionId}`);
+  const byExtension = new Map<string, AgentAnnotationsExtensionRedactor[]>();
+  for (const redactor of [...redactors].sort(
+    (left, right) =>
+      left.extensionId.localeCompare(right.extensionId) ||
+      left.id.localeCompare(right.id)
+  )) {
+    const list = byExtension.get(redactor.extensionId);
+    if (list) {
+      if (list.some((existing) => existing.id === redactor.id)) {
+        throw new TypeError(
+          `Duplicate extension redactor: ${redactor.extensionId}/${redactor.id}`
+        );
+      }
+      list.push(redactor);
+    } else {
+      byExtension.set(redactor.extensionId, [redactor]);
     }
-    byExtension.set(redactor.extensionId, redactor);
   }
   const annotations = task.annotations.map((annotation) => {
     const extensions: Record<string, AgentAnnotationsJsonObject> = {};
-    for (const [extensionId, rawData] of Object.entries(annotation.extensions)) {
+    for (const [extensionId, rawData] of Object.entries(annotation.extensions)
+      .sort(([left], [right]) => left.localeCompare(right))) {
       const genericData = redactJsonValue(rawData, recorder) as AgentAnnotationsJsonObject;
-      const extensionData = byExtension.get(extensionId)?.redact(genericData, {
-        annotationId: annotation.annotationId,
-        extensionId,
-      });
-      const data = extensionData === undefined ? genericData : extensionData;
+      let data: AgentAnnotationsJsonObject | null = genericData;
+      for (const redactor of byExtension.get(extensionId) ?? []) {
+        const next = redactor.redact(data, {
+          annotationId: annotation.annotationId,
+          extensionId,
+        });
+        if (next === null) {
+          data = null;
+          break;
+        }
+        data = next;
+      }
       if (data === null) continue;
       const extensionIssue = validateExtensionData(data, extensionId);
       if (extensionIssue) {

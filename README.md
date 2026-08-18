@@ -86,9 +86,18 @@ The Vite API binds to loopback by default, requires a random private session
 token, and validates Host plus Origin/Referer. Set `allowRemote: true` only on a
 trusted development network. Runtime data is stored under `.agent-annotations`;
 do not commit it. The client does not collect form values, cookies,
-Authorization headers, request bodies, or response bodies, and generic
-redaction runs before persistence. The CLI is scoped to that runtime directory
-and does not execute shell commands or expose arbitrary file reads.
+Authorization headers, request bodies, or response bodies.
+
+Generic redaction is the final persistence boundary: every mutation path
+(browser, CLI, Vite API, and direct store calls) passes through
+`redactAgentAnnotationsTask()` before atomic write, so update comments,
+`setExtension` data, completion summaries, and evidence metadata cannot persist
+secrets. Extension redactors run on the client and are composed deterministically
+in stable `(extensionId, redactorId)` order; generic redaction always runs again
+after them and again before persistence. Extension setup receives `{ studio }`
+only — raw `TaskTransport` is never exposed to extensions. The CLI is scoped to
+that runtime directory and does not execute shell commands or expose arbitrary
+file reads.
 
 ## Release verification
 

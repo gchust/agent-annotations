@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -70,5 +70,13 @@ describe("public CLI processes", () => {
     const result = runExpectingFailure(fixture(), ["mcp"]);
     expect(result.status).toBe(2);
     expect(result.stderr).toContain("unknown command: mcp");
+  });
+
+  it("redacts a secret in the complete summary before it reaches active-task.json", () => {
+    const root = fixture();
+    run(root, ["complete", "ann-1", "--verified", "--summary", "Bearer UNIQUE_SECRET_SENTINEL_cli"]);
+    const persisted = readFileSync(path.join(root, "tasks/active-task.json"), "utf8");
+    expect(persisted).not.toContain("UNIQUE_SECRET_SENTINEL_cli");
+    expect(persisted).toContain("[REDACTED]");
   });
 });

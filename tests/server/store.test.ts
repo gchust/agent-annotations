@@ -63,4 +63,110 @@ describe("file task store", () => {
     const reference = evidenced.annotations[0].evidence?.[0].ref;
     expect(readFileSync(path.join(store.root, reference!))).toEqual(png);
   });
+
+  it("redacts secrets from update comments before persistence", async () => {
+    const store = new FileTaskStore(root());
+    const task = store.readOrCreate();
+    await store.mutate({
+      taskId: task.taskId,
+      expectedRevision: 0,
+      operations: [{ op: "add", annotation: annotationFixture() }],
+    });
+    const updated = await store.mutate({
+      taskId: task.taskId,
+      expectedRevision: 1,
+      operations: [{
+        op: "update",
+        annotationId: "ann-1",
+        comment: "Bearer UNIQUE_SECRET_SENTINEL_update",
+      }],
+    });
+    expect(updated.annotations[0].comment).not.toContain("UNIQUE_SECRET_SENTINEL_update");
+    expect(updated.annotations[0].comment).toContain("[REDACTED]");
+    expect(JSON.stringify(store.read())).not.toContain("UNIQUE_SECRET_SENTINEL_update");
+  });
+
+  it("redacts secrets from setExtension data before persistence", async () => {
+    const store = new FileTaskStore(root());
+    const task = store.readOrCreate();
+    await store.mutate({
+      taskId: task.taskId,
+      expectedRevision: 0,
+      operations: [{ op: "add", annotation: annotationFixture() }],
+    });
+    const updated = await store.mutate({
+      taskId: task.taskId,
+      expectedRevision: 1,
+      operations: [{
+        op: "setExtension",
+        annotationId: "ann-1",
+        extensionId: "demo.extension",
+        data: {
+          token: "Bearer UNIQUE_SECRET_SENTINEL_set",
+          keep: "Bearer UNIQUE_SECRET_SENTINEL_keep",
+        },
+      }],
+    });
+    const extensions = updated.annotations[0].extensions["demo.extension"];
+    expect(extensions).not.toHaveProperty("token");
+    expect(JSON.stringify(extensions)).not.toContain("UNIQUE_SECRET_SENTINEL");
+    expect(JSON.stringify(store.read())).not.toContain("UNIQUE_SECRET_SENTINEL");
+  });
+
+  it("persists create through the same redaction boundary and returns the written task", () => {
+    const store = new FileTaskStore(root());
+    const created = store.create();
+    expect(JSON.parse(readFileSync(store.taskPath, "utf8"))).toEqual(created);
+    expect(store.read()).toEqual(created);
+  });
+
+  it("redacts secrets from addEvidence metadata refs before persistence", async () => {
+    const store = new FileTaskStore(root());
+    const task = store.readOrCreate();
+    await store.mutate({
+      taskId: task.taskId,
+      expectedRevision: 0,
+      operations: [{ op: "add", annotation: annotationFixture() }],
+    });
+    const evidenced = await store.mutate({
+      taskId: task.taskId,
+      expectedRevision: 1,
+      operations: [{
+        op: "addEvidence",
+        annotationId: "ann-1",
+        evidence: {
+          kind: "screenshot",
+          ref: "evidence/ann-1.png?token=UNIQUE_SECRET_SENTINEL_ref",
+          mediaType: "image/png",
+        },
+      }],
+    });
+    expect(evidenced.annotations[0].evidence?.[0].ref).not.toContain("UNIQUE_SECRET_SENTINEL_ref");
+    expect(evidenced.annotations[0].evidence?.[0].ref).toContain("[REDACTED]");
+    const persisted = readFileSync(store.taskPath, "utf8");
+    expect(persisted).not.toContain("UNIQUE_SECRET_SENTINEL_ref");
+    expect(persisted).toContain("[REDACTED]");
+  });
+
+  it("redacts secrets from completion evidence before persistence", async () => {
+    const store = new FileTaskStore(root());
+    const task = store.readOrCreate();
+    await store.mutate({
+      taskId: task.taskId,
+      expectedRevision: 0,
+      operations: [{ op: "add", annotation: annotationFixture() }],
+    });
+    const completed = await store.mutate({
+      taskId: task.taskId,
+      expectedRevision: 1,
+      operations: [{
+        op: "complete",
+        annotationId: "ann-1",
+        evidence: { verified: true, summary: "Bearer UNIQUE_SECRET_SENTINEL_complete", source: "test" },
+      }],
+    });
+    expect(completed.annotations[0].completionEvidence?.summary).not.toContain("UNIQUE_SECRET_SENTINEL_complete");
+    expect(completed.annotations[0].completionEvidence?.summary).toContain("[REDACTED]");
+    expect(JSON.stringify(store.read())).not.toContain("UNIQUE_SECRET_SENTINEL_complete");
+  });
 });

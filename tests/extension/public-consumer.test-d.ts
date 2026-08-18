@@ -51,7 +51,8 @@ defineClientExtension({
   apiVersion: 1,
   setup(context: AgentAnnotationsExtensionContext) {
     useStudio(context.studio);
-    void context.transport.read();
+    // @ts-expect-error The public context cannot expose the raw transport.
+    context.transport;
   },
   toolbar: [toolbar],
   panels: [panel],

@@ -15,6 +15,7 @@ import {
   applyAgentAnnotationsMutation,
   createAgentAnnotationsTask,
   parseAgentAnnotationsTask,
+  redactAgentAnnotationsTask,
 } from "../core/index.js";
 import type {
   AgentAnnotation,
@@ -74,6 +75,12 @@ export class FileTaskStore {
   readonly sessionPath: string;
   #writes: Promise<unknown> = Promise.resolve();
 
+  #persist(task: AgentAnnotationsTask): AgentAnnotationsTask {
+    const redacted = redactAgentAnnotationsTask(task).task;
+    atomicWrite(this.taskPath, redacted);
+    return redacted;
+  }
+
   constructor(root: string) {
     this.root = path.resolve(root);
     this.taskPath = path.join(this.root, ACTIVE_TASK_FILE);
@@ -98,8 +105,7 @@ export class FileTaskStore {
   create(): AgentAnnotationsTask {
     const createdAt = new Date().toISOString();
     const task = createAgentAnnotationsTask({ taskId: randomUUID(), createdAt });
-    atomicWrite(this.taskPath, task);
-    return task;
+    return this.#persist(task);
   }
 
   mutate(
@@ -133,8 +139,7 @@ export class FileTaskStore {
           if (result.error === "revision_conflict") error.task = result.task;
           throw error;
         }
-        atomicWrite(this.taskPath, result.task);
-        return result.task;
+        return this.#persist(result.task);
       } finally {
         unlock();
       }

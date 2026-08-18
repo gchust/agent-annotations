@@ -63,6 +63,14 @@ describe("ClientExtensionRegistry", () => {
     expect(registry.getHostIntegration()).toBe(host);
   });
 
+  it("returns redactors in stable (extensionId, redactorId) order", () => {
+    const registry = new ClientExtensionRegistry();
+    registry.register(extension("a-extension", { redactors: [redactor("z-redactor")] }));
+    registry.register(extension("z-extension", { redactors: [redactor("a-redactor")] }));
+    expect(registry.getRedactors().map(({ extensionId, id }) => `${extensionId}/${id}`))
+      .toEqual(["a-extension/z-redactor", "z-extension/a-redactor"]);
+  });
+
   it("unregisters all owned entries once and permits re-registration", () => {
     const registry = new ClientExtensionRegistry();
     const complete = extension("complete", {

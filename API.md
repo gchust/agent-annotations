@@ -25,11 +25,15 @@ integrations.
 ## `@gchust/agent-annotations/extension`
 
 - `defineClientExtension(extension)` defines a public extension without global
-  mutation.
+  mutation. `setup` receives `{ studio }` only; extensions reach the task through
+  `StudioPublicApi` commands, never a raw transport.
 - `ClientExtensionRegistry` and `registerClientExtension` provide deterministic,
   atomic registration and disposal.
 - Public contribution types cover toolbar actions, panels, target enrichers,
-  exporters, redactors, locale messages, and one host integration.
+  exporters, redactors, locale messages, and one host integration. Multiple
+  redactors per extension are composed deterministically in stable
+  `(extensionId, redactorId)` order; duplicate `(extensionId, redactorId)` pairs
+  are rejected.
 - `StudioPublicApi` exposes snapshots, subscriptions, and commands only. It does
   not expose React setters, reducers, live DOM, or inspection internals.
 

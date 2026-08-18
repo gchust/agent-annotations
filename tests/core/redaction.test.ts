@@ -4,6 +4,7 @@ import {
   redactAgentAnnotationsTask,
   redactAgentAnnotationsText,
 } from "../../src/core/index.js";
+import type { AgentAnnotationsExtensionRedactor } from "../../src/types/index.js";
 import { annotationFixture, targetFixture, taskFixture } from "./test-data.js";
 
 describe("generic redaction", () => {
@@ -62,6 +63,7 @@ describe("generic redaction", () => {
     const result = redactAgentAnnotationsTask(task, [
       {
         extensionId: "first.context",
+        id: "only",
         redact: (data) => ({
           ...data,
           host: '<input value="host-secret">',
@@ -81,5 +83,132 @@ describe("generic redaction", () => {
       "second.context": { keep: "second" },
     });
     expect(result.manifest.droppedKeys).toEqual(["password", "value"]);
+  });
+
+  it("composes multiple redactors for one extension deterministically by redactor id", () => {
+    const task = taskFixture({
+      annotations: [
+        annotationFixture({
+          extensions: {
+            "multi.context": { payload: "first" },
+            "other.context": { payload: "other" },
+          },
+        }),
+      ],
+    });
+    const calls: string[] = [];
+    const result = redactAgentAnnotationsTask(task, [
+      {
+        extensionId: "multi.context",
+        id: "z-last",
+        redact: (data) => {
+          calls.push("z-last");
+          return { ...data, z: true };
+        },
+      },
+      {
+        extensionId: "multi.context",
+        id: "a-first",
+        redact: (data) => {
+          calls.push("a-first");
+          return { ...data, a: true };
+        },
+      },
+      {
+        extensionId: "other.context",
+        id: "only",
+        redact: (data) => ({ ...data, other: true }),
+      },
+    ]);
+    expect(calls).toEqual(["a-first", "z-last"]);
+    expect(result.task.annotations[0].extensions).toEqual({
+      "multi.context": { payload: "first", a: true, z: true },
+      "other.context": { payload: "other", other: true },
+    });
+  });
+
+  it("drops the extension namespace when any composed redactor returns null", () => {
+    const task = taskFixture({
+      annotations: [
+        annotationFixture({
+          extensions: {
+            "drop.context": { payload: "first" },
+          },
+        }),
+      ],
+    });
+    const result = redactAgentAnnotationsTask(task, [
+      {
+        extensionId: "drop.context",
+        id: "b-second",
+        redact: (data) => ({ ...data, b: true }),
+      },
+      {
+        extensionId: "drop.context",
+        id: "a-first",
+        redact: () => null,
+      },
+    ]);
+    expect(result.task.annotations[0].extensions).toEqual({});
+  });
+
+  it("executes composed redactors in stable (extensionId, redactorId) order", () => {
+    const task = taskFixture({
+      annotations: [
+        annotationFixture({
+          extensions: {
+            "z.context": { payload: "z" },
+            "a.context": { payload: "a" },
+          },
+        }),
+      ],
+    });
+    const calls: string[] = [];
+    const redactor = (extensionId: string, id: string): AgentAnnotationsExtensionRedactor => ({
+      extensionId,
+      id,
+      redact: (data) => {
+        calls.push(`${extensionId}/${id}`);
+        return data;
+      },
+    });
+    const result = redactAgentAnnotationsTask(task, [
+      redactor("z.context", "a"),
+      redactor("a.context", "z"),
+      redactor("a.context", "a"),
+      redactor("z.context", "z"),
+    ]);
+    expect(calls).toEqual([
+      "a.context/a",
+      "a.context/z",
+      "z.context/a",
+      "z.context/z",
+    ]);
+    expect(result.task.annotations[0].extensions).toEqual({
+      "a.context": { payload: "a" },
+      "z.context": { payload: "z" },
+    });
+  });
+
+  it("rejects duplicate extension redactor ids for the same extension deterministically", () => {
+    const task = taskFixture({
+      annotations: [
+        annotationFixture({
+          extensions: { "dup.context": { keep: true } },
+        }),
+      ],
+    });
+    const redactor = (id: string): AgentAnnotationsExtensionRedactor => ({
+      extensionId: "dup.context",
+      id,
+      redact: (data) => data,
+    });
+    expect(() => redactAgentAnnotationsTask(task, [redactor("same"), redactor("same")]))
+      .toThrow("Duplicate extension redactor: dup.context/same");
+    expect(() => redactAgentAnnotationsTask(task, [
+      redactor("same"),
+      redactor("other"),
+      redactor("same"),
+    ])).toThrow("Duplicate extension redactor: dup.context/same");
   });
 });
