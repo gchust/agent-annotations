@@ -8,6 +8,7 @@ import {
 } from "../core/index.js";
 import { clearDiagnostics, readDiagnostics } from "../server/diagnostics.js";
 import { listEvidence } from "../server/evidence.js";
+import { createSourcePathService } from "../server/source-path.js";
 import { FileTaskStore } from "../server/store.js";
 import { PACKAGE_VERSION } from "../metadata.js";
 import type { AgentAnnotationsMutationOperation, AgentAnnotationsTask } from "../types/index.js";
@@ -17,11 +18,13 @@ const HELP = `Agent Annotations ${PACKAGE_VERSION}
 Usage: agent-annotations <command> [options]
 
 Commands:
-  list
+  list [--json]
   complete <annotation-id> --verified --summary <text>
   reopen <annotation-id>
   print [--json|--markdown]
-  verify
+  verify [--json]
+  revision [--json]
+  wait --source-revision <sha256> [--timeout-ms <n>] [--json]
   diagnostics [--json|--clear]
   evidence [--json]
 `;
@@ -98,7 +101,19 @@ const main = async (): Promise<void> => {
     return;
   }
   if (command === "list") {
-    for (const [index, annotation] of task().annotations.entries()) {
+    const unknown = args.filter((arg) => arg !== "--json");
+    if (unknown.length) return fail(`unknown option: ${unknown[0]}`, 2);
+    const json = args.includes("--json");
+    const current = task();
+    if (json) {
+      process.stdout.write(`${JSON.stringify({
+        taskId: current.taskId,
+        taskRevision: current.taskRevision,
+        annotations: current.annotations,
+      })}\n`);
+      return;
+    }
+    for (const [index, annotation] of current.annotations.entries()) {
       process.stdout.write(`${index + 1}. [${annotation.status}] ${annotation.annotationId}: ${annotation.comment}\n`);
     }
     return;
@@ -110,9 +125,71 @@ const main = async (): Promise<void> => {
     return;
   }
   if (command === "verify") {
+    const unknown = args.filter((arg) => arg !== "--json");
+    if (unknown.length) return fail(`unknown option: ${unknown[0]}`, 2);
     const verified = parseAgentAnnotationsTask(JSON.parse(readFileSync(path.join(runtimeRoot(), "tasks", "active-task.json"), "utf8")));
     process.stdout.write(`${JSON.stringify({ ok: true, taskId: verified.taskId, taskRevision: verified.taskRevision })}\n`);
     return;
+  }
+  if (command === "revision") {
+    const unknown = args.filter((arg) => arg !== "--json");
+    if (unknown.length) return fail(`unknown option: ${unknown[0]}`, 2);
+    const current = new FileTaskStore(runtimeRoot()).read();
+    if (!current) return fail(`no task found at ${path.join(runtimeRoot(), "tasks", "active-task.json")}`);
+    const sourcePaths = createSourcePathService(process.cwd());
+    process.stdout.write(`${JSON.stringify({
+      taskRevision: current.taskRevision,
+      sourceRevision: sourcePaths.revision(current),
+      sourceFiles: sourcePaths.files(current),
+    })}\n`);
+    return;
+  }
+  if (command === "wait") {
+    let target: string | null = null;
+    let timeoutMs = 30_000;
+    const json = args.includes("--json");
+    const rest = args.filter((arg) => arg !== "--json");
+    while (rest.length) {
+      const option = rest.shift();
+      if (option === "--source-revision") {
+        if (target !== null) return fail("duplicate --source-revision", 2);
+        target = rest.shift() ?? "";
+      } else if (option === "--timeout-ms") {
+        const value = rest.shift() ?? "";
+        if (!/^\d+$/.test(value)) {
+          return fail("--timeout-ms must be an integer between 0 and 30000", 2);
+        }
+        const parsed = Number(value);
+        if (!Number.isSafeInteger(parsed) || parsed < 0 || parsed > 30_000) {
+          return fail("--timeout-ms must be an integer between 0 and 30000", 2);
+        }
+        timeoutMs = parsed;
+      } else {
+        return fail(`unknown option: ${option}`, 2);
+      }
+    }
+    if (target === null) return fail("wait requires --source-revision <sha256>", 2);
+    if (!/^[0-9a-f]{64}$/i.test(target)) {
+      return fail("--source-revision must be a 64-character hex sha256", 2);
+    }
+    const baseline = target.toLowerCase();
+    const store = new FileTaskStore(runtimeRoot());
+    const sourcePaths = createSourcePathService(process.cwd());
+    const deadline = Date.now() + timeoutMs;
+    let observed: string | null = null;
+    while (true) {
+      const current = store.read();
+      observed = current ? sourcePaths.revision(current) : null;
+      if (observed !== baseline) {
+        process.stdout.write(`${JSON.stringify({ changed: true, sourceRevision: observed })}\n`);
+        return;
+      }
+      if (Date.now() >= deadline) {
+        process.stdout.write(`${JSON.stringify({ changed: false, sourceRevision: observed })}\n`);
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
   }
   if (command === "diagnostics") {
     const json = args.includes("--json");

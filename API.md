@@ -14,6 +14,9 @@
 - `formatAgentAnnotationsTask` emits Markdown or JSON.
 - `redactAgentAnnotationsTask` and `redactAgentAnnotationsText` remove generic secret
   material before persistence or export.
+- `RevisionConflictError` is thrown by stores and transports on stale writes; it
+  carries the parsed latest task plus expected/actual revisions and is
+  `instanceof`-recognizable in the browser.
 - The remaining root exports are pure ID, selection, placement, selector, and
   shortcut helpers plus their public types.
 

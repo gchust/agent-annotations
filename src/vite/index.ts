@@ -237,7 +237,7 @@ export default function agentAnnotations(
         )) return json(response, 404, { error: "not_found" });
         try {
           if (url.pathname === `${resolvedEndpoint}/task` && request.method === "GET") {
-            return json(response, 200, { task: store.read() ?? store.create() });
+            return json(response, 200, { task: await store.readOrCreate() });
           }
           if (url.pathname === `${resolvedEndpoint}/task` && request.method === "POST") {
             return json(response, 200, {
@@ -290,7 +290,8 @@ export default function agentAnnotations(
           return json(response, 404, { error: "not_found" });
         } catch (error) {
           const code = (error as Error & { code?: string }).code ?? (error as Error).message;
-          const task = (error as Error & { task?: unknown }).task;
+          const task = (error as Error & { task?: unknown; latestTask?: unknown }).task
+            ?? (error as Error & { latestTask?: unknown }).latestTask;
           return json(response, code === "revision_conflict" ? 409 : 400, { error: code, ...(task ? { task } : {}) });
         }
       });

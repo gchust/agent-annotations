@@ -73,11 +73,13 @@ The CLI reads `.agent-annotations/tasks/active-task.json`, which always uses
 `agent-annotations.task.v1`:
 
 ```text
-agent-annotations list
+agent-annotations list [--json]
 agent-annotations complete <annotation-id> --verified --summary <text>
 agent-annotations reopen <annotation-id>
 agent-annotations print [--json|--markdown]
-agent-annotations verify
+agent-annotations verify [--json]
+agent-annotations revision [--json]
+agent-annotations wait --source-revision <sha256> [--timeout-ms <n>] [--json]
 agent-annotations diagnostics [--json|--clear]
 agent-annotations evidence [--json]
 ```
@@ -85,7 +87,12 @@ agent-annotations evidence [--json]
 `diagnostics` prints the bounded redacted browser diagnostics persisted under
 `.agent-annotations` (with `--clear` emptying only diagnostics); `evidence`
 lists task-referenced screenshot files with their annotation ids and never
-touches files outside the runtime evidence directory.
+touches files outside the runtime evidence directory. `revision` reports the
+exact task revision, the sha256 of the referenced canonical source files, and
+those files; `wait` treats the given sha256 as a baseline and returns
+`{ changed: true, sourceRevision }` as soon as the referenced-source revision
+moves off it, or `{ changed: false, sourceRevision }` when it stays until the
+bounded (30 second) timeout.
 
 ## Security
 

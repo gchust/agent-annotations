@@ -1,3 +1,4 @@
+import { parseAgentAnnotationsTask, RevisionConflictError } from "../core/index.js";
 import type {
   AgentAnnotationsDiagnosticsEntry,
   AgentAnnotationsMutationRequest,
@@ -26,7 +27,7 @@ export class HttpTaskTransport implements TaskTransport {
     this.pollInterval = options.pollInterval ?? 500;
   }
 
-  async #request(init?: RequestInit): Promise<AgentAnnotationsTask> {
+  async #request(init?: RequestInit, expectedRevision?: number): Promise<AgentAnnotationsTask> {
     const response = await fetch(`${this.endpoint}/task`, {
       ...init,
       cache: "no-store",
@@ -40,7 +41,21 @@ export class HttpTaskTransport implements TaskTransport {
       error?: string;
       task?: AgentAnnotationsTask;
     };
-    if (!response.ok || !payload.task) throw new Error(payload.error ?? "request_failed");
+    if (!response.ok || !payload.task) {
+      if (response.status === 409 && payload.error === "revision_conflict" && payload.task) {
+        try {
+          const latestTask = parseAgentAnnotationsTask(payload.task);
+          throw new RevisionConflictError(
+            latestTask,
+            expectedRevision ?? latestTask.taskRevision - 1,
+            latestTask.taskRevision
+          );
+        } catch (error) {
+          if (error instanceof RevisionConflictError) throw error;
+        }
+      }
+      throw new Error(payload.error ?? "request_failed");
+    }
     return payload.task;
   }
 
@@ -51,7 +66,10 @@ export class HttpTaskTransport implements TaskTransport {
   }
 
   mutate(request: AgentAnnotationsMutationRequest): Promise<AgentAnnotationsTask> {
-    return this.#request({ method: "POST", body: JSON.stringify(request) });
+    return this.#request(
+      { method: "POST", body: JSON.stringify(request) },
+      request.expectedRevision
+    );
   }
 
   async writeEvidence(input: {
@@ -68,7 +86,21 @@ export class HttpTaskTransport implements TaskTransport {
       body: JSON.stringify(input),
     });
     const payload = await response.json() as { error?: string; task?: AgentAnnotationsTask };
-    if (!response.ok || !payload.task) throw new Error(payload.error ?? "request_failed");
+    if (!response.ok || !payload.task) {
+      if (response.status === 409 && payload.error === "revision_conflict" && payload.task) {
+        try {
+          const latestTask = parseAgentAnnotationsTask(payload.task);
+          throw new RevisionConflictError(
+            latestTask,
+            input.expectedRevision,
+            latestTask.taskRevision
+          );
+        } catch (error) {
+          if (error instanceof RevisionConflictError) throw error;
+        }
+      }
+      throw new Error(payload.error ?? "request_failed");
+    }
     return payload.task;
   }
 
@@ -82,30 +114,52 @@ export class HttpTaskTransport implements TaskTransport {
   }
 
   subscribe(listener: (task: AgentAnnotationsTask) => void): () => void {
-    let revision = this.#lastReadRevision;
+    let revision = this.#lastReadRevision ?? -1;
+    let stopped = false;
+    let pollInFlight = false;
+    let heartbeatInFlight = false;
+    let pollTimer: number | undefined;
+    let heartbeatTimer: number | undefined;
+
     const poll = async () => {
+      if (stopped || pollInFlight) return;
+      pollInFlight = true;
       try {
         const task = await this.#request();
-        if (task.taskRevision !== revision) {
+        if (stopped) return;
+        if (task.taskRevision > revision) {
           listener(task);
           revision = task.taskRevision;
           this.#lastReadRevision = revision;
         }
       } catch {
         // The dev server may be restarting; the next poll reconnects.
+      } finally {
+        pollInFlight = false;
+        if (!stopped) pollTimer = window.setTimeout(() => void poll(), this.pollInterval);
       }
     };
-    const timer = window.setInterval(() => void poll(), this.pollInterval);
-    const heartbeat = () => void fetch(`${this.endpoint}/heartbeat`, {
-      method: "POST",
-      headers: { [TOKEN_HEADER]: this.token },
-    }).catch(() => undefined);
-    const heartbeatTimer = window.setInterval(heartbeat, HEARTBEAT_INTERVAL);
-    heartbeat();
+    const heartbeat = async () => {
+      if (stopped || heartbeatInFlight) return;
+      heartbeatInFlight = true;
+      try {
+        await fetch(`${this.endpoint}/heartbeat`, {
+          method: "POST",
+          headers: { [TOKEN_HEADER]: this.token },
+        });
+      } catch {
+        // The dev server may be restarting; the next heartbeat reconnects.
+      } finally {
+        heartbeatInFlight = false;
+        if (!stopped) heartbeatTimer = window.setTimeout(() => void heartbeat(), HEARTBEAT_INTERVAL);
+      }
+    };
+    heartbeatTimer = window.setTimeout(() => void heartbeat(), 0);
     void poll();
     return () => {
-      window.clearInterval(timer);
-      window.clearInterval(heartbeatTimer);
+      stopped = true;
+      if (pollTimer !== undefined) window.clearTimeout(pollTimer);
+      if (heartbeatTimer !== undefined) window.clearTimeout(heartbeatTimer);
     };
   }
 }

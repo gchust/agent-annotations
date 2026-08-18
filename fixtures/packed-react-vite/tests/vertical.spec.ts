@@ -51,6 +51,18 @@ test("packed browser to file to CLI to browser loop, HMR and session security", 
   await expect.poll(() => cli("diagnostics", "--json")).toContain("e2e-diagnostic-sentinel");
   cli("diagnostics", "--clear");
   expect(JSON.parse(cli("diagnostics", "--json"))).toEqual([]);
+  // Revision and wait commands report and poll exact referenced sources.
+  const revision = JSON.parse(cli("revision", "--json"));
+  expect(revision).toMatchObject({ taskRevision: expect.any(Number), sourceFiles: ["src/main.tsx"] });
+  expect(revision.sourceRevision).toMatch(/^[0-9a-f]{64}$/);
+  // The given revision is a baseline: an unchanged revision times out with changed: false.
+  expect(JSON.parse(cli("wait", "--source-revision", revision.sourceRevision, "--timeout-ms", "0", "--json")))
+    .toEqual({ changed: false, sourceRevision: revision.sourceRevision });
+  expect(JSON.parse(cli("list", "--json"))).toMatchObject({
+    taskId: task.taskId,
+    taskRevision: expect.any(Number),
+  });
+  expect(JSON.parse(cli("verify", "--json"))).toMatchObject({ ok: true, taskId: task.taskId });
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await page.keyboard.press("Control+Alt+KeyJ");
   await expect.poll(() => page.evaluate(() => window.__demoExtension?.actionCount)).toBe(1);

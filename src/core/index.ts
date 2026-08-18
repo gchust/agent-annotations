@@ -1,3 +1,4 @@
+export * from "./conflict.js";
 export * from "./format.js";
 export * from "./hotkeys.js";
 export * from "./ids.js";

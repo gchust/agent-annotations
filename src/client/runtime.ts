@@ -7,6 +7,7 @@ import {
   redactAgentAnnotationsTask,
   redactAgentAnnotationsText,
   resolveAgentAnnotationsPlacement,
+  RevisionConflictError,
   toAgentAnnotationsDocumentRegion,
 } from "../core/index.js";
 import { ClientExtensionRegistry } from "../extension/index.js";
@@ -289,7 +290,7 @@ export async function mountAgentAnnotations(
   });
   if (options.transport.subscribe) {
     cleanups.push(options.transport.subscribe((next) => {
-      if (destroyed || next.taskRevision === task.taskRevision) return;
+      if (destroyed || next.taskRevision <= task.taskRevision) return;
       task = next;
       scheduleFrame(() => {
         render();
@@ -404,32 +405,53 @@ export async function mountAgentAnnotations(
   };
   const mutate = async (operations: AgentAnnotationsMutationOperation[]): Promise<AgentAnnotationsTask | undefined> => {
     if (destroyed) return undefined;
-    const redactors = registry.getRedactors().map((redactor) => ({
-      extensionId: redactor.extensionId,
-      id: redactor.id,
-      redact: redactor.redact,
-    }));
-    const redactedOperations = operations.map((operation) =>
-      operation.op === "add"
-        ? {
-            ...operation,
-            annotation: redactAgentAnnotationsTask(
-              { ...task, annotations: [operation.annotation] },
-              redactors
-            ).task.annotations[0],
-          }
-        : operation
-    );
-    const next = await options.transport.mutate({
-      taskId: task.taskId,
-      expectedRevision: task.taskRevision,
-      operations: redactedOperations,
-    });
-    if (destroyed) return undefined;
-    task = next;
-    render();
-    emit();
-    return next;
+    const attempt = async (expectedRevision: number): Promise<AgentAnnotationsTask | undefined> => {
+      const redactors = registry.getRedactors().map((redactor) => ({
+        extensionId: redactor.extensionId,
+        id: redactor.id,
+        redact: redactor.redact,
+      }));
+      const redactedOperations = operations.map((operation) =>
+        operation.op === "add"
+          ? {
+              ...operation,
+              annotation: redactAgentAnnotationsTask(
+                { ...task, annotations: [operation.annotation] },
+                redactors
+              ).task.annotations[0],
+            }
+          : operation
+      );
+      const next = await options.transport.mutate({
+        taskId: task.taskId,
+        expectedRevision,
+        operations: redactedOperations,
+      });
+      if (destroyed) return undefined;
+      task = next;
+      render();
+      emit();
+      return next;
+    };
+    try {
+      return await attempt(task.taskRevision);
+    } catch (error) {
+      if (destroyed || !(error instanceof RevisionConflictError)) throw error;
+      // Adopt the latest task, then retry the rejected mutation exactly once.
+      task = error.latestTask;
+      render();
+      emit();
+      try {
+        return await attempt(error.latestTask.taskRevision);
+      } catch (retryError) {
+        // A second conflict also adopts the latest task, then stops.
+        if (destroyed || !(retryError instanceof RevisionConflictError)) throw retryError;
+        task = retryError.latestTask;
+        render();
+        emit();
+        throw retryError;
+      }
+    }
   };
   const mutateCommand = async (operations: AgentAnnotationsMutationOperation[]): Promise<void> => {
     await mutate(operations);

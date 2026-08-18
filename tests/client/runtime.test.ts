@@ -43,7 +43,7 @@ vi.mock("../../src/client/screenshot.js", () => ({
   captureViewportPng: screenshot.captureViewportPng,
 }));
 
-import { mountAgentAnnotations } from "../../src/client/index.js";
+import { mountAgentAnnotations, RevisionConflictError } from "../../src/client/index.js";
 import { defineClientExtension } from "../../src/extension/index.js";
 import { FileTaskStore } from "../../src/server/store.js";
 import { MemoryTaskTransport } from "../../src/testing/index.js";
@@ -675,9 +675,9 @@ describe("client runtime", () => {
   it("fails closed when an extension redactor throws before transport persistence", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "agent-annotations-runtime-throw-"));
     const store = new FileTaskStore(root);
-    const task = store.readOrCreate();
+    const task = await store.readOrCreate();
     const transport: TaskTransport = {
-      read: () => Promise.resolve(store.readOrCreate()),
+      read: async () => store.readOrCreate(),
       mutate: (request) => store.mutate(request),
     };
     const mutate = vi.spyOn(transport, "mutate");
@@ -730,14 +730,14 @@ describe("client runtime", () => {
     history.pushState({}, "", "/settings");
     const root = mkdtempSync(path.join(tmpdir(), "agent-annotations-runtime-redact-"));
     const store = new FileTaskStore(root);
-    const task = store.readOrCreate();
+    const task = await store.readOrCreate();
     await store.mutate({
       taskId: task.taskId,
       expectedRevision: 0,
       operations: [{ op: "add", annotation: annotationFixture() }],
     });
     const transport: TaskTransport = {
-      read: () => Promise.resolve(store.readOrCreate()),
+      read: async () => store.readOrCreate(),
       mutate: (request) => store.mutate(request),
     };
     const mounted = await mountAgentAnnotations({ transport });
@@ -888,9 +888,9 @@ describe("client runtime", () => {
   it("persists inspected region targets with namespaced redacted extension data", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "agent-annotations-runtime-region-"));
     const store = new FileTaskStore(root);
-    const task = store.readOrCreate();
+    const task = await store.readOrCreate();
     const transport: TaskTransport = {
-      read: () => Promise.resolve(store.readOrCreate()),
+      read: async () => store.readOrCreate(),
       mutate: (request) => store.mutate(request),
     };
     const elements = Array.from({ length: 3 }, () => {
@@ -946,9 +946,9 @@ describe("client runtime", () => {
   it("persists an empty region without fabricating targets", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "agent-annotations-runtime-region-empty-"));
     const store = new FileTaskStore(root);
-    const task = store.readOrCreate();
+    const task = await store.readOrCreate();
     const transport: TaskTransport = {
-      read: () => Promise.resolve(store.readOrCreate()),
+      read: async () => store.readOrCreate(),
       mutate: (request) => store.mutate(request),
     };
     primitives.getElementsAtPoint.mockReturnValue([]);
@@ -977,9 +977,9 @@ describe("client runtime", () => {
   it("persists region targets in the original sample order under concurrent inspection", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "agent-annotations-runtime-region-order-"));
     const store = new FileTaskStore(root);
-    const task = store.readOrCreate();
+    const task = await store.readOrCreate();
     const transport: TaskTransport = {
-      read: () => Promise.resolve(store.readOrCreate()),
+      read: async () => store.readOrCreate(),
       mutate: (request) => store.mutate(request),
     };
     const elements: Element[] = Array.from({ length: 3 }, (_, index) => {
@@ -1058,9 +1058,9 @@ describe("client runtime", () => {
     history.pushState({}, "", "/route-a");
     const root = mkdtempSync(path.join(tmpdir(), "agent-annotations-runtime-region-route-"));
     const store = new FileTaskStore(root);
-    const task = store.readOrCreate();
+    const task = await store.readOrCreate();
     const transport: TaskTransport = {
-      read: () => Promise.resolve(store.readOrCreate()),
+      read: async () => store.readOrCreate(),
       mutate: (request) => store.mutate(request),
     };
     const mutate = vi.spyOn(transport, "mutate");
@@ -1102,9 +1102,9 @@ describe("client runtime", () => {
   it("bounds region enrichment concurrency to the inspection limit", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "agent-annotations-runtime-region-concurrency-"));
     const store = new FileTaskStore(root);
-    const task = store.readOrCreate();
+    const task = await store.readOrCreate();
     const transport: TaskTransport = {
-      read: () => Promise.resolve(store.readOrCreate()),
+      read: async () => store.readOrCreate(),
       mutate: (request) => store.mutate(request),
     };
     const elements: Element[] = Array.from({ length: 60 }, (_, index) => {
@@ -1180,11 +1180,77 @@ describe("client runtime", () => {
     }
   });
 
+  it("adopts the latest task and retries a revision conflict exactly once", async () => {
+    const initial = taskFixture();
+    const latest = taskFixture({
+      taskRevision: 1,
+      annotations: [{
+        ...taskFixture().annotations[0]!,
+        comment: "from another tab",
+      }],
+    });
+    const completed = taskFixture({
+      ...latest,
+      taskRevision: 2,
+      annotations: [{
+        ...latest.annotations[0]!,
+        status: "completed",
+        completedAt: "2026-08-12T12:05:00.000Z",
+      }],
+    });
+    const mutate = vi.fn()
+      .mockRejectedValueOnce(new RevisionConflictError(latest, 0, 1))
+      .mockResolvedValueOnce(completed);
+    const transport: TaskTransport = {
+      read: async () => initial,
+      mutate,
+    };
+    const mounted = await mountAgentAnnotations({ transport });
+    await mounted.api.commands.annotations.complete("ann-1");
+    expect(mutate).toHaveBeenCalledTimes(2);
+    expect(mutate.mock.calls[1]![0]).toMatchObject({ expectedRevision: 1 });
+    expect(mounted.api.getSnapshot().task.taskRevision).toBe(2);
+    mounted.unmount();
+  });
+
+  it("adopts after a second conflict and stops without further retries", async () => {
+    const initial = taskFixture();
+    const latest = taskFixture({ taskRevision: 1 });
+    const evenNewer = taskFixture({ taskRevision: 2 });
+    const mutate = vi.fn()
+      .mockRejectedValueOnce(new RevisionConflictError(latest, 0, 1))
+      .mockRejectedValueOnce(new RevisionConflictError(evenNewer, 1, 2));
+    const transport: TaskTransport = {
+      read: async () => initial,
+      mutate,
+    };
+    const mounted = await mountAgentAnnotations({ transport });
+    await expect(mounted.api.commands.annotations.complete("ann-1"))
+      .rejects.toBeInstanceOf(RevisionConflictError);
+    expect(mutate).toHaveBeenCalledTimes(2);
+    expect(mounted.api.getSnapshot().task.taskRevision).toBe(2);
+    mounted.unmount();
+  });
+
+  it("does not retry arbitrary mutation failures", async () => {
+    const mutate = vi.fn().mockRejectedValueOnce(new Error("boom"));
+    const memory = new MemoryTaskTransport();
+    const transport: TaskTransport = {
+      read: () => memory.read(),
+      mutate,
+    };
+    const mounted = await mountAgentAnnotations({ transport });
+    await expect(mounted.api.commands.annotations.complete("ann-1"))
+      .rejects.toThrow("boom");
+    expect(mutate).toHaveBeenCalledTimes(1);
+    mounted.unmount();
+  });
+
   it("never attaches evidence captured after a route change to the annotation", async () => {
     history.pushState({}, "", "/route-a");
     const root = mkdtempSync(path.join(tmpdir(), "agent-annotations-runtime-evidence-route-"));
     const store = new FileTaskStore(root);
-    const task = store.readOrCreate();
+    const task = await store.readOrCreate();
     let releaseMutate!: () => void;
     const writeEvidence = vi.fn(async (input: {
       taskId: string;
@@ -1209,7 +1275,7 @@ describe("client runtime", () => {
       }],
     }));
     const transport: TaskTransport = {
-      read: () => Promise.resolve(store.readOrCreate()),
+      read: async () => store.readOrCreate(),
       mutate: (request) => new Promise((resolve) => {
         releaseMutate = () => {
           void store.mutate(request).then(resolve);

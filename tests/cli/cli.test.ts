@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -8,7 +8,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import pkg from "../../package.json" with { type: "json" };
 import { createAgentAnnotationsTask } from "../../src/core/index.js";
 import { appendDiagnostics } from "../../src/server/diagnostics.js";
-import { annotationFixture } from "../core/test-data.js";
+import { createSourcePathService } from "../../src/server/source-path.js";
+import { annotationFixture, targetFixture } from "../core/test-data.js";
 
 const script = path.resolve("dist/cli/index.mjs");
 const roots: string[] = [];
@@ -29,6 +30,7 @@ afterEach(() => roots.splice(0).forEach((root) => rmSync(root, { recursive: true
 
 const run = (root: string, args: string[]) => execFileSync(process.execPath, [script, ...args], {
   encoding: "utf8",
+  cwd: root,
   env: { ...process.env, AGENT_ANNOTATIONS_DIR: root },
 });
 
@@ -36,6 +38,7 @@ const runExpectingFailure = (root: string, args: string[]): { status: number; st
   try {
     execFileSync(process.execPath, [script, ...args], {
       encoding: "utf8",
+      cwd: root,
       env: { ...process.env, AGENT_ANNOTATIONS_DIR: root },
     });
   } catch (error) {
@@ -111,5 +114,92 @@ describe("public CLI processes", () => {
       size: 3,
       annotationIds: ["ann-1"],
     }]);
+  });
+
+  it("emits pure JSON for list and verify without log prefixes", () => {
+    const root = fixture();
+    const list = run(root, ["list", "--json"]);
+    expect(JSON.parse(list)).toMatchObject({
+      taskId: "task-cli",
+      taskRevision: 0,
+      annotations: [{ annotationId: "ann-1", status: "open" }],
+    });
+    expect(JSON.parse(run(root, ["verify"]))).toMatchObject({ ok: true, taskId: "task-cli" });
+    expect(JSON.parse(run(root, ["verify", "--json"]))).toMatchObject({ ok: true, taskId: "task-cli" });
+  });
+
+  it("reports exact source revision and waits for a referenced-source change", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "agent-annotations-cli-wait-"));
+    roots.push(root);
+    mkdirSync(path.join(root, "tasks"), { recursive: true });
+    mkdirSync(path.join(root, "src"), { recursive: true });
+    mkdirSync(path.join(root, "src", "other"), { recursive: true });
+    writeFileSync(path.join(root, "src", "settings.tsx"), "export const A = 1;\n");
+    const task = createAgentAnnotationsTask({
+      taskId: "task-rev",
+      createdAt: "2026-08-12T12:00:00.000Z",
+      annotations: [annotationFixture({
+        targets: [targetFixture({
+          inspection: {
+            ...targetFixture().inspection,
+            source: { filePath: "src/settings.tsx", lineNumber: 1, columnNumber: 14, componentName: "A" },
+            sourceStack: [],
+          },
+        })],
+      })],
+    });
+    writeFileSync(path.join(root, "tasks/active-task.json"), JSON.stringify(task));
+    const sourcePaths = createSourcePathService(root);
+    const expected = sourcePaths.revision(task);
+    expect(expected).toMatch(/^[0-9a-f]{64}$/);
+    expect(JSON.parse(run(root, ["revision", "--json"]))).toEqual({
+      taskRevision: 0,
+      sourceRevision: expected,
+      sourceFiles: ["src/settings.tsx"],
+    });
+    // The given revision is the baseline: an unchanged revision times out with changed: false.
+    expect(JSON.parse(run(root, ["wait", "--source-revision", expected, "--timeout-ms", "0", "--json"])))
+      .toEqual({ changed: false, sourceRevision: expected });
+    // Unrelated and duplicate-basename files never move the revision.
+    writeFileSync(path.join(root, "src", "unrelated.tsx"), "export const B = 1;\n");
+    writeFileSync(path.join(root, "src", "other", "settings.tsx"), "export const C = 1;\n");
+    expect(JSON.parse(run(root, ["revision", "--json"])).sourceRevision).toBe(expected);
+    expect(JSON.parse(run(root, ["wait", "--source-revision", expected, "--timeout-ms", "0", "--json"])))
+      .toEqual({ changed: false, sourceRevision: expected });
+    // A delayed change to the referenced source flips the wait to changed: true.
+    const child = spawn(process.execPath, [script, "wait", "--source-revision", expected, "--timeout-ms", "10000", "--json"], {
+      cwd: root,
+      env: { ...process.env, AGENT_ANNOTATIONS_DIR: root },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const output = new Promise<string>((resolve) => {
+      let buffer = "";
+      child.stdout.on("data", (chunk: Buffer) => { buffer += String(chunk); });
+      child.on("close", () => resolve(buffer));
+    });
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    writeFileSync(path.join(root, "src", "settings.tsx"), "export const A = 2;\n");
+    const waited = JSON.parse(await output);
+    expect(waited).toMatchObject({ changed: true });
+    expect(waited.sourceRevision).not.toBe(expected);
+    expect(waited.sourceRevision).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("rejects invalid revision wait arguments with exit code 2", () => {
+    const root = fixture();
+    const missing = runExpectingFailure(root, ["wait"]);
+    expect(missing.status).toBe(2);
+    expect(missing.stderr).toContain("--source-revision");
+    const badSha = runExpectingFailure(root, ["wait", "--source-revision", "short"]);
+    expect(badSha.status).toBe(2);
+    expect(badSha.stderr).toContain("64-character hex");
+    const badTimeout = runExpectingFailure(root, ["wait", "--source-revision", "0".repeat(64), "--timeout-ms", "99999"]);
+    expect(badTimeout.status).toBe(2);
+    expect(badTimeout.stderr).toContain("between 0 and 30000");
+    const badRange = runExpectingFailure(root, ["wait", "--source-revision", "0".repeat(64), "--timeout-ms", "-1"]);
+    expect(badRange.status).toBe(2);
+    const unknown = runExpectingFailure(root, ["revision", "--bogus"]);
+    expect(unknown.status).toBe(2);
+    expect(unknown.stderr).toContain("unknown option");
   });
 });

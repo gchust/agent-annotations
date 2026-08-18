@@ -1,3 +1,4 @@
+import { RevisionConflictError } from "../core/conflict.js";
 import { applyAgentAnnotationsMutation } from "../core/mutation.js";
 import { createAgentAnnotationsId } from "../core/ids.js";
 import { createAgentAnnotationsTask, parseAgentAnnotationsTask } from "../core/schema.js";
@@ -25,7 +26,16 @@ export class MemoryTaskTransport implements TaskTransport {
       request,
       new Date(Math.max(Date.now(), Date.parse(this.#task.updatedAt) + 1)).toISOString()
     );
-    if (!result.ok) throw new Error(`Agent Annotations mutation failed: ${result.error}`);
+    if (!result.ok) {
+      if (result.error === "revision_conflict") {
+        throw new RevisionConflictError(
+          result.task,
+          request.expectedRevision,
+          result.actualRevision
+        );
+      }
+      throw new Error(`Agent Annotations mutation failed: ${result.error}`);
+    }
     this.#task = parseAgentAnnotationsTask(result.task);
     return structuredClone(this.#task);
   }
