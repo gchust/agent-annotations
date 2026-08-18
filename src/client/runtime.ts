@@ -16,6 +16,7 @@ import type {
   AgentAnnotationsCaptureMode,
   AgentAnnotationsDiagnosticsEntry,
   AgentAnnotationsIconProps,
+  AgentAnnotationsHostTheme,
   AgentAnnotationsMutationOperation,
   AgentAnnotationsRect,
   AgentAnnotationsTarget,
@@ -34,7 +35,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import {
   disposeInspectionEngine,
   inspectTarget,
-  resolveTarget,
+  resolveTargetResult,
   sampleRegionTargets,
   setInspectionFrozen,
   targetBounds,
@@ -272,6 +273,36 @@ export async function mountAgentAnnotations(
   let studioRenders = 0;
   let destroyed = false;
   let routeKey = pageContext(host).routeKey;
+  let hostLocale = host?.locale?.() ?? (document.documentElement.lang || "en-US");
+  let hostTheme: AgentAnnotationsHostTheme = host?.theme?.() ?? "light";
+  let appRoot: Element | Document = host?.appRoot?.() ?? document.body;
+  let systemThemeCleanup: (() => void) | null = null;
+  const effectiveTheme = (): "light" | "dark" =>
+    hostTheme === "system"
+      ? window.matchMedia?.("(prefers-color-scheme: dark)").matches
+        ? "dark"
+        : "light"
+      : hostTheme;
+  const applyTheme = (): void => {
+    hostElement.dataset.theme = effectiveTheme();
+  };
+  const refreshSystemThemeListener = (): void => {
+    const needsSystem = hostTheme === "system";
+    if (needsSystem && !systemThemeCleanup) {
+      const query = window.matchMedia?.("(prefers-color-scheme: dark)");
+      if (query) {
+        const onChange = (): void => {
+          if (destroyed || hostTheme !== "system") return;
+          applyTheme();
+        };
+        query.addEventListener("change", onChange);
+        systemThemeCleanup = () => query.removeEventListener("change", onChange);
+      }
+    } else if (!needsSystem && systemThemeCleanup) {
+      systemThemeCleanup();
+      systemThemeCleanup = null;
+    }
+  };
   const applyRouteKey = (next: string) => {
     if (destroyed || next === routeKey) return;
     routeKey = next;
@@ -292,6 +323,42 @@ export async function mountAgentAnnotations(
       emit();
     });
   };
+  const applyHostChange = (): void => {
+    if (destroyed) return;
+    const nextTheme = host?.theme?.() ?? "light";
+    if (nextTheme !== hostTheme) {
+      hostTheme = nextTheme;
+      refreshSystemThemeListener();
+      applyTheme();
+    } else {
+      refreshSystemThemeListener();
+    }
+    const nextLocale = host?.locale?.() ?? (document.documentElement.lang || "en-US");
+    const nextMessages = { ...registry.getMessages(), ...host?.messages };
+    if (nextLocale !== hostLocale || JSON.stringify(nextMessages) !== JSON.stringify(messages)) {
+      hostLocale = nextLocale;
+      messages = nextMessages;
+      root.lang = hostLocale;
+      shortcuts = buildShortcuts();
+      render();
+      emit();
+    }
+    const nextAppRoot = host?.appRoot?.() ?? document.body;
+    if (nextAppRoot !== appRoot) {
+      appRoot = nextAppRoot;
+      trackedMarkerTargets = new WeakSet<Element>();
+      if (captureMode !== "idle") {
+        clearCaptureDocuments();
+        bindCaptureDocument(captureDocumentOf());
+      }
+      scheduleMarkerRefresh();
+      scheduleFrame(() => {
+        render();
+        emit();
+      });
+    }
+    applyRouteKey(pageContext(host).routeKey);
+  };
   const refreshRoute = () => applyRouteKey(pageContext(host).routeKey);
   const listeners = new Set<(snapshot: StudioPublicSnapshot) => void>();
   const uiListeners = new Set<() => void>();
@@ -306,6 +373,10 @@ export async function mountAgentAnnotations(
   const uiGetSnapshot = (): StudioPublicSnapshot => uiSnapshot;
   const diagnostics: AgentAnnotationsDiagnosticsEntry[] = [];
   const cleanups: Array<() => void> = [];
+  cleanups.push(() => {
+    systemThemeCleanup?.();
+    systemThemeCleanup = null;
+  });
   const timers = new Set<number>();
   const frames = new Set<number>();
   let refreshCaptureDocuments = (): void => undefined;
@@ -347,33 +418,6 @@ export async function mountAgentAnnotations(
       });
     }));
   }
-  if (host?.subscribe) {
-    cleanups.push(host.subscribe((next) => applyRouteKey(next)));
-  } else {
-    const onRouteEvent = () => refreshRoute();
-    window.addEventListener("popstate", onRouteEvent);
-    window.addEventListener("hashchange", onRouteEvent);
-    const originalPushState = history.pushState;
-    const originalReplaceState = history.replaceState;
-    const wrap = (
-      original: typeof history.pushState
-    ): typeof history.pushState =>
-      function (this: History, ...args: Parameters<typeof history.pushState>) {
-        const result = original.apply(this, args);
-        refreshRoute();
-        return result;
-      };
-    const pushState = wrap(originalPushState);
-    const replaceState = wrap(originalReplaceState);
-    history.pushState = pushState;
-    history.replaceState = replaceState;
-    cleanups.push(() => {
-      window.removeEventListener("popstate", onRouteEvent);
-      window.removeEventListener("hashchange", onRouteEvent);
-      if (history.pushState === pushState) history.pushState = originalPushState;
-      if (history.replaceState === replaceState) history.replaceState = originalReplaceState;
-    });
-  }
 
   const hostElement = document.createElement("div");
   hostElement.id = HOST_ID;
@@ -391,22 +435,23 @@ export async function mountAgentAnnotations(
   const overlayMount = document.createElement("div");
   overlayMount.className = "aa-overlays";
   root.append(uiMount, overlayMount);
+  applyTheme();
+  refreshSystemThemeListener();
 
-  const locale = host?.locale?.() ?? (document.documentElement.lang || "en-US");
-  const messages = registry.getMessages();
-  root.lang = locale;
+  let messages = { ...registry.getMessages(), ...host?.messages };
+  root.lang = hostLocale;
 
   const localized = (value: string | Readonly<Record<string, string>>): string =>
     typeof value === "string"
       ? (messages[value] ?? value)
-      : value[locale] ??
-        value[locale.split("-")[0]] ??
+      : value[hostLocale] ??
+        value[hostLocale.split("-")[0]] ??
         value["en-US"] ??
         Object.values(value)[0] ??
         "";
   const platform = /Mac|iPhone|iPad/.test(navigator.platform) ? "mac" : "other";
   const toolbar = registry.getToolbarContributions();
-  const shortcuts = toolbar.flatMap((contribution) =>
+  const buildShortcuts = () => toolbar.flatMap((contribution) =>
     contribution.shortcut
       ? [{
           id: contribution.id,
@@ -420,6 +465,7 @@ export async function mountAgentAnnotations(
         }]
       : []
   );
+  let shortcuts = buildShortcuts();
   const exporters = registry.getExporters();
 
   const snapshot = (): StudioPublicSnapshot => ({
@@ -431,6 +477,7 @@ export async function mountAgentAnnotations(
     diagnostics: [...diagnostics],
     shortcuts,
     exporters: exporters.map(({ id, extensionId }) => ({ id, extensionId })),
+    messages: { ...messages },
   });
   uiSnapshot = snapshot();
   const refreshChrome = () => {
@@ -808,10 +855,11 @@ export async function mountAgentAnnotations(
         }, true);
       }
       const target = annotation.targets?.[0]
-        ? resolveTarget(annotation.targets[0].selector)
+        ? resolveTargetInAppRoot(annotation.targets[0].selector)
         : null;
-      if (target) resolved.push(target);
-      const rect = target ? targetBounds(target) : null;
+      const targetInRoot = target && isInAppRoot(target) ? target : null;
+      if (targetInRoot) resolved.push(targetInRoot);
+      const rect = targetInRoot ? targetBounds(targetInRoot) : null;
       const anchor = rect
         ? { x: rect.x - 8, y: rect.y - 8 }
         : annotation.region
@@ -1267,6 +1315,32 @@ export async function mountAgentAnnotations(
 
   const isHostEvent = (event: Event): boolean =>
     event.composedPath().includes(hostElement);
+  const isInAppRoot = (element: Element): boolean => {
+    const appRootIsDocument = appRoot.nodeType === 9;
+    let current: Element | null = element;
+    while (current) {
+      if (appRootIsDocument) {
+        if (current.ownerDocument === appRoot) return true;
+      } else if (appRoot.contains(current)) {
+        return true;
+      }
+      const frameElement: Element | null = current.ownerDocument.defaultView?.frameElement ?? null;
+      if (!frameElement) return false;
+      current = frameElement;
+    }
+    return false;
+  };
+  const resolveTargetInAppRoot = (selector: string): Element | null => {
+    const result = resolveTargetResult(
+      selector,
+      appRoot.nodeType === 9 ? (appRoot as Document) : (appRoot as Element)
+    );
+    return result.status === "resolved" ? result.element : null;
+  };
+  const captureTargetFrom = (event: MouseEvent | PointerEvent): Element | null => {
+    const target = targetFromEvent(event) ?? targetAtPoint(event.clientX, event.clientY);
+    return target && isInAppRoot(target) ? target : null;
+  };
 
   const onPointerMove = (event: PointerEvent) => {
     if (captureMode === "idle" || composer || isHostEvent(event)) return;
@@ -1280,7 +1354,7 @@ export async function mountAgentAnnotations(
       scheduleInteractiveOverlays();
       return;
     }
-    hover = targetFromEvent(event) ?? targetAtPoint(event.clientX, event.clientY);
+    hover = captureTargetFrom(event);
     scheduleInteractiveOverlays();
   };
   const onPointerDown = (event: PointerEvent) => {
@@ -1303,7 +1377,7 @@ export async function mountAgentAnnotations(
     areaStart = null;
     areaRect = null;
     if (rect.width < 8 || rect.height < 8) return render();
-    const targets = sampleRegionTargets(rect);
+    const targets = sampleRegionTargets(rect).filter((entry) => isInAppRoot(entry));
     const sampled = targets.length;
     composer = { kind: "region", rect, sampled, elements: targets };
     if (targets.length > 0) setInspectionFrozen(true, targets);
@@ -1311,7 +1385,7 @@ export async function mountAgentAnnotations(
   };
   const onClick = (event: MouseEvent) => {
     if ((captureMode !== "pick" && captureMode !== "multi") || composer || isHostEvent(event)) return;
-    const target = targetFromEvent(event) ?? targetAtPoint(event.clientX, event.clientY);
+    const target = captureTargetFrom(event);
     if (!target) return;
     event.preventDefault();
     event.stopPropagation();
@@ -1402,6 +1476,10 @@ export async function mountAgentAnnotations(
   });
 
   const captureDocuments = new Map<Document, () => void>();
+  const captureDocumentOf = (): Document =>
+    appRoot.nodeType === 9
+      ? (appRoot as unknown as Document)
+      : (appRoot as Element).ownerDocument!;
   const bindCaptureDocument = (captureDocument: Document): void => {
     if (captureDocuments.has(captureDocument)) return;
     for (const [type, listener] of [
@@ -1415,7 +1493,8 @@ export async function mountAgentAnnotations(
       ] as Array<[string, EventListener]>) captureDocument.removeEventListener(type, listener, true);
     };
     captureDocuments.set(captureDocument, cleanup);
-    for (const frame of captureDocument.querySelectorAll("iframe")) {
+    const frameScope: ParentNode = captureDocument === captureDocumentOf() ? appRoot : captureDocument;
+    for (const frame of frameScope.querySelectorAll("iframe")) {
       const refresh = () => {
         try {
           if (frame.contentDocument) bindCaptureDocument(frame.contentDocument);
@@ -1436,7 +1515,10 @@ export async function mountAgentAnnotations(
       }
     }
   };
-  refreshCaptureDocuments = () => bindCaptureDocument(document);
+  refreshCaptureDocuments = () => {
+    clearCaptureDocuments();
+    bindCaptureDocument(captureDocumentOf());
+  };
   clearCaptureDocuments = () => {
     for (const cleanup of captureDocuments.values()) cleanup();
     captureDocuments.clear();
@@ -1485,10 +1567,11 @@ export async function mountAgentAnnotations(
           .find((node) => node.dataset.annotationId === annotation.annotationId);
         if (!marker) continue;
         const target = annotation.targets?.[0]
-          ? resolveTarget(annotation.targets[0].selector)
+          ? resolveTargetInAppRoot(annotation.targets[0].selector)
           : null;
-        if (target) resolved.push(target);
-        const rect = target ? targetBounds(target) : null;
+        const targetInRoot = target && isInAppRoot(target) ? target : null;
+        if (targetInRoot) resolved.push(targetInRoot);
+        const rect = targetInRoot ? targetBounds(targetInRoot) : null;
         const anchor = rect
           ? { x: rect.x - 8, y: rect.y - 8 }
           : annotation.region
@@ -1506,7 +1589,6 @@ export async function mountAgentAnnotations(
       }
     });
   };
-  const appRoot = document.getElementById("root") ?? document.querySelector("main") ?? document.body;
   const watchMarkerFrames = (scope: ParentNode, observeSetup: boolean): void => {
     for (const frame of scope.querySelectorAll("iframe")) {
       if (markerFrames.has(frame)) continue;
@@ -1543,7 +1625,9 @@ export async function mountAgentAnnotations(
     const selector = annotation.status === "open" && annotation.pageContext.routeKey === routeKey
       ? annotation.targets?.[0]?.selector
       : undefined;
-    return !!selector?.includes(">>iframe>>") && !resolveTarget(selector);
+    if (!selector?.includes(">>iframe>>")) return false;
+    const target = resolveTargetInAppRoot(selector);
+    return !target || !isInAppRoot(target);
   });
   function syncMarkerTracking(targets: Element[]): void {
     stopMarkerTracking();
@@ -1574,6 +1658,35 @@ export async function mountAgentAnnotations(
   }
   hostElement.dataset.markerRefreshes = "0";
   cleanups.push(stopMarkerTracking);
+  // Host subscriptions are registered only after every initialization is complete so
+  // a synchronous first notification can never hit a not-yet-initialized binding.
+  if (host?.subscribe) {
+    cleanups.push(host.subscribe(() => applyHostChange()));
+  } else {
+    const onRouteEvent = () => refreshRoute();
+    window.addEventListener("popstate", onRouteEvent);
+    window.addEventListener("hashchange", onRouteEvent);
+    const originalPushState = history.pushState;
+    const originalReplaceState = history.replaceState;
+    const wrap = (
+      original: typeof history.pushState
+    ): typeof history.pushState =>
+      function (this: History, ...args: Parameters<typeof history.pushState>) {
+        const result = original.apply(this, args);
+        refreshRoute();
+        return result;
+      };
+    const pushState = wrap(originalPushState);
+    const replaceState = wrap(originalReplaceState);
+    history.pushState = pushState;
+    history.replaceState = replaceState;
+    cleanups.push(() => {
+      window.removeEventListener("popstate", onRouteEvent);
+      window.removeEventListener("hashchange", onRouteEvent);
+      if (history.pushState === pushState) history.pushState = originalPushState;
+      if (history.replaceState === replaceState) history.replaceState = originalReplaceState;
+    });
+  }
 
   const onViewport = () => {
     positionPanel();

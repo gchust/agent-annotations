@@ -44,11 +44,19 @@ integrations.
   redactors per extension are composed deterministically in stable
   `(extensionId, redactorId)` order; duplicate `(extensionId, redactorId)` pairs
   are rejected.
-- `HostIntegration` may expose `routeKey()`, `subscribe(listener)`, and
-  `navigate(routeKey)`. Annotations persist the route key they were created on;
-  markers render only on their own route. Without `subscribe`, the runtime
-  observes `popstate`, `hashchange`, and patched `pushState`/`replaceState`,
-  and removes those listeners and restores the patched methods on unmount.
+- `HostIntegration` may expose `routeKey()`, `locale()`, `theme()`, `appRoot()`,
+  `navigate(routeKey)`, and a single unified `subscribe(listener)` notification.
+  `theme()` accepts `"light" | "dark" | "system"`; `system` follows
+  `prefers-color-scheme` through a media listener that is bound while the system
+  theme is active and released on switch or unmount. `appRoot()` accepts an
+  `Element` or `Document` and defaults to `document.body`; observers, frame
+  scanning, and capture hits are scoped to it. One `subscribe` notification
+  re-reads route, locale, theme, and app root together; locale changes rebuild
+  toolbar labels, tooltips, Help, and panel titles without remounting.
+  Annotations persist the route key they were created on; markers render only on
+  their own route. Without `subscribe`, the runtime observes `popstate`,
+  `hashchange`, and patched `pushState`/`replaceState`, and removes those
+  listeners and restores the patched methods on unmount.
 - `StudioPublicApi` exposes snapshots, subscriptions, and commands only. It does
   not expose React setters, reducers, live DOM, or inspection internals.
 

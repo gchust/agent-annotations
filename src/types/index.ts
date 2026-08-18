@@ -277,11 +277,15 @@ export type AgentAnnotationsIconProps = {
   size?: number;
 };
 
+export type AgentAnnotationsHostTheme = "light" | "dark" | "system";
+
 export interface HostIntegration {
   locale?(): string;
   routeKey?(): string;
   navigate?(routeKey: string): void;
-  subscribe?(listener: (routeKey: string) => void): () => void;
+  appRoot?(): Element | Document;
+  theme?(): AgentAnnotationsHostTheme;
+  subscribe?(listener: () => void): () => void;
   messages?: AgentAnnotationsLocaleMessages;
   identity?(element: Element): Record<string, string>;
 }
@@ -339,6 +343,7 @@ export type StudioPublicSnapshot = {
   diagnostics: readonly AgentAnnotationsDiagnosticsEntry[];
   shortcuts: readonly StudioPublicShortcut[];
   exporters: readonly StudioPublicExporter[];
+  messages: AgentAnnotationsLocaleMessages;
 };
 
 export interface StudioPublicApi {

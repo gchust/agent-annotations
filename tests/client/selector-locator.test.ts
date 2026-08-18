@@ -23,6 +23,18 @@ describe("cross-realm selector recovery", () => {
     });
   });
 
+  it("treats an Element root and its descendant matching the same first segment as ambiguous", () => {
+    const root = document.createElement("div");
+    root.id = "shared-segment";
+    const descendant = document.createElement("span");
+    descendant.id = "shared-segment";
+    root.append(descendant);
+    expect(resolveTargetResult("#shared-segment", root)).toMatchObject({
+      status: "ambiguous",
+      reason: "ambiguous segment: #shared-segment",
+    });
+  });
+
   it("reports a cross-origin/unavailable boundary without throwing", () => {
     const frame = document.createElement("iframe");
     frame.id = "blocked";

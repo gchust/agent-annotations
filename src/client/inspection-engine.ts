@@ -141,13 +141,13 @@ export type TargetResolution =
 
 export const resolveTargetResult = (
   selector: string,
-  initialDocument: Document = document
+  initialRoot: Document | ShadowRoot | Element = document
 ): TargetResolution => {
   const tokens = selector.split(/(>>>|>>iframe>>)/).map((value) => value.trim()).filter(Boolean);
   if (tokens.length === 0 || tokens.length % 2 === 0) {
     return { status: "invalid", reason: "malformed selector" };
   }
-  let root: Document | ShadowRoot = initialDocument;
+  let root: Document | ShadowRoot | Element = initialRoot;
   let current: Element | null = null;
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index]!;
@@ -155,9 +155,15 @@ export const resolveTargetResult = (
       let matches: NodeListOf<Element>;
       try { matches = root.querySelectorAll(token); }
       catch { return { status: "invalid", reason: `invalid CSS segment: ${token}` }; }
-      if (matches.length === 0) return { status: "missing", reason: `missing segment: ${token}` };
-      if (matches.length > 1) return { status: "ambiguous", reason: `ambiguous segment: ${token}` };
-      current = matches[0]!;
+      // An Element root can itself be a first-segment match (nodeType, not
+      // instanceof: cross-realm documents have their own Element class). The
+      // root and its descendants share one candidate count: exactly one wins,
+      // more than one is ambiguous.
+      const selfMatches = root.nodeType === 1 && (root as Element).matches?.(token) === true;
+      const total = matches.length + (selfMatches ? 1 : 0);
+      if (total === 0) return { status: "missing", reason: `missing segment: ${token}` };
+      if (total > 1) return { status: "ambiguous", reason: `ambiguous segment: ${token}` };
+      current = selfMatches ? (root as Element) : matches[0]!;
       continue;
     }
     if (token === ">>>") {

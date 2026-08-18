@@ -1,0 +1,41 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / node ${{ matrix.node }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: [20, 24]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm build
+      - run: pnpm check:architecture
+      - run: pnpm check:docs
+      - name: Full test suite (Linux)
+        if: runner.os == 'Linux'
+        run: pnpm test
+      - name: Portable Goal 09 gates (Windows)
+        if: runner.os == 'Windows'
+        run: pnpm exec vitest run tests/client/runtime.test.ts tests/components/accessibility.test.ts tests/extension/registry.test.ts tests/server/vite.test.ts
+      - name: Install Chromium for the packed E2E
+        if: runner.os == 'Linux'
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Fresh packed E2E (Linux)
+        if: runner.os == 'Linux'
+        run: pnpm test:e2e

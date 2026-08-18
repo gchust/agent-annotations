@@ -187,6 +187,49 @@ describe("serve-only Vite plugin", () => {
     }
   });
 
+  it("normalizes Windows drive and backslash extension specifiers to valid Vite ids", () => {
+    const plugin = agentAnnotations({
+      root: "/demo",
+      clientExtensions: ["C:\\demo\\extension.ts", "/unix/demo/extension.ts", "./relative/extension.ts"],
+    });
+    const loaded = String((plugin.load as Function).call({} as never, "\0virtual:agent-annotations/client", {} as never));
+    expect(loaded).toContain(JSON.stringify("/C:/demo/extension.ts"));
+    expect(loaded).toContain(JSON.stringify("/unix/demo/extension.ts"));
+    expect(loaded).toContain(JSON.stringify("./relative/extension.ts"));
+    const forward = agentAnnotations({ root: "/demo", clientExtensions: ["C:/demo/extension.ts"] });
+    const forwardLoaded = String((forward.load as Function).call({} as never, "\0virtual:agent-annotations/client", {} as never));
+    expect(forwardLoaded).toContain(JSON.stringify("/C:/demo/extension.ts"));
+  });
+
+  it("loads the platform's absolute extension specifier through a real Vite server", async () => {
+    const { root } = fixture();
+    const extension = path.join(root, "src/extension.ts");
+    writeFileSync(extension, "export default { id: 'platform-ext', apiVersion: 1 };\n");
+    const plugin = agentAnnotations({ root, clientExtensions: [extension] });
+    const expectedId = extension.replace(/\\/g, "/").replace(/^([A-Za-z]):/, "/$1:");
+    const loaded = String((plugin.load as Function).call({} as never, "\0virtual:agent-annotations/client", {} as never));
+    expect(loaded).toContain(JSON.stringify(expectedId));
+    const server = await createServer({
+      root,
+      logLevel: "silent",
+      server: { host: "127.0.0.1", port: 0 },
+      plugins: [agentAnnotations({ root, clientExtensions: [extension] })],
+    });
+    await server.listen();
+    try {
+      const address = server.httpServer!.address();
+      if (!address || typeof address === "string") throw new Error("missing Vite address");
+      const base = `http://127.0.0.1:${address.port}`;
+      const virtual = await (await fetch(`${base}/@id/__x00__virtual:agent-annotations/client`)).text();
+      expect(virtual).toContain("extension.ts");
+      const relativeUrl = path.relative(root, extension).split(path.sep).join("/");
+      const extensionCode = await (await fetch(`${base}/${relativeUrl}`)).text();
+      expect(extensionCode).toContain("platform-ext");
+    } finally {
+      await server.close();
+    }
+  });
+
   it("warns only for explicit remote opt-in", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     agentAnnotations();

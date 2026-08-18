@@ -282,6 +282,9 @@ describe("ClientExtensionRegistry", () => {
       { host: { locale: "bad" } as never },
       { host: { navigate: "bad" } as never },
       { host: { subscribe: "bad" as never } },
+      { host: { theme: "bad" as never } },
+      { host: { appRoot: "bad" as never } },
+      { host: { theme: () => "blue" as never } },
       { setup: "bad" as never },
     ];
     for (const [index, values] of invalid.entries()) {
@@ -296,10 +299,11 @@ describe("ClientExtensionRegistry", () => {
     const registry = new ClientExtensionRegistry();
     const navigate = () => undefined;
     const subscribe = () => () => undefined;
+    const appRoot = (() => undefined) as unknown as () => Element | Document;
     expect(() => registry.register(extension("route-host", {
-      host: { routeKey: () => "/a", navigate, subscribe },
+      host: { routeKey: () => "/a", navigate, subscribe, theme: () => "system", appRoot },
     }))).not.toThrow();
-    expect(registry.getHostIntegration()).toMatchObject({ navigate, subscribe });
+    expect(registry.getHostIntegration()).toMatchObject({ navigate, subscribe, appRoot });
   });
 
   it("preserves defineClientExtension identity", () => {

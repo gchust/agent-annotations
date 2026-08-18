@@ -167,13 +167,26 @@ const validateExtension = (extension: AgentAnnotationsClientExtension): void => 
     if (!extension.host || typeof extension.host !== "object") {
       throw new TypeError(`Invalid host integration: ${extension.id}`);
     }
-    for (const callback of ["locale", "routeKey", "navigate", "subscribe", "identity"] as const) {
+    for (const callback of ["locale", "routeKey", "navigate", "subscribe", "identity", "theme", "appRoot"] as const) {
       if (
         extension.host[callback] !== undefined &&
         typeof extension.host[callback] !== "function"
       ) {
         throw new TypeError(`Invalid host ${callback}: ${extension.id}`);
       }
+    }
+    const theme = extension.host.theme?.();
+    if (theme !== undefined && theme !== "light" && theme !== "dark" && theme !== "system") {
+      throw new TypeError(`Invalid host theme: ${extension.id}`);
+    }
+    const appRoot = extension.host.appRoot?.();
+    if (
+      appRoot !== undefined &&
+      (typeof appRoot !== "object" ||
+        appRoot === null ||
+        (appRoot.nodeType !== 1 && appRoot.nodeType !== 9))
+    ) {
+      throw new TypeError(`Invalid host appRoot: ${extension.id}`);
     }
     if (
       extension.host.messages !== undefined &&

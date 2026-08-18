@@ -1,7 +1,7 @@
 import { createElement, useState } from "react";
 
 import { defineClientExtension } from "../extension/index.js";
-import type { PanelContribution, ToolbarContribution } from "../types/index.js";
+import type { PanelContribution, StudioPublicApi, ToolbarContribution } from "../types/index.js";
 import {
   AnnotationsIcon,
   AreaIcon,
@@ -23,6 +23,8 @@ const shortcut = (
 ) => ({ key, code, primary, alt, shift });
 const toggleCollapsed = ({ collapsed }: { collapsed: boolean }) => collapsed;
 const showCollapse = ({ collapsed }: { collapsed: boolean }) => !collapsed;
+const translate = (studio: StudioPublicApi, value: string): string =>
+  studio.getSnapshot().messages[value] ?? value;
 
 const HelpPanel: PanelContribution["render"] = ({ studio, close }) =>
   createElement(
@@ -33,8 +35,8 @@ const HelpPanel: PanelContribution["render"] = ({ studio, close }) =>
       {
         type: "button",
         className: "aa-button aa-icon-button",
-        "aria-label": "Close",
-        title: "Close",
+        "aria-label": translate(studio, "Close"),
+        title: translate(studio, "Close"),
         onClick: close,
       },
       createElement(CloseIcon)
@@ -69,7 +71,7 @@ const AnnotationList: PanelContribution["render"] = ({ studio, close }) => {
           "aria-pressed": filter === "open",
           onClick: () => setFilter("open"),
         },
-        "Open"
+        translate(studio, "Open")
       ),
       createElement(
         "button",
@@ -79,15 +81,15 @@ const AnnotationList: PanelContribution["render"] = ({ studio, close }) => {
           "aria-pressed": filter === "all",
           onClick: () => setFilter("all"),
         },
-        "All"
+        translate(studio, "All")
       ),
       createElement(
         "button",
         {
           type: "button",
           className: "aa-button aa-icon-button",
-          "aria-label": "Close",
-          title: "Close",
+          "aria-label": translate(studio, "Close"),
+          title: translate(studio, "Close"),
           onClick: close,
         },
         createElement(CloseIcon)
@@ -117,7 +119,7 @@ const AnnotationList: PanelContribution["render"] = ({ studio, close }) => {
                 createElement(
                   "span",
                   { className: "aa-muted" },
-                  annotation.status
+                  translate(studio, annotation.status)
                 )
               ),
             ]

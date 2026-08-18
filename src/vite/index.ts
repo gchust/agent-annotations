@@ -19,6 +19,15 @@ const MAX_BODY_BYTES = 256 * 1024;
 const MAX_EVIDENCE_BODY_BYTES = 3 * 1024 * 1024;
 const MAX_DIAGNOSTICS_BODY_BYTES = 16 * 1024;
 const SOURCE_MODULE = /\.[cm]?[jt]sx?$/i;
+const WINDOWS_DRIVE = /^([A-Za-z]:)[\\/]/;
+
+const normalizeClientExtensionSpecifier = (specifier: string): string => {
+  // Windows drive paths (C:\x, C:/x) become Vite's canonical /C:/x id.
+  const drive = WINDOWS_DRIVE.exec(specifier);
+  if (drive) return `/${drive[1]}${specifier.slice(2).replace(/\\/g, "/")}`;
+  // Unix absolute paths, relative specifiers, and package ids stay as authored.
+  return specifier;
+};
 
 export type AgentAnnotationsPluginOptions = {
   root?: string;
@@ -104,7 +113,7 @@ export default function agentAnnotations(
   assertRuntimeRoot();
   const endpoint = options.endpoint ?? "/__agent-annotations";
   const allowRemote = options.allowRemote === true;
-  const extensions = options.clientExtensions ?? [];
+  const extensions = (options.clientExtensions ?? []).map(normalizeClientExtensionSpecifier);
   const token = randomBytes(32).toString("hex");
   let sourcePaths = createSourcePathService(root);
   let store = new FileTaskStore(runtimeRoot);
