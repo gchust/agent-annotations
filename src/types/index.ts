@@ -415,7 +415,6 @@ export interface PanelContribution {
     close(): void;
   }>;
   placement?: "above" | "below" | "auto";
-  exclusiveGroup?: string;
 }
 
 export type MountAgentAnnotationsOptions = {

@@ -132,8 +132,8 @@ const toolbar: ToolbarContribution[] = [
   { id: "area", group: "capture", order: 30, label: "Area", icon: AreaIcon, kind: "toggle", shortcut: shortcut("A", "KeyA"), isPressed: ({ captureMode }) => captureMode === "area", execute: ({ studio }) => studio.commands.capture.startArea() },
   { id: "copy", group: "handoff", order: 10, label: "Copy", icon: CopyIcon, kind: "action", shortcut: shortcut("C", "KeyC"), execute: ({ studio }) => studio.commands.annotations.copyOpen() },
   { id: "visibility", group: "view", order: 10, label: "Markers", icon: MarkersIcon, kind: "toggle", shortcut: shortcut("V", "KeyV"), isPressed: ({ markersVisible }) => markersVisible, execute: ({ studio }) => studio.getSnapshot().markersVisible ? studio.commands.markers.hide() : studio.commands.markers.show() },
-  { id: "list", group: "view", order: 20, label: "Annotations", icon: AnnotationsIcon, kind: "panel", shortcut: shortcut("L", "KeyL"), panelId: "list", isPressed: ({ openPanel }) => openPanel === "list" },
-  { id: "help", group: "view", order: 30, label: "Shortcut help", icon: HelpIcon, kind: "panel", shortcut: shortcut("/", "Slash", false, false, true), panelId: "help", isPressed: ({ openPanel }) => openPanel === "help" },
+  { id: "list", group: "view", order: 20, label: "Annotations", icon: AnnotationsIcon, kind: "panel", shortcut: shortcut("L", "KeyL"), panelId: "list", isPressed: ({ openPanel }) => openPanel === "agent-annotations.builtin:list" },
+  { id: "help", group: "view", order: 30, label: "Shortcut help", icon: HelpIcon, kind: "panel", shortcut: shortcut("/", "Slash", false, false, true), panelId: "help", isPressed: ({ openPanel }) => openPanel === "agent-annotations.builtin:help" },
   { id: "toggle", group: "view", order: 40, label: "Collapse toolbar", icon: CollapseIcon, kind: "toggle", shortcut: shortcut("K", "KeyK"), isVisible: showCollapse, isPressed: toggleCollapsed, execute: ({ studio }) => studio.commands.toolbar.toggleCollapsed() },
 ];
 
@@ -142,7 +142,7 @@ export const builtinClientExtension = defineClientExtension({
   apiVersion: 1,
   toolbar,
   panels: [
-    { id: "list", title: "Annotation list", render: AnnotationList, exclusiveGroup: "toolbar" },
-    { id: "help", title: "Shortcut help", render: HelpPanel, exclusiveGroup: "toolbar" },
+    { id: "list", title: "Annotation list", render: AnnotationList },
+    { id: "help", title: "Shortcut help", render: HelpPanel },
   ],
 });

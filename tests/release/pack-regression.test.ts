@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -52,6 +52,82 @@ describe("pack lifecycle regression", () => {
         expect(file).not.toMatch(/\.map$/);
       }
       expect(JSON.stringify(manifest)).not.toContain("workspace:");
+    } finally {
+      rmSync(temporary, { recursive: true, force: true });
+    }
+  });
+
+  it("compiles a packed public type consumer", { timeout: 240_000 }, () => {
+    const temporary = mkdtempSync(path.join(tmpdir(), "agent-annotations-type-consumer-"));
+    try {
+      const destination = path.join(temporary, "packed");
+      run(["pack", "--pack-destination", destination], root);
+      const tarball = readdirSync(destination).find((file) => file.endsWith(".tgz"));
+      expect(tarball).toBeDefined();
+      const consumer = path.join(temporary, "consumer");
+      mkdirSync(consumer);
+      writeFileSync(path.join(consumer, "package.json"), JSON.stringify({
+        name: "agent-annotations-type-consumer",
+        private: true,
+        type: "module",
+        devDependencies: {
+          "@gchust/agent-annotations": `file:${path.join(destination, tarball!)}`,
+          "@types/react": "19.2.18",
+          react: "19.2.8",
+          typescript: "5.9.3",
+        },
+      }, null, 2));
+      writeFileSync(path.join(consumer, "tsconfig.json"), JSON.stringify({
+        compilerOptions: {
+          target: "ES2022",
+          module: "NodeNext",
+          moduleResolution: "NodeNext",
+          strict: true,
+          jsx: "react-jsx",
+          noEmit: true,
+          types: ["react"],
+          skipLibCheck: true,
+        },
+        include: ["consumer.ts"],
+      }, null, 2));
+      writeFileSync(path.join(consumer, "consumer.ts"), `
+import {
+  defineClientExtension,
+  type PanelContribution,
+  type ToolbarContribution,
+} from "@gchust/agent-annotations/extension";
+import { RevisionConflictError } from "@gchust/agent-annotations";
+import type { AgentAnnotationsTask } from "@gchust/agent-annotations/types";
+
+const toolbar: ToolbarContribution = {
+  id: "action",
+  group: "host",
+  label: "Action",
+  icon: () => null,
+  kind: "action",
+  execute: () => undefined,
+};
+const panel: PanelContribution = { id: "panel", title: "Panel", render: () => null };
+// @ts-expect-error exclusiveGroup is not part of the public panel contract.
+panel.exclusiveGroup;
+defineClientExtension({
+  id: "consumer",
+  apiVersion: 1,
+  toolbar: [toolbar],
+  panels: [panel],
+  setup({ studio }) {
+    studio.getSnapshot();
+    studio.subscribe(() => undefined);
+    studio.commands.markers.focus("consumer:panel");
+  },
+});
+const conflict = new RevisionConflictError({} as AgentAnnotationsTask, 1, 2);
+void conflict.latestTask;
+void conflict.expectedRevision;
+void conflict.actualRevision;
+`);
+      run(["install", "--ignore-scripts"], consumer);
+      run(["exec", "tsc", "--noEmit"], consumer);
     } finally {
       rmSync(temporary, { recursive: true, force: true });
     }

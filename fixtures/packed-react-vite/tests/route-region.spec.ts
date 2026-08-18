@@ -54,7 +54,7 @@ test("route-aware markers, region targets, history navigation, and cross-route f
   const sources = new Set(region.targets.map((target: any) => target.inspection.source?.filePath));
   const componentSources = [...sources].filter((file) => file?.startsWith("src/route-a/"));
   expect(componentSources.length).toBeGreaterThanOrEqual(2);
-  expect(region.extensions["demo.extension"]?.["target-context"]).toBeDefined();
+  expect(region.extensions["demo.extension"]?.["demo.extension:target-context"]).toBeDefined();
   expect(JSON.stringify(region.extensions)).not.toContain("redactMe");
   console.log(`region-targets count=${region.targets.length} sources=${JSON.stringify([...sources])}`);
 

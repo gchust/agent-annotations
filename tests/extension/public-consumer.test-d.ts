@@ -12,10 +12,10 @@ const useStudio = (studio: StudioPublicApi): void => {
   studio.commands.capture.startPick();
   void studio.commands.annotations.copyOpen();
   studio.commands.markers.focus("annotation-id");
-  studio.commands.panels.open("panel-id");
+  studio.commands.panels.open("public-consumer:consumer-panel");
   studio.commands.toolbar.toggleCollapsed();
-  void studio.commands.exporters.format("exporter-id");
-  void studio.commands.exporters.copy("exporter-id");
+  void studio.commands.exporters.format("public-consumer:exporter-id");
+  void studio.commands.exporters.copy("public-consumer:exporter-id");
   // @ts-expect-error Internal setters are not public.
   studio.setMode("pick");
   // @ts-expect-error Internal setters are not public.

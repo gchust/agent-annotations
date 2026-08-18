@@ -11,12 +11,15 @@ import type {
 
 export const agentAnnotationsExtensionApiVersion = 1 as const;
 
-type Registered<T> = T & { readonly extensionId: string };
+type Registered<T> = T & { readonly extensionId: string; readonly id: string };
 type RegisteredToolbarContribution = Registered<ToolbarContribution>;
 type RegisteredPanelContribution = Registered<PanelContribution>;
 type RegisteredTargetEnricher = Registered<TargetEnricher>;
 type RegisteredAnnotationExporter = Registered<AnnotationExporter>;
 type RegisteredAnnotationRedactor = Registered<AnnotationRedactor>;
+
+const canonical = (extensionId: string, localId: string): string =>
+  `${extensionId}:${localId}`;
 
 const GROUP_ORDER = ["capture", "handoff", "view", "host"] as const;
 const ID_PATTERN = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
@@ -133,9 +136,7 @@ const validateExtension = (extension: AgentAnnotationsClientExtension): void => 
       isText(panel.title) &&
       typeof panel.render === "function" &&
       (panel.placement === undefined ||
-        ["above", "below", "auto"].includes(panel.placement)) &&
-      (panel.exclusiveGroup === undefined ||
-        (typeof panel.exclusiveGroup === "string" && panel.exclusiveGroup.length > 0))
+        ["above", "below", "auto"].includes(panel.placement))
   );
   assertList(
     "target enricher",
@@ -210,6 +211,31 @@ export class ClientExtensionRegistry {
         `Duplicate host integration: ${extension.id} conflicts with ${this.#host.extensionId}`
       );
     }
+    if (extension.messages || extension.host?.messages) {
+      const ownKeys = new Set<string>();
+      for (const source of [extension.messages ?? {}, extension.host?.messages ?? {}]) {
+        for (const key of Object.keys(source)) {
+          if (ownKeys.has(key)) {
+            throw new TypeError(
+              `Duplicate locale message key: ${key} (${extension.id} defines it in both messages and host.messages)`
+            );
+          }
+          ownKeys.add(key);
+        }
+      }
+      for (const key of ownKeys) {
+        const existing = [...this.#extensions.values()].find(
+          (registered) =>
+            registered.messages?.[key] !== undefined ||
+            registered.host?.messages?.[key] !== undefined
+        );
+        if (existing) {
+          throw new TypeError(
+            `Duplicate locale message key: ${key} (${extension.id} conflicts with ${existing.id})`
+          );
+        }
+      }
+    }
 
     const assertUnique = (
       kind: string,
@@ -218,10 +244,11 @@ export class ClientExtensionRegistry {
     ): void => {
       const pending = new Set<string>();
       for (const value of values) {
-        if (registered.has(value.id) || pending.has(value.id)) {
-          throw new TypeError(`Duplicate ${kind} ID: ${value.id}`);
+        const id = canonical(extension.id, value.id);
+        if (registered.has(id) || pending.has(id)) {
+          throw new TypeError(`Duplicate ${kind} ID: ${id}`);
         }
-        pending.add(value.id);
+        pending.add(id);
       }
     };
     assertUnique("toolbar contribution", extension.toolbar ?? [], this.#toolbar);
@@ -232,34 +259,45 @@ export class ClientExtensionRegistry {
 
     const pendingShortcuts = new Map<string, string>();
     for (const toolbar of extension.toolbar ?? []) {
-      if (
-        toolbar.panelId &&
-        !this.#panels.has(toolbar.panelId) &&
-        !(extension.panels ?? []).some((panel) => panel.id === toolbar.panelId)
-      ) {
-        throw new TypeError(`Unknown toolbar panel ID: ${toolbar.panelId}`);
+      if (toolbar.kind === "panel") {
+        const panelId = canonical(extension.id, toolbar.panelId!);
+        if (
+          !this.#panels.has(panelId) &&
+          !(extension.panels ?? []).some((panel) => canonical(extension.id, panel.id) === panelId)
+        ) {
+          throw new TypeError(`Unknown toolbar panel ID: ${panelId}`);
+        }
       }
       for (const key of shortcutKeys(toolbar.shortcut, toolbar.id)) {
+        const id = canonical(extension.id, toolbar.id);
         const conflict = this.#shortcuts.get(key) ?? pendingShortcuts.get(key);
         if (conflict) {
           throw new TypeError(
-            `Duplicate toolbar shortcut: ${toolbar.id} conflicts with ${conflict}`
+            `Duplicate toolbar shortcut: ${id} conflicts with ${conflict}`
           );
         }
-        pendingShortcuts.set(key, toolbar.id);
+        pendingShortcuts.set(key, id);
       }
     }
 
-    const add = <T extends { id: string }>(
+    const add = <T extends { id: string; panelId?: string }>(
       values: readonly T[] | undefined,
-      registered: Map<string, Registered<T>>
+      registered: Map<string, Registered<T>>,
+      resolvePanel = false
     ): void => {
       for (const value of values ?? []) {
-        registered.set(value.id, { ...value, extensionId: extension.id });
+        registered.set(canonical(extension.id, value.id), {
+          ...value,
+          ...(resolvePanel && value.panelId
+            ? { panelId: canonical(extension.id, value.panelId) }
+            : {}),
+          extensionId: extension.id,
+          id: canonical(extension.id, value.id),
+        });
       }
     };
     this.#extensions.set(extension.id, extension);
-    add(extension.toolbar, this.#toolbar);
+    add(extension.toolbar, this.#toolbar, true);
     add(extension.panels, this.#panels);
     add(extension.targetEnrichers, this.#enrichers);
     add(extension.exporters, this.#exporters);
@@ -278,7 +316,9 @@ export class ClientExtensionRegistry {
         values: readonly { id: string }[] | undefined,
         contributions: Map<string, unknown>
       ): void => {
-        for (const value of values ?? []) contributions.delete(value.id);
+        for (const value of values ?? []) {
+          contributions.delete(canonical(extension.id, value.id));
+        }
       };
       remove(extension.toolbar, this.#toolbar);
       remove(extension.panels, this.#panels);
@@ -328,10 +368,18 @@ export class ClientExtensionRegistry {
   }
 
   getMessages(): AgentAnnotationsLocaleMessages {
-    return Object.assign(
-      {},
-      ...this.getExtensions().map((extension) => extension.messages ?? {})
-    );
+    const messages: AgentAnnotationsLocaleMessages = {};
+    for (const extension of this.getExtensions()) {
+      for (const source of [extension.messages ?? {}, extension.host?.messages ?? {}]) {
+        for (const [key, value] of Object.entries(source)) {
+          if (key in messages) {
+            throw new TypeError(`Duplicate locale message key: ${key}`);
+          }
+          messages[key] = value;
+        }
+      }
+    }
+    return messages;
   }
 
   getHostIntegration(): HostIntegration | undefined {

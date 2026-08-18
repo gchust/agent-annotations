@@ -23,8 +23,10 @@ describe("toolbar accessibility", () => {
     vi.advanceTimersByTime(300);
     expect(shadow.querySelector('[role="tooltip"]')?.textContent).toContain("Pick");
 
-    mounted.api.commands.panels.open("help");
+    mounted.api.commands.panels.open("agent-annotations.builtin:help");
     expect(shadow.querySelector('[aria-label="Shortcut help"]')?.textContent).toContain("Ctrl+Alt+P");
+    expect(shadow.querySelector<HTMLButtonElement>('[data-action-id="agent-annotations.builtin:help"]')
+      ?.getAttribute("aria-pressed")).toBe("true");
     const collapse = [...shadow.querySelectorAll<HTMLButtonElement>("button")].find((node) => node.getAttribute("aria-label")?.startsWith("Collapse toolbar"))!;
     collapse.click();
     expect(shadow.querySelector(".aa-dock")?.getAttribute("data-collapsed")).toBe("true");

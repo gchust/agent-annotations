@@ -18,7 +18,7 @@ test("packed browser to file to CLI to browser loop, HMR and session security", 
   await page.goto("/");
   await expect(page.locator("#agent-annotations-root")).toHaveCount(1);
   await expect(shadow(page, ".aa-dock")).toBeVisible();
-  await expect(shadow(page, '[data-action-id="demo-copy-json"]')).toHaveCount(1);
+  await expect(shadow(page, '[data-action-id="demo.extension:demo-copy-json"]')).toHaveCount(1);
   expect(await page.evaluate(() => window.__demoExtension?.setupCount)).toBe(1);
   expect(statSync(path.join(runtimeRoot, "session.json")).mode & 0o777).toBe(0o600);
   const session = JSON.parse(readFileSync(path.join(runtimeRoot, "session.json"), "utf8"));
@@ -37,7 +37,7 @@ test("packed browser to file to CLI to browser loop, HMR and session security", 
   const id = task.annotations[0].annotationId;
   expect(task.annotations[0].extensions).toEqual({
     "demo.extension": {
-      "target-context": { demoKind: "packed", kept: "visible" },
+      "demo.extension:target-context": { demoKind: "packed", kept: "visible" },
     },
   });
   // Evidence is listed by the CLI with annotation metadata.
@@ -96,7 +96,7 @@ test("packed browser to file to CLI to browser loop, HMR and session security", 
       setup: window.__demoExtension?.setupCount,
       dispose: window.__demoExtension?.disposeCount,
       buttons: document.getElementById("agent-annotations-root")?.shadowRoot
-        ?.querySelectorAll('[data-action-id="demo-copy-json"]').length,
+        ?.querySelectorAll('[data-action-id="demo.extension:demo-copy-json"]').length,
     }))).toEqual({ setup: 2, dispose: 1, buttons: 1 });
     const beforeAction = await page.evaluate(() => window.__demoExtension?.actionCount);
     await page.keyboard.press("Control+Alt+KeyJ");

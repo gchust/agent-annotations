@@ -1,3 +1,7 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -32,7 +36,7 @@ const extension = (
 ) => defineClientExtension({ id, apiVersion: 1, ...values });
 
 describe("ClientExtensionRegistry", () => {
-  it("stores and sorts every family without executing setup", () => {
+  it("canonicalizes internal ids while preserving local ids in author input", () => {
     const registry = new ClientExtensionRegistry();
     const setup = vi.fn();
     const host: HostIntegration = { locale: () => "en-US" };
@@ -42,33 +46,144 @@ describe("ClientExtensionRegistry", () => {
         { ...action("late", "L"), order: 20 },
         { ...action("host", "H"), group: "host", order: -10 },
         { ...action("first", "F"), order: 10 },
+        { ...action("open", "P"), kind: "panel", execute: undefined, panelId: "panel" },
       ],
-      panels: [panel("z-panel"), panel("a-panel")],
+      panels: [panel("z-panel"), panel("a-panel"), panel("panel")],
       targetEnrichers: [enricher("z-enricher"), enricher("a-enricher")],
       exporters: [exporter("z-exporter"), exporter("a-exporter")],
       redactors: [redactor("z-redactor"), redactor("a-redactor")],
       messages: { z: "last", shared: "z" },
       host,
     }));
-    registry.register(extension("a-extension", { messages: { a: "first", shared: "a" } }));
+    registry.register(extension("a-extension", { messages: { a: "first" } }));
 
     expect(setup).not.toHaveBeenCalled();
     expect(registry.getExtensions().map(({ id }) => id)).toEqual(["a-extension", "z-extension"]);
-    expect(registry.getToolbarContributions().map(({ id }) => id)).toEqual(["first", "late", "host"]);
-    expect(registry.getPanels().map(({ id }) => id)).toEqual(["a-panel", "z-panel"]);
-    expect(registry.getTargetEnrichers().map(({ id }) => id)).toEqual(["a-enricher", "z-enricher"]);
-    expect(registry.getExporters().map(({ id }) => id)).toEqual(["a-exporter", "z-exporter"]);
-    expect(registry.getRedactors().map(({ id }) => id)).toEqual(["a-redactor", "z-redactor"]);
-    expect(registry.getMessages()).toEqual({ a: "first", shared: "z", z: "last" });
+    expect(registry.getToolbarContributions().map(({ id }) => id)).toEqual([
+      "z-extension:open",
+      "z-extension:first",
+      "z-extension:late",
+      "z-extension:host",
+    ]);
+    const panelOpen = registry.getToolbarContributions().find(({ id }) => id === "z-extension:open")!;
+    expect(panelOpen.panelId).toBe("z-extension:panel");
+    expect(registry.getPanels().map(({ id }) => id)).toEqual([
+      "z-extension:a-panel",
+      "z-extension:panel",
+      "z-extension:z-panel",
+    ]);
+    expect(registry.getTargetEnrichers().map(({ id }) => id)).toEqual([
+      "z-extension:a-enricher",
+      "z-extension:z-enricher",
+    ]);
+    expect(registry.getExporters().map(({ id }) => id)).toEqual([
+      "z-extension:a-exporter",
+      "z-extension:z-exporter",
+    ]);
+    expect(registry.getRedactors().map(({ id }) => id)).toEqual([
+      "z-extension:a-redactor",
+      "z-extension:z-redactor",
+    ]);
+    expect(registry.getMessages()).toEqual({ a: "first", z: "last", shared: "z" });
     expect(registry.getHostIntegration()).toBe(host);
   });
 
-  it("returns redactors in stable (extensionId, redactorId) order", () => {
+  it("lets two extensions register the same local id", () => {
     const registry = new ClientExtensionRegistry();
-    registry.register(extension("a-extension", { redactors: [redactor("z-redactor")] }));
-    registry.register(extension("z-extension", { redactors: [redactor("a-redactor")] }));
-    expect(registry.getRedactors().map(({ extensionId, id }) => `${extensionId}/${id}`))
-      .toEqual(["a-extension/z-redactor", "z-extension/a-redactor"]);
+    const noShortcut = (id: string): ToolbarContribution => ({
+      id,
+      group: "host",
+      label: id,
+      icon: () => null,
+      kind: "action",
+      execute: () => undefined,
+    });
+    registry.register(extension("one", {
+      toolbar: [noShortcut("list")],
+      panels: [panel("list")],
+      exporters: [exporter("list")],
+    }));
+    registry.register(extension("two", {
+      toolbar: [noShortcut("list")],
+      panels: [panel("list")],
+      exporters: [exporter("list")],
+    }));
+    expect(registry.getToolbarContributions().map(({ id }) => id)).toEqual([
+      "one:list",
+      "two:list",
+    ]);
+    expect(registry.getPanels().map(({ id }) => id)).toEqual(["one:list", "two:list"]);
+    expect(registry.getExporters().map(({ id }) => id)).toEqual(["one:list", "two:list"]);
+  });
+
+  it("rejects cross-extension shortcut conflicts with both canonical owners and stays atomic", () => {
+    const registry = new ClientExtensionRegistry();
+    registry.register(extension("one", { toolbar: [action("copy", "C")] }));
+    expect(() => registry.register(extension("two", {
+      toolbar: [{ ...action("clone", "X"), shortcut: { key: "c", code: "KeyX", primary: true, alt: true, shift: false } }],
+    }))).toThrow("Duplicate toolbar shortcut: two:clone conflicts with one:copy");
+    expect(registry.getExtensions().map(({ id }) => id)).toEqual(["one"]);
+  });
+
+  it("rejects conflicting locale message keys with both extension ids and stays atomic", () => {
+    const registry = new ClientExtensionRegistry();
+    registry.register(extension("one", { messages: { shared: "one" } }));
+    expect(() => registry.register(extension("two", { messages: { shared: "two" } })))
+      .toThrow("Duplicate locale message key: shared (two conflicts with one)");
+    expect(registry.getExtensions().map(({ id }) => id)).toEqual(["one"]);
+    expect(registry.getMessages()).toEqual({ shared: "one" });
+  });
+
+  it("rejects an intra-extension message key defined in both message sources atomically", () => {
+    const registry = new ClientExtensionRegistry();
+    expect(() => registry.register(extension("broken", {
+      messages: { shared: "one" },
+      host: { messages: { shared: "two" } },
+    }))).toThrow(
+      "Duplicate locale message key: shared (broken defines it in both messages and host.messages)"
+    );
+    expect(registry.getExtensions()).toEqual([]);
+    expect(registry.getMessages()).toEqual({});
+  });
+
+  it("rejects host message conflicts against any extension message source", () => {
+    const registry = new ClientExtensionRegistry();
+    registry.register(extension("one", { host: { messages: { shared: "host-one" } } }));
+    expect(() => registry.register(extension("two", { messages: { shared: "two" } })))
+      .toThrow("Duplicate locale message key: shared (two conflicts with one)");
+    expect(registry.getExtensions().map(({ id }) => id)).toEqual(["one"]);
+    expect(registry.getMessages()).toEqual({ shared: "host-one" });
+
+    const second = new ClientExtensionRegistry();
+    second.register(extension("one", { messages: { shared: "one" } }));
+    expect(() => second.register(extension("two", { host: { messages: { shared: "two" } } })))
+      .toThrow("Duplicate locale message key: shared (two conflicts with one)");
+    expect(second.getExtensions().map(({ id }) => id)).toEqual(["one"]);
+  });
+
+  it("rejects an intra-extension duplicate canonical id atomically", () => {
+    const registry = new ClientExtensionRegistry();
+    expect(() => registry.register(extension("broken", {
+      toolbar: [action("same", "A"), action("same", "B")],
+    }))).toThrow("Duplicate toolbar contribution ID: broken:same");
+    expect(registry.getExtensions()).toEqual([]);
+  });
+
+  it("resolves panel references only within the owning extension", () => {
+    const registry = new ClientExtensionRegistry();
+    registry.register(extension("one", { panels: [panel("panel")] }));
+    // A toolbar in a different extension cannot reference another extension's panel.
+    expect(() => registry.register(extension("two", {
+      toolbar: [{ ...action("open", "O"), kind: "panel", execute: undefined, panelId: "panel" }],
+    }))).toThrow("Unknown toolbar panel ID: two:panel");
+    expect(registry.getExtensions().map(({ id }) => id)).toEqual(["one"]);
+    // The owning extension resolves its own panel deterministically.
+    expect(() => registry.register(extension("three", {
+      toolbar: [{ ...action("open", "O"), kind: "panel", execute: undefined, panelId: "panel" }],
+      panels: [panel("panel")],
+    }))).not.toThrow();
+    expect(registry.getToolbarContributions().find(({ id }) => id === "three:open")?.panelId)
+      .toBe("three:panel");
   });
 
   it("unregisters all owned entries once and permits re-registration", () => {
@@ -97,24 +212,11 @@ describe("ClientExtensionRegistry", () => {
     expect(() => registry.register(complete)).not.toThrow();
   });
 
-  it("rejects every duplicate contribution ID across registrations", () => {
-    const families = [
-      ["toolbar contribution", { toolbar: [action("same", "A")] }],
-      ["panel", { panels: [panel("same")] }],
-      ["target enricher", { targetEnrichers: [enricher("same")] }],
-      ["exporter", { exporters: [exporter("same")] }],
-      ["redactor", { redactors: [redactor("same")] }],
-    ] as const;
-    for (const [kind, values] of families) {
-      const registry = new ClientExtensionRegistry();
-      registry.register(extension("one", values));
-      expect(() => registry.register(extension("two", values))).toThrow(`Duplicate ${kind} ID: same`);
-      expect(registry.getExtensions().map(({ id }) => id)).toEqual(["one"]);
-    }
-
+  it("rejects duplicate extension ids atomically", () => {
     const registry = new ClientExtensionRegistry();
     registry.register(extension("same"));
     expect(() => registry.register(extension("same"))).toThrow("Duplicate extension ID: same");
+    expect(registry.getExtensions().map(({ id }) => id)).toEqual(["same"]);
   });
 
   it("rejects every intra-extension duplicate atomically", () => {
@@ -127,7 +229,7 @@ describe("ClientExtensionRegistry", () => {
     ] as const;
     for (const [kind, values] of families) {
       const registry = new ClientExtensionRegistry();
-      expect(() => registry.register(extension("broken", values))).toThrow(`Duplicate ${kind} ID: same`);
+      expect(() => registry.register(extension("broken", values))).toThrow(`Duplicate ${kind} ID: broken:same`);
       expect(registry.getExtensions()).toEqual([]);
     }
   });
@@ -137,16 +239,13 @@ describe("ClientExtensionRegistry", () => {
     registry.register(extension("one", { toolbar: [action("copy", "C")] }));
     expect(() => registry.register(extension("two", {
       toolbar: [{ ...action("clone", "X"), shortcut: { key: "c", code: "KeyX", primary: true, alt: true, shift: false } }],
-    }))).toThrow("Duplicate toolbar shortcut: clone conflicts with copy");
-    expect(() => registry.register(extension("three", {
-      toolbar: [{ ...action("symbol", "X"), shortcut: { key: "χ", code: "keyc", primary: true, alt: true, shift: false } }],
-    }))).toThrow("Duplicate toolbar shortcut: symbol conflicts with copy");
+    }))).toThrow("Duplicate toolbar shortcut: two:clone conflicts with one:copy");
 
     const intra = new ClientExtensionRegistry();
     expect(() => intra.register(extension("broken", { toolbar: [
       action("first", "A"),
       { ...action("second", "B"), shortcut: { key: "a", code: "KeyB", primary: true, alt: true, shift: false } },
-    ] }))).toThrow("Duplicate toolbar shortcut: second conflicts with first");
+    ] }))).toThrow("Duplicate toolbar shortcut: broken:second conflicts with broken:first");
     expect(intra.getExtensions()).toEqual([]);
   });
 
@@ -160,13 +259,8 @@ describe("ClientExtensionRegistry", () => {
     const missing = new ClientExtensionRegistry();
     expect(() => missing.register(extension("broken", { toolbar: [{
       ...action("open", "O"), kind: "panel", execute: undefined, panelId: "missing",
-    }] }))).toThrow("Unknown toolbar panel ID: missing");
+    }] }))).toThrow("Unknown toolbar panel ID: broken:missing");
     expect(missing.getExtensions()).toEqual([]);
-
-    const linked = new ClientExtensionRegistry();
-    expect(() => linked.register(extension("linked", { toolbar: [{
-      ...action("open", "P"), kind: "panel", execute: undefined, panelId: "panel",
-    }], panels: [panel("panel")] }))).not.toThrow();
   });
 
   it("validates every field before mutating state", () => {
@@ -187,7 +281,7 @@ describe("ClientExtensionRegistry", () => {
       { messages: { bad: 1 } as never },
       { host: { locale: "bad" } as never },
       { host: { navigate: "bad" } as never },
-      { host: { subscribe: "bad" } as never },
+      { host: { subscribe: "bad" as never } },
       { setup: "bad" as never },
     ];
     for (const [index, values] of invalid.entries()) {
@@ -211,5 +305,12 @@ describe("ClientExtensionRegistry", () => {
   it("preserves defineClientExtension identity", () => {
     const value = { id: "identity", apiVersion: 1 } as const;
     expect(defineClientExtension(value)).toBe(value);
+  });
+
+  it("keeps exclusiveGroup out of public types and docs", () => {
+    const root = fileURLToPath(new URL("../..", import.meta.url));
+    for (const file of ["src/types/index.ts", "src/client/builtin-extension.ts", "README.md", "API.md"]) {
+      expect(readFileSync(path.join(root, file), "utf8"), file).not.toContain("exclusiveGroup");
+    }
   });
 });

@@ -4,7 +4,7 @@ import path from "node:path";
 
 /** @vitest-environment jsdom */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createElement } from "react";
+import { Component, createElement } from "react";
 
 const primitives = vi.hoisted(() => {
   const context = () => ({
@@ -51,6 +51,7 @@ import type {
   AgentAnnotationsDiagnosticsEntry,
   AgentAnnotationsTask,
   HostIntegration,
+  StudioPublicApi,
   TaskTransport,
 } from "../../src/types/index.js";
 import { annotationFixture, targetFixture, taskFixture } from "../core/test-data.js";
@@ -170,12 +171,12 @@ describe("client runtime", () => {
 
     mounted.api.commands.capture.startPick();
     mounted.api.commands.markers.hide();
-    mounted.api.commands.panels.open("help");
+    mounted.api.commands.panels.open("agent-annotations.builtin:help");
 
     expect(mounted.api.getSnapshot()).toMatchObject({
       captureMode: "pick",
       markersVisible: false,
-      openPanel: "help",
+      openPanel: "agent-annotations.builtin:help",
     });
     expect(listener).toHaveBeenCalled();
     expect(Object.keys(mounted.api)).toEqual(["getSnapshot", "subscribe", "commands"]);
@@ -362,7 +363,7 @@ describe("client runtime", () => {
 
     expect(primitives.getElementAtPoint).not.toHaveBeenCalled();
     expect(mounted.api.getSnapshot().captureMode).toBe("pick");
-    expect(mounted.api.getSnapshot().openPanel).toBe("list");
+    expect(mounted.api.getSnapshot().openPanel).toBe("agent-annotations.builtin:list");
     expect(document.getElementById("agent-annotations-root")!.shadowRoot!.querySelector(".aa-composer")).toBeNull();
     shadow.querySelector<HTMLButtonElement>('[aria-label^="Annotations"]')!.click();
     shadow.querySelector<HTMLButtonElement>('[aria-label^="Annotations"]')!
@@ -471,20 +472,21 @@ describe("client runtime", () => {
     expect(action.getAttribute("aria-label")).toContain("Ctrl+Alt+R");
     expect(action.querySelector("[data-runtime-icon]")).not.toBeNull();
     expect(action.textContent).toBe("");
-    expect(mounted.api.getSnapshot().shortcuts.find(({ id }) => id === "runtime-action")?.formatted).toBe("Ctrl+Alt+R");
-    mounted.api.commands.panels.open("help");
+    expect(mounted.api.getSnapshot().shortcuts.find(({ id }) => id === "runtime-test:runtime-action")?.formatted).toBe("Ctrl+Alt+R");
+    mounted.api.commands.panels.open("agent-annotations.builtin:help");
     expect(shadow.querySelector('[aria-label="Shortcut help"]')?.textContent).toContain("Ctrl+Alt+R");
-    mounted.api.commands.panels.close("help");
+    mounted.api.commands.panels.close();
     action.click();
+    await vi.advanceTimersByTimeAsync(0);
     window.dispatchEvent(new KeyboardEvent("keydown", {
       key: "r", code: "KeyR", ctrlKey: true, altKey: true,
     }));
     expect(execute).toHaveBeenCalledTimes(2);
     expect(setup).toHaveBeenCalledOnce();
-    expect(mounted.api.getSnapshot().exporters).toContainEqual({ id: "json", extensionId: "runtime-test" });
+    expect(mounted.api.getSnapshot().exporters).toContainEqual({ id: "runtime-test:json", extensionId: "runtime-test" });
     expect(await mounted.api.commands.exporters.format()).toContain("# Agent Annotations Task");
-    expect(await mounted.api.commands.exporters.format("json")).toContain('"schema":"agent-annotations.task.v1"');
-    mounted.api.commands.panels.open("runtime-panel");
+    expect(await mounted.api.commands.exporters.format("runtime-test:json")).toContain('"schema":"agent-annotations.task.v1"');
+    mounted.api.commands.panels.open("runtime-test:runtime-panel");
     vi.runAllTimers();
     expect(shadow.activeElement).toBe(shadow.querySelector(".aa-panel button"));
     shadow.querySelector<HTMLButtonElement>(".aa-panel button")!.click();
@@ -502,11 +504,11 @@ describe("client runtime", () => {
     list.focus();
     list.click();
     vi.runAllTimers();
-    expect(mounted.api.getSnapshot().openPanel).toBe("list");
-    mounted.api.commands.panels.open("help");
-    expect(mounted.api.getSnapshot().openPanel).toBe("help");
+    expect(mounted.api.getSnapshot().openPanel).toBe("agent-annotations.builtin:list");
+    mounted.api.commands.panels.open("agent-annotations.builtin:help");
+    expect(mounted.api.getSnapshot().openPanel).toBe("agent-annotations.builtin:help");
     expect(shadow.querySelectorAll(".aa-panel")).toHaveLength(1);
-    mounted.api.commands.panels.close("help");
+    mounted.api.commands.panels.close();
     vi.runAllTimers();
     expect(shadow.activeElement).toBe(
       shadow.querySelector<HTMLButtonElement>('[aria-label^="Annotations"]')
@@ -570,6 +572,7 @@ describe("client runtime", () => {
     const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
     const markers = shadow.querySelector<HTMLButtonElement>('[aria-label^="Markers"]')!;
     markers.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(mounted.api.getSnapshot().markersVisible).toBe(false);
     expect(
       shadow
@@ -578,12 +581,14 @@ describe("client runtime", () => {
     ).toBe("false");
     const collapse = shadow.querySelector<HTMLButtonElement>('[aria-label^="Collapse toolbar"]')!;
     collapse.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(mounted.api.getSnapshot().collapsed).toBe(true);
     expect(shadow.querySelectorAll(".aa-action:not([data-toggle=true])")).toHaveLength(7);
     expect(shadow.querySelector(".aa-dock")?.getAttribute("data-collapsed")).toBe("true");
     shadow
       .querySelector<HTMLButtonElement>('[aria-label^="Collapse toolbar"]')!
       .click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(mounted.api.getSnapshot().collapsed).toBe(false);
     expect(shadow.querySelectorAll(".aa-action").length).toBeGreaterThan(1);
     mounted.unmount();
@@ -672,7 +677,7 @@ describe("client runtime", () => {
     mounted.unmount();
   });
 
-  it("fails closed when an extension redactor throws before transport persistence", async () => {
+  it("drops the extension namespace when a redactor throws and persists the rest", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "agent-annotations-runtime-throw-"));
     const store = new FileTaskStore(root);
     const task = await store.readOrCreate();
@@ -681,7 +686,6 @@ describe("client runtime", () => {
       mutate: (request) => store.mutate(request),
     };
     const mutate = vi.spyOn(transport, "mutate");
-    const before = readFileSync(path.join(root, "tasks/active-task.json"), "utf8");
     const pageTarget = document.createElement("button");
     document.body.append(pageTarget);
     primitives.getElementAtPoint.mockReturnValue(pageTarget);
@@ -714,16 +718,343 @@ describe("client runtime", () => {
       shadow.querySelector<HTMLFormElement>(".aa-composer")!.dispatchEvent(
         new Event("submit", { bubbles: true, cancelable: true })
       );
-      await vi.waitFor(() => expect(shadow.querySelector('[role="status"]')?.textContent)
-        .toBe("redactor exploded"));
-      expect(mutate).not.toHaveBeenCalled();
-      expect(store.read()).toEqual(task);
-      expect(readFileSync(path.join(root, "tasks/active-task.json"), "utf8")).toBe(before);
+      await vi.waitFor(() => expect(store.read()!.annotations).toHaveLength(1));
+      expect(mutate).toHaveBeenCalledOnce();
+      const persisted = store.read()!;
+      expect(persisted.annotations[0]!.extensions["throwing-redactor"]).toBeUndefined();
+      expect(JSON.stringify(persisted)).not.toContain("redactor exploded");
     } finally {
       mounted.unmount();
       pageTarget.remove();
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  it("skips a throwing target enricher with a redacted diagnostic and keeps capture working", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "agent-annotations-runtime-enricher-"));
+    const store = new FileTaskStore(root);
+    const task = await store.readOrCreate();
+    const transport: TaskTransport = {
+      read: async () => store.readOrCreate(),
+      mutate: (request) => store.mutate(request),
+    };
+    const pageTarget = document.createElement("button");
+    document.body.append(pageTarget);
+    primitives.getElementAtPoint.mockReturnValue(pageTarget);
+    const mounted = await mountAgentAnnotations({
+      transport,
+      extensions: [
+        defineClientExtension({
+          id: "broken-enricher",
+          apiVersion: 1,
+          targetEnrichers: [{ id: "target", enrich: () => { throw new Error("token=enricher-secret"); } }],
+        }),
+      ],
+    });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      mounted.api.commands.capture.startPick();
+      document.dispatchEvent(new MouseEvent("click", {
+        bubbles: true,
+        clientX: 10,
+        clientY: 10,
+      }));
+      const textarea = shadow.querySelector<HTMLTextAreaElement>(".aa-composer textarea")!;
+      textarea.value = "Still captured";
+      shadow.querySelector<HTMLFormElement>(".aa-composer")!.dispatchEvent(
+        new Event("submit", { bubbles: true, cancelable: true })
+      );
+      await vi.waitFor(() => expect(store.read()!.annotations).toHaveLength(1));
+      const persisted = store.read()!;
+      expect(persisted.annotations[0]!.comment).toBe("Still captured");
+      expect(persisted.annotations[0]!.extensions["broken-enricher"]).toBeUndefined();
+      const diagnostics = mounted.api.getSnapshot().diagnostics;
+      expect(diagnostics.some((entry) => entry.message.includes("enricher"))).toBe(true);
+      expect(JSON.stringify(diagnostics)).not.toContain("enricher-secret");
+    } finally {
+      mounted.unmount();
+      pageTarget.remove();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("disables a pending toolbar action and re-enables it after a rejection", async () => {
+    let release!: () => void;
+    const execute = vi.fn(async () => {
+      await new Promise<void>((resolve) => { release = resolve; });
+      throw new Error("token=action-secret");
+    });
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(),
+      extensions: [
+        defineClientExtension({
+          id: "broken-action",
+          apiVersion: 1,
+          toolbar: [{
+            id: "boom",
+            group: "host",
+            label: "Boom",
+            icon: () => null,
+            kind: "action",
+            execute,
+          }],
+        }),
+      ],
+    });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      const button = () => shadow.querySelector<HTMLButtonElement>('[data-action-id="broken-action:boom"]')!;
+      expect(button().disabled).toBe(false);
+      button().click();
+      await vi.waitFor(() => expect(button().disabled).toBe(true));
+      release();
+      await vi.waitFor(() => expect(button().disabled).toBe(false));
+      await vi.waitFor(() => expect(
+        mounted.api.getSnapshot().diagnostics.some((entry) => entry.message.includes("action"))
+      ).toBe(true));
+      expect(JSON.stringify(mounted.api.getSnapshot().diagnostics))
+        .not.toContain("action-secret");
+    } finally {
+      mounted.unmount();
+    }
+  });
+
+  it("keeps one pending action disabled while a concurrent action settles", async () => {
+    let releaseA!: () => void;
+    let releaseB!: () => void;
+    const executeA = vi.fn(async () => {
+      await new Promise<void>((resolve) => { releaseA = resolve; });
+    });
+    const executeB = vi.fn(async () => {
+      await new Promise<void>((resolve) => { releaseB = resolve; });
+    });
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(),
+      extensions: [
+        defineClientExtension({
+          id: "concurrent",
+          apiVersion: 1,
+          toolbar: [
+            { id: "a", group: "host", label: "A", icon: () => null, kind: "action", execute: executeA },
+            { id: "b", group: "host", label: "B", icon: () => null, kind: "action", execute: executeB },
+          ],
+        }),
+      ],
+    });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      const a = () => shadow.querySelector<HTMLButtonElement>('[data-action-id="concurrent:a"]')!;
+      const b = () => shadow.querySelector<HTMLButtonElement>('[data-action-id="concurrent:b"]')!;
+      a().click();
+      await vi.waitFor(() => expect(a().disabled).toBe(true));
+      b().click();
+      await vi.waitFor(() => expect(b().disabled).toBe(true));
+      releaseB();
+      await vi.waitFor(() => expect(b().disabled).toBe(false));
+      expect(a().disabled).toBe(true); // A is still pending.
+      releaseA();
+      await vi.waitFor(() => expect(a().disabled).toBe(false));
+    } finally {
+      mounted.unmount();
+    }
+  });
+
+  it("rejects re-entering an already pending action through the hotkey path", async () => {
+    let release!: () => void;
+    const execute = vi.fn(async () => {
+      await new Promise<void>((resolve) => { release = resolve; });
+    });
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(),
+      extensions: [
+        defineClientExtension({
+          id: "reentry",
+          apiVersion: 1,
+          toolbar: [{
+            id: "slow",
+            group: "host",
+            label: "Slow",
+            icon: () => null,
+            kind: "action",
+            shortcut: { key: "s", code: "KeyS", primary: true, alt: true, shift: false },
+            execute,
+          }],
+        }),
+      ],
+    });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      const button = () => shadow.querySelector<HTMLButtonElement>('[data-action-id="reentry:slow"]')!;
+      button().click();
+      await vi.waitFor(() => expect(button().disabled).toBe(true));
+      window.dispatchEvent(new KeyboardEvent("keydown", {
+        key: "s",
+        code: "KeyS",
+        ctrlKey: true,
+        altKey: true,
+      }));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(execute).toHaveBeenCalledTimes(1);
+      release();
+      await vi.waitFor(() => expect(button().disabled).toBe(false));
+      expect(execute).toHaveBeenCalledTimes(1);
+    } finally {
+      mounted.unmount();
+    }
+  });
+
+  it("isolates a synchronously throwing toolbar action and leaves no unhandled rejection", async () => {
+    const unhandled = vi.fn();
+    window.addEventListener("unhandledrejection", unhandled);
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(),
+      extensions: [
+        defineClientExtension({
+          id: "sync-action",
+          apiVersion: 1,
+          toolbar: [{
+            id: "boom",
+            group: "host",
+            label: "Boom",
+            icon: () => null,
+            kind: "action",
+            execute: () => { throw new Error("token=action-sync"); },
+          }],
+        }),
+      ],
+    });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      shadow.querySelector<HTMLButtonElement>('[data-action-id="sync-action:boom"]')!.click();
+      await vi.waitFor(() => expect(
+        mounted.api.getSnapshot().diagnostics.some((entry) => entry.message.includes("action"))
+      ).toBe(true));
+      expect(JSON.stringify(mounted.api.getSnapshot().diagnostics))
+        .not.toContain("action-sync");
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(unhandled).not.toHaveBeenCalled();
+    } finally {
+      mounted.unmount();
+      window.removeEventListener("unhandledrejection", unhandled);
+    }
+  });
+
+  it("surfaces an exporter error without mutating the task", async () => {
+    const memory = new MemoryTaskTransport(taskFixture());
+    const mounted = await mountAgentAnnotations({
+      transport: { read: () => memory.read(), mutate: (request) => memory.mutate(request) },
+      extensions: [
+        defineClientExtension({
+          id: "broken-exporter",
+          apiVersion: 1,
+          exporters: [{ id: "json", export: () => { throw new Error("exporter exploded"); } }],
+        }),
+      ],
+    });
+    try {
+      const before = await memory.read();
+      await expect(mounted.api.commands.exporters.format("broken-exporter:json"))
+        .rejects.toThrow("exporter exploded");
+      expect(await memory.read()).toEqual(before);
+    } finally {
+      mounted.unmount();
+    }
+  });
+
+  it("isolates a throwing panel with an error boundary while the dock stays usable", async () => {
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(),
+      extensions: [
+        defineClientExtension({
+          id: "broken-panel",
+          apiVersion: 1,
+          panels: [{
+            id: "explode",
+            title: "Exploding panel",
+            render: () => { throw new Error("token=panel-secret"); },
+          }],
+        }),
+      ],
+    });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      mounted.api.commands.panels.open("broken-panel:explode");
+      expect(shadow.querySelector('[aria-label="Exploding panel"]')).not.toBeNull();
+      expect(shadow.querySelector(".aa-panel-error")?.textContent).toBe("Panel failed to render");
+      expect(shadow.querySelector(".aa-dock")).not.toBeNull();
+      const pick = shadow.querySelector<HTMLButtonElement>('[aria-label^="Pick"]')!;
+      expect(pick.disabled).toBe(false);
+      expect(JSON.stringify(mounted.api.getSnapshot().diagnostics))
+        .not.toContain("panel-secret");
+      mounted.api.commands.panels.close();
+      mounted.api.commands.panels.open("agent-annotations.builtin:help");
+      expect(shadow.querySelector('[aria-label="Shortcut help"]')).not.toBeNull();
+    } finally {
+      mounted.unmount();
+    }
+  });
+
+  it("keeps the panel error boundary across post-interaction render failures", async () => {
+    let shouldThrow = false;
+    class LatePanel extends Component<
+      { studio: StudioPublicApi; close(): void },
+      { count: number }
+    > {
+      state = { count: 0 };
+      render() {
+        if (shouldThrow) throw new Error("token=panel-late");
+        return createElement(
+          "button",
+          { type: "button", onClick: () => { shouldThrow = true; this.setState({ count: 1 }); } },
+          `Count ${this.state.count}`
+        );
+      }
+    }
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(),
+      extensions: [
+        defineClientExtension({
+          id: "late-panel",
+          apiVersion: 1,
+          panels: [{ id: "late", title: "Late panel", render: LatePanel }],
+        }),
+      ],
+    });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      mounted.api.commands.panels.open("late-panel:late");
+      const button = shadow.querySelector<HTMLButtonElement>(".aa-panel button")!;
+      expect(button.textContent).toBe("Count 0");
+      button.click();
+      await vi.waitFor(() => expect(shadow.querySelector(".aa-panel-error")?.textContent)
+        .toBe("Panel failed to render"));
+      expect(shadow.querySelector<HTMLButtonElement>('[aria-label^="Pick"]')!.disabled).toBe(false);
+      expect(JSON.stringify(mounted.api.getSnapshot().diagnostics))
+        .not.toContain("panel-late");
+    } finally {
+      mounted.unmount();
+    }
+  });
+
+  it("runs setup and dispose exactly once per mount and unmount", async () => {
+    const setup = vi.fn();
+    const dispose = vi.fn();
+    const extension = defineClientExtension({
+      id: "lifecycle",
+      apiVersion: 1,
+      setup: () => {
+        setup();
+        return dispose;
+      },
+    });
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(),
+      extensions: [extension],
+    });
+    expect(setup).toHaveBeenCalledOnce();
+    mounted.unmount();
+    mounted.unmount();
+    expect(dispose).toHaveBeenCalledOnce();
   });
 
   it("redacts secrets through the browser mutation path before persistence", async () => {
@@ -1150,9 +1481,9 @@ describe("client runtime", () => {
       const annotation = store.read()!.annotations[0]!;
       expect(annotation.targets).toHaveLength(50);
       const extensionData = annotation.extensions["region.concurrency"] as {
-        target: { targets: unknown[] };
+        "region.concurrency:target": { targets: unknown[] };
       };
-      expect(extensionData.target.targets).toHaveLength(50);
+      expect(extensionData["region.concurrency:target"].targets).toHaveLength(50);
     } finally {
       mounted.unmount();
       for (const element of elements) element.remove();

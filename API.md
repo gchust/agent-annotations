@@ -33,6 +33,10 @@ integrations.
 - `defineClientExtension(extension)` defines a public extension without global
   mutation. `setup` receives `{ studio }` only; extensions reach the task through
   `StudioPublicApi` commands, never a raw transport.
+- Author input keeps explicit local contribution IDs; the registry canonicalizes
+  them internally to `<extensionId>:<localId>`. Toolbar/panel references resolve
+  deterministically inside the owning extension, and the public snapshot and
+  `StudioPublicApi` commands use the canonical IDs.
 - `ClientExtensionRegistry` and `registerClientExtension` provide deterministic,
   atomic registration and disposal.
 - Public contribution types cover toolbar actions, panels, target enrichers,

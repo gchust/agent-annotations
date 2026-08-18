@@ -184,6 +184,30 @@ describe("generic redaction", () => {
     expect(result.task.annotations[0].extensions["region.context"]).toEqual({ keep: "yes" });
   });
 
+  it("drops the extension namespace when a composed redactor throws", () => {
+    const task = taskFixture({
+      annotations: [
+        annotationFixture({
+          extensions: {
+            "broken.context": { keep: "yes", token: "secret" },
+            "fine.context": { keep: "yes" },
+          },
+        }),
+      ],
+    });
+    const result = redactAgentAnnotationsTask(task, [
+      {
+        extensionId: "broken.context",
+        id: "explode",
+        redact: () => {
+          throw new Error("redactor exploded");
+        },
+      },
+    ]);
+    expect(result.task.annotations[0].extensions["broken.context"]).toBeUndefined();
+    expect(result.task.annotations[0].extensions["fine.context"]).toEqual({ keep: "yes" });
+  });
+
   it("executes composed redactors in stable (extensionId, redactorId) order", () => {
     const task = taskFixture({
       annotations: [

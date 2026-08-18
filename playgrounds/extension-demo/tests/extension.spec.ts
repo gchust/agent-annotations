@@ -17,26 +17,26 @@ test("external extension shares the public registry and survives HMR", async ({ 
     buttons.map((button) => button.getAttribute("data-action-id"))
   );
   expect(actionIds).toEqual([
-    "pick",
-    "multi",
-    "area",
-    "copy",
-    "demo-copy-json",
-    "visibility",
-    "list",
-    "demo-panel-action",
-    "help",
-    "toggle",
+    "agent-annotations.builtin:pick",
+    "agent-annotations.builtin:multi",
+    "agent-annotations.builtin:area",
+    "agent-annotations.builtin:copy",
+    "demo.extension:demo-copy-json",
+    "agent-annotations.builtin:visibility",
+    "agent-annotations.builtin:list",
+    "demo.extension:demo-panel-action",
+    "agent-annotations.builtin:help",
+    "agent-annotations.builtin:toggle",
   ]);
   if (evidenceRoot) {
     await page.screenshot({ path: path.join(evidenceRoot, "toolbar-and-demo-action.png") });
   }
-  await expect(shadow(page, '[data-action-id="demo-copy-json"]'))
+  await expect(shadow(page, '[data-action-id="demo.extension:demo-copy-json"]'))
     .toHaveAttribute("aria-label", "Copy JSON (Ctrl+Alt+J)");
-  await shadow(page, '[data-action-id="demo-copy-json"]').hover();
+  await shadow(page, '[data-action-id="demo.extension:demo-copy-json"]').hover();
   await expect(shadow(page, '[role="tooltip"]')).toHaveText("Copy JSON (Ctrl+Alt+J)");
 
-  await shadow(page, '[data-action-id="help"]').click();
+  await shadow(page, '[data-action-id="agent-annotations.builtin:help"]').click();
   await expect(shadow(page, '[aria-label="Shortcut help"]'))
     .toContainText("Copy JSONCtrl+Alt+J");
   if (evidenceRoot) {
@@ -44,9 +44,9 @@ test("external extension shares the public registry and survives HMR", async ({ 
   }
   await shadow(page, '[aria-label="Shortcut help"] button[aria-label="Close"]').click();
 
-  await shadow(page, '[data-action-id="list"]').click();
+  await shadow(page, '[data-action-id="agent-annotations.builtin:list"]').click();
   await expect(shadow(page, '[aria-label="Annotation list"]')).toBeVisible();
-  await shadow(page, '[data-action-id="demo-panel-action"]').click();
+  await shadow(page, '[data-action-id="demo.extension:demo-panel-action"]').click();
   await expect(shadow(page, ".aa-panel")).toHaveCount(1);
   await expect(shadow(page, '[aria-label="Demo Extension"]')).toContainText("demo-json");
   await expect.poll(() => page.evaluate(() =>
@@ -60,9 +60,9 @@ test("external extension shares the public registry and survives HMR", async ({ 
   await expect(shadow(page, '[aria-label="Demo Extension"]')).toHaveCount(0);
   await expect.poll(() => page.evaluate(() =>
     document.getElementById("agent-annotations-root")?.shadowRoot?.activeElement?.getAttribute("data-action-id")
-  )).toBe("demo-panel-action");
+  )).toBe("demo.extension:demo-panel-action");
 
-  await shadow(page, '[data-action-id="pick"]').click();
+  await shadow(page, '[data-action-id="agent-annotations.builtin:pick"]').click();
   await page.locator("#demo-target").click();
   await shadow(page, '[aria-label="Annotation comment"]').fill("Keep Demo data safe");
   await shadow(page, 'button[aria-label="Save annotation"]').click();
@@ -70,11 +70,11 @@ test("external extension shares the public registry and survives HMR", async ({ 
     window.__demoExtension?.studio?.getSnapshot().task.annotations[0]?.extensions
   )).toEqual({
     "demo.extension": {
-      "target-context": { demoKind: "primary", kept: "visible" },
+      "demo.extension:target-context": { demoKind: "primary", kept: "visible" },
     },
   });
 
-  await shadow(page, '[data-action-id="copy"]').click();
+  await shadow(page, '[data-action-id="agent-annotations.builtin:copy"]').click();
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText()))
     .toContain("# Agent Annotations Task");
   await page.locator("main").click();
@@ -83,7 +83,7 @@ test("external extension shares the public registry and survives HMR", async ({ 
   const json = JSON.parse(await page.evaluate(() => navigator.clipboard.readText()));
   expect(json).toMatchObject({
     format: "demo-json",
-    annotations: [{ extensions: { "demo.extension": { "target-context": {
+    annotations: [{ extensions: { "demo.extension": { "demo.extension:target-context": {
       demoKind: "primary",
       kept: "visible",
     } } } }],
@@ -110,7 +110,7 @@ test("external extension shares the public registry and survives HMR", async ({ 
       setup: window.__demoExtension?.setupCount,
       dispose: window.__demoExtension?.disposeCount,
       buttons: document.getElementById("agent-annotations-root")?.shadowRoot
-        ?.querySelectorAll('[data-action-id="demo-copy-json"]').length,
+        ?.querySelectorAll('[data-action-id="demo.extension:demo-copy-json"]').length,
     }))).toEqual({ setup: 2, dispose: 1, buttons: 1 });
     const beforeAction = await page.evaluate(() => window.__demoExtension?.actionCount);
     await page.locator("main").click();

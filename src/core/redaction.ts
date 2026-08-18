@@ -141,10 +141,17 @@ export function redactAgentAnnotationsTask(
       const genericData = redactJsonValue(rawData, recorder) as AgentAnnotationsJsonObject;
       let data: AgentAnnotationsJsonObject | null = genericData;
       for (const redactor of byExtension.get(extensionId) ?? []) {
-        const next = redactor.redact(data, {
-          annotationId: annotation.annotationId,
-          extensionId,
-        });
+        let next: AgentAnnotationsJsonObject | null;
+        try {
+          next = redactor.redact(data, {
+            annotationId: annotation.annotationId,
+            extensionId,
+          });
+        } catch {
+          // A faulty redactor fails closed for its own namespace only: the namespace is
+          // dropped and the rest of the task persists with generic redaction intact.
+          next = null;
+        }
         if (next === null) {
           data = null;
           break;

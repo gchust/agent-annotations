@@ -27,7 +27,7 @@ import type {
   StudioPublicSnapshot,
   ToolbarCommandContext,
 } from "../types/index.js";
-import { createElement, type ComponentType } from "react";
+import { Component, createElement, type ComponentType } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import {
@@ -101,7 +101,8 @@ const regionAnnotation = async (
   elements: Element[],
   comment: string,
   host: HostIntegration | undefined,
-  enrichers: readonly RegisteredTargetEnricher[]
+  enrichers: readonly RegisteredTargetEnricher[],
+  reportDiagnostic: (message: string) => void
 ): Promise<AgentAnnotation> => {
   const inspected = await mapBounded(
     elements,
@@ -123,18 +124,23 @@ const regionAnnotation = async (
   const targets = resolved.map(({ target }) => target);
   const extensions: AgentAnnotation["extensions"] = {};
   for (const enricher of enrichers) {
-    const values = await mapBounded(
-      resolved,
-      REGION_TARGET_CONCURRENCY,
-      async ({ element, target }) =>
-        enricher.enrich({ element, inspection: target.inspection })
-    );
-    const data = values.filter((value) => value !== null);
-    if (data.length > 0) {
-      extensions[enricher.extensionId] = {
-        ...(extensions[enricher.extensionId] ?? {}),
-        [enricher.id]: data.length === 1 ? data[0]! : { targets: data },
-      };
+    try {
+      const values = await mapBounded(
+        resolved,
+        REGION_TARGET_CONCURRENCY,
+        async ({ element, target }) =>
+          enricher.enrich({ element, inspection: target.inspection })
+      );
+      const data = values.filter((value) => value !== null);
+      if (data.length > 0) {
+        extensions[enricher.extensionId] = {
+          ...(extensions[enricher.extensionId] ?? {}),
+          [enricher.id]: data.length === 1 ? data[0]! : { targets: data },
+        };
+      }
+    } catch (error) {
+      // A faulty enricher is skipped with a redacted diagnostic; capture continues.
+      reportDiagnostic(`target enricher failed: ${String(error)}`);
     }
   }
   return {
@@ -155,22 +161,28 @@ const elementAnnotation = async (
   elements: Element[],
   comment: string,
   host: HostIntegration | undefined,
-  enrichers: readonly RegisteredTargetEnricher[]
+  enrichers: readonly RegisteredTargetEnricher[],
+  reportDiagnostic: (message: string) => void
 ): Promise<AgentAnnotation> => {
   const targets = await Promise.all(elements.map((element) => inspectTarget(element, host)));
   const extensions: AgentAnnotation["extensions"] = {};
   for (const enricher of enrichers) {
-    const values = await Promise.all(
-      elements.map((element, index) =>
-        enricher.enrich({ element, inspection: targets[index].inspection })
-      )
-    );
-    const data = values.filter((value) => value !== null);
-    if (data.length > 0) {
-      extensions[enricher.extensionId] = {
-        ...(extensions[enricher.extensionId] ?? {}),
-        [enricher.id]: data.length === 1 ? data[0]! : { targets: data },
-      };
+    try {
+      const values = await Promise.all(
+        elements.map((element, index) =>
+          enricher.enrich({ element, inspection: targets[index].inspection })
+        )
+      );
+      const data = values.filter((value) => value !== null);
+      if (data.length > 0) {
+        extensions[enricher.extensionId] = {
+          ...(extensions[enricher.extensionId] ?? {}),
+          [enricher.id]: data.length === 1 ? data[0]! : { targets: data },
+        };
+      }
+    } catch (error) {
+      // A faulty enricher is skipped with a redacted diagnostic; capture continues.
+      reportDiagnostic(`target enricher failed: ${String(error)}`);
     }
   }
   return {
@@ -184,6 +196,31 @@ const elementAnnotation = async (
     extensions,
   };
 };
+
+type PanelErrorBoundaryProps = {
+  onError: (message: string) => void;
+  children: import("react").ReactNode;
+};
+type PanelErrorBoundaryState = { failed: boolean };
+
+class PanelErrorBoundary extends Component<PanelErrorBoundaryProps, PanelErrorBoundaryState> {
+  state: PanelErrorBoundaryState = { failed: false };
+
+  static getDerivedStateFromError(): PanelErrorBoundaryState {
+    return { failed: true };
+  }
+
+  componentDidCatch(error: unknown): void {
+    this.props.onError(String(error));
+  }
+
+  render(): import("react").ReactNode {
+    if (this.state.failed) {
+      return createElement("p", { className: "aa-panel-error" }, "Panel failed to render");
+    }
+    return this.props.children;
+  }
+}
 
 export async function mountAgentAnnotations(
   options: MountAgentAnnotationsOptions
@@ -227,6 +264,7 @@ export async function mountAgentAnnotations(
   let copyFallback = "";
   let dockPosition: { left: number; top: number } | null = null;
   let collapseAction: string | null = null;
+  let pendingActions = new Set<string>();
   let focusPanel = false;
   let panelReturnAction: string | null = null;
   let panelRoot: Root | null = null;
@@ -339,7 +377,7 @@ export async function mountAgentAnnotations(
   shadow.append(root);
 
   const locale = host?.locale?.() ?? (document.documentElement.lang || "en-US");
-  const messages = { ...registry.getMessages(), ...(host?.messages ?? {}) };
+  const messages = registry.getMessages();
   root.lang = locale;
 
   const localized = (value: string | Readonly<Record<string, string>>): string =>
@@ -639,10 +677,26 @@ export async function mountAgentAnnotations(
       }
       return;
     }
-    void contribution.execute?.({
-      studio: api,
-      extensionId: contribution.extensionId,
-    } satisfies ToolbarCommandContext);
+    const execute = async () => {
+      if (pendingActions.has(contribution.id)) return; // No re-entry for the same action.
+      pendingActions.add(contribution.id);
+      render();
+      try {
+        await contribution.execute?.({
+          studio: api,
+          extensionId: contribution.extensionId,
+        } satisfies ToolbarCommandContext);
+      } catch (error) {
+        if (destroyed) return;
+        // A faulty optional action is caught and re-enabled; capture stays usable.
+        record("console", `toolbar action failed: ${String(error)}`);
+      } finally {
+        if (destroyed) return;
+        pendingActions.delete(contribution.id); // Only this action is released.
+        render();
+      }
+    };
+    void execute();
   };
 
   const renderIcon = (
@@ -793,14 +847,16 @@ export async function mountAgentAnnotations(
               composer.elements,
               comment,
               host,
-              registry.getTargetEnrichers()
+              registry.getTargetEnrichers(),
+              (message) => record("console", message)
             )
           : await elementAnnotation(
               composer!.kind,
               composer!.elements,
               comment,
               host,
-              registry.getTargetEnrichers()
+              registry.getTargetEnrichers(),
+              (message) => record("console", message)
             );
         if (destroyed || routeKey !== submittedRouteKey) return;
         const persisted = await mutate([{ op: "add", annotation }]);
@@ -973,9 +1029,12 @@ export async function mountAgentAnnotations(
     panelRoot = createRoot(mount);
     flushSync(() =>
       panelRoot!.render(
-        createElement(contribution.render, {
-          studio: api,
-          close: () => api.commands.panels.close(contribution.id),
+        createElement(PanelErrorBoundary, {
+          onError: (message) => record("console", `panel render failed: ${message}`),
+          children: createElement(contribution.render, {
+            studio: api,
+            close: () => api.commands.panels.close(contribution.id),
+          }),
         })
       )
     );
@@ -1030,7 +1089,8 @@ export async function mountAgentAnnotations(
           ? { "aria-expanded": String(openPanel === contribution.panelId) }
           : {}),
       });
-      node.disabled = contribution.isEnabled?.(current) === false;
+      node.disabled = pendingActions.has(contribution.id)
+        || contribution.isEnabled?.(current) === false;
       if (contribution.id === collapseAction) {
         node.dataset.toggle = "true";
       }

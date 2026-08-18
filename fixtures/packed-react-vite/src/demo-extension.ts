@@ -69,7 +69,7 @@ export default defineClientExtension({
       },
       async execute({ studio }) {
         state.actionCount += 1;
-        await studio.commands.exporters.copy("demo-json", "all");
+        await studio.commands.exporters.copy("demo.extension:demo-json", "all");
       },
     },
     {
@@ -86,7 +86,6 @@ export default defineClientExtension({
     id: "demo-panel",
     title: "Demo Extension",
     render: DemoPanel,
-    exclusiveGroup: "toolbar",
   }],
   targetEnrichers: [{
     id: "target-context",
