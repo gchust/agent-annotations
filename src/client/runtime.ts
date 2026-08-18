@@ -27,9 +27,10 @@ import type {
   StudioPublicSnapshot,
   ToolbarCommandContext,
 } from "../types/index.js";
-import { Component, createElement, type ComponentType } from "react";
+import { Component, createElement, useLayoutEffect, useRef, useSyncExternalStore, type ComponentType } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
+import { renderToStaticMarkup } from "react-dom/server";
 import {
   disposeInspectionEngine,
   inspectTarget,
@@ -267,8 +268,8 @@ export async function mountAgentAnnotations(
   let pendingActions = new Set<string>();
   let focusPanel = false;
   let panelReturnAction: string | null = null;
-  let panelRoot: Root | null = null;
-  let iconRoots: Root[] = [];
+  let studioRoot: Root | null = null;
+  let studioRenders = 0;
   let destroyed = false;
   let routeKey = pageContext(host).routeKey;
   const applyRouteKey = (next: string) => {
@@ -293,6 +294,16 @@ export async function mountAgentAnnotations(
   };
   const refreshRoute = () => applyRouteKey(pageContext(host).routeKey);
   const listeners = new Set<(snapshot: StudioPublicSnapshot) => void>();
+  const uiListeners = new Set<() => void>();
+  let uiSnapshot: StudioPublicSnapshot;
+  const notifyUi = () => {
+    for (const listener of uiListeners) listener();
+  };
+  const uiSubscribe = (listener: () => void): (() => void) => {
+    uiListeners.add(listener);
+    return () => uiListeners.delete(listener);
+  };
+  const uiGetSnapshot = (): StudioPublicSnapshot => uiSnapshot;
   const diagnostics: AgentAnnotationsDiagnosticsEntry[] = [];
   const cleanups: Array<() => void> = [];
   const timers = new Set<number>();
@@ -375,6 +386,11 @@ export async function mountAgentAnnotations(
   shadow.append(style);
   const root = document.createElement("div");
   shadow.append(root);
+  const uiMount = document.createElement("div");
+  uiMount.className = "aa-ui";
+  const overlayMount = document.createElement("div");
+  overlayMount.className = "aa-overlays";
+  root.append(uiMount, overlayMount);
 
   const locale = host?.locale?.() ?? (document.documentElement.lang || "en-US");
   const messages = registry.getMessages();
@@ -416,19 +432,27 @@ export async function mountAgentAnnotations(
     shortcuts,
     exporters: exporters.map(({ id, extensionId }) => ({ id, extensionId })),
   });
+  uiSnapshot = snapshot();
+  const refreshChrome = () => {
+    flushSync(() => {
+      uiSnapshot = snapshot();
+      notifyUi();
+    });
+  };
   const emit = () => {
     if (destroyed) return;
-    const value = snapshot();
+    refreshChrome();
+    const value = uiSnapshot;
     for (const listener of listeners) listener(value);
   };
   const renderStatus = () => {
-    root.querySelector(".aa-status")?.remove();
+    overlayMount.querySelector(".aa-status")?.remove();
     if (!status) return;
     const toast = document.createElement("div");
     toast.className = "aa-status";
     toast.setAttribute("role", "status");
     toast.textContent = status;
-    root.append(toast);
+    overlayMount.append(toast);
   };
   const setStatus = (message: string) => {
     if (destroyed) return;
@@ -594,7 +618,7 @@ export async function mountAgentAnnotations(
     editingId = id;
     openPanel = null;
     render();
-    scheduleFrame(() => root.querySelector<HTMLElement>(".aa-editor textarea")?.focus());
+    scheduleFrame(() => overlayMount.querySelector<HTMLElement>(".aa-editor textarea")?.focus());
   };
 
   const api: StudioPublicApi = {
@@ -699,17 +723,8 @@ export async function mountAgentAnnotations(
     void execute();
   };
 
-  const renderIcon = (
-    node: HTMLElement,
-    Icon: ComponentType<AgentAnnotationsIconProps>
-  ): void => {
-    const mount = document.createElement("span");
-    mount.className = "aa-icon-slot";
-    node.append(mount);
-    const iconRoot = createRoot(mount);
-    iconRoots.push(iconRoot);
-    flushSync(() => iconRoot.render(createElement(Icon, { className: "aa-icon" })));
-  };
+  const iconMarkup = (Icon: ComponentType<AgentAnnotationsIconProps>): string =>
+    renderToStaticMarkup(createElement(Icon, { className: "aa-icon" }));
 
   const iconButton = (
     label: string,
@@ -722,7 +737,10 @@ export async function mountAgentAnnotations(
     node.className = "aa-action";
     node.setAttribute("aria-label", attributes["aria-label"] ?? label);
     for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, value);
-    renderIcon(node, Icon);
+    const slot = document.createElement("span");
+    slot.className = "aa-icon-slot";
+    slot.innerHTML = iconMarkup(Icon);
+    node.append(slot);
     if (action) node.addEventListener("click", action);
     node.addEventListener("mouseenter", () => showTooltip(node));
     node.addEventListener("mouseleave", hideTooltip);
@@ -743,10 +761,10 @@ export async function mountAgentAnnotations(
   const hideTooltip = () => {
     if (tooltipTimer !== null) cancelTimer(tooltipTimer);
     tooltipTimer = null;
-    root.querySelector(".aa-tooltip")?.remove();
+    overlayMount.querySelector(".aa-tooltip")?.remove();
   };
   const positionTooltip = (trigger: HTMLElement) => {
-    const tooltip = root.querySelector<HTMLElement>(".aa-tooltip");
+    const tooltip = overlayMount.querySelector<HTMLElement>(".aa-tooltip");
     if (!tooltip) return;
     const rect = trigger.getBoundingClientRect();
     tooltip.style.left = `${Math.max(4, rect.left)}px`;
@@ -760,7 +778,7 @@ export async function mountAgentAnnotations(
       tooltip.className = "aa-tooltip";
       tooltip.role = "tooltip";
       tooltip.textContent = trigger.getAttribute("aria-label") ?? "";
-      root.append(tooltip);
+      overlayMount.append(tooltip);
       positionTooltip(trigger);
     }, 300);
   };
@@ -772,7 +790,7 @@ export async function mountAgentAnnotations(
     Object.assign(node.style, {
       left: `${rect.x}px`, top: `${rect.y}px`, width: `${rect.width}px`, height: `${rect.height}px`,
     });
-    root.append(node);
+    overlayMount.append(node);
   };
 
   const renderMarkers = () => {
@@ -809,7 +827,7 @@ export async function mountAgentAnnotations(
       marker.hidden = !anchor;
       if (anchor) Object.assign(marker.style, { left: `${anchor.x}px`, top: `${anchor.y}px` });
       marker.addEventListener("click", () => focusAnnotation(annotation.annotationId));
-      root.append(marker);
+      overlayMount.append(marker);
     });
     return resolved;
   };
@@ -891,7 +909,7 @@ export async function mountAgentAnnotations(
         setStatus(error instanceof Error ? error.message : "Save failed");
       }
     });
-    root.append(surface);
+    overlayMount.append(surface);
     positionComposer();
     scheduleFrame(() => textarea.focus());
   };
@@ -910,7 +928,7 @@ export async function mountAgentAnnotations(
   };
 
   function positionComposer(): void {
-    const surface = root.querySelector<HTMLElement>(".aa-composer");
+    const surface = overlayMount.querySelector<HTMLElement>(".aa-composer");
     if (!surface || !composer) return;
     const anchor = composer.kind === "region"
       ? composer.rect
@@ -921,8 +939,8 @@ export async function mountAgentAnnotations(
   }
 
   const positionEditor = () => {
-    const surface = root.querySelector<HTMLElement>(".aa-editor");
-    const marker = Array.from(root.querySelectorAll<HTMLElement>(".aa-marker"))
+    const surface = overlayMount.querySelector<HTMLElement>(".aa-editor");
+    const marker = Array.from(overlayMount.querySelectorAll<HTMLElement>(".aa-marker"))
       .find((node) => node.dataset.annotationId === editingId);
     if (!surface || !marker || marker.hidden) return;
     const markerRect = marker.getBoundingClientRect();
@@ -982,7 +1000,7 @@ export async function mountAgentAnnotations(
         setStatus(error instanceof Error ? error.message : "Save failed");
       }
     });
-    root.append(surface);
+    overlayMount.append(surface);
     positionEditor();
   };
 
@@ -1010,126 +1028,215 @@ export async function mountAgentAnnotations(
     });
   };
 
-  const renderPanel = () => {
-    if (!openPanel) return;
-    const contribution = registry.getPanels().find(({ id }) => id === openPanel);
-    if (!contribution) return;
-    const panel = document.createElement("section");
-    panel.className = "aa-panel";
-    panel.setAttribute("role", "dialog");
-    panel.setAttribute("aria-modal", "false");
-    panel.tabIndex = -1;
-    panel.setAttribute("aria-label", localized(contribution.title));
-    const heading = document.createElement("h2");
-    heading.textContent = localized(contribution.title);
-    panel.append(heading);
-    const mount = document.createElement("div");
-    panel.append(mount);
-    root.append(panel);
-    panelRoot = createRoot(mount);
-    flushSync(() =>
-      panelRoot!.render(
-        createElement(PanelErrorBoundary, {
-          onError: (message) => record("console", `panel render failed: ${message}`),
-          children: createElement(contribution.render, {
-            studio: api,
-            close: () => api.commands.panels.close(contribution.id),
-          }),
-        })
-      )
-    );
-    positionPanel();
-    if (focusPanel) {
-      focusPanel = false;
-      scheduleFrame(() => {
-        const target = panel.querySelector<HTMLElement>(
-          "button,[href],input,select,textarea,[tabindex]:not([tabindex='-1'])"
-        );
-        if (target && target.isConnected) target.focus();
-        else if (panel.isConnected) panel.focus();
-      });
-    }
+  let drag: { x: number; y: number; left: number; top: number } | null = null;
+  let hoverOutline: HTMLElement | null = null;
+  let areaNode: HTMLElement | null = null;
+  let overlayFrame: number | null = null;
+
+  const ToolbarButton = (props: {
+    contribution: RegisteredToolbarContribution;
+    label: string;
+    shortcut?: StudioPublicSnapshot["shortcuts"][number];
+    current: StudioPublicSnapshot;
+  }): import("react").ReactNode => {
+    const ref = useRef<HTMLButtonElement | null>(null);
+    useLayoutEffect(() => {
+      const node = ref.current!;
+      const enter = () => showTooltip(node);
+      const leave = () => hideTooltip();
+      node.addEventListener("mouseenter", enter);
+      node.addEventListener("mouseleave", leave);
+      return () => {
+        node.removeEventListener("mouseenter", enter);
+        node.removeEventListener("mouseleave", leave);
+      };
+    }, []);
+    const { contribution, label, shortcut, current } = props;
+    const pressed = contribution.isPressed?.(current);
+    return createElement("button", {
+      ref,
+      key: contribution.id,
+      type: "button",
+      className: "aa-action",
+      disabled: pendingActions.has(contribution.id)
+        || contribution.isEnabled?.(current) === false,
+      "aria-label": `${label}${shortcut ? ` (${shortcut.formatted})` : ""}`,
+      "data-action-id": contribution.id,
+      ...(pressed !== undefined ? { "aria-pressed": String(pressed) } : {}),
+      ...(contribution.kind === "panel"
+        ? { "aria-expanded": String(current.openPanel === contribution.panelId) }
+        : {}),
+      ...(contribution.id === collapseAction ? { "data-toggle": "true" } : {}),
+      onClick: () => executeContribution(contribution),
+    }, createElement(contribution.icon, { className: "aa-icon" }));
   };
 
-  const render = () => {
+  const StudioChrome = (): import("react").ReactNode => {
+    studioRenders += 1;
+    hostElement.dataset.studioRenders = String(studioRenders);
+    const current = useSyncExternalStore(uiSubscribe, uiGetSnapshot);
+    const dockRef = useRef<HTMLDivElement | null>(null);
+    const gripRef = useRef<HTMLButtonElement | null>(null);
+    const panelRef = useRef<HTMLElement | null>(null);
+    const panelContribution = registry.getPanels().find(({ id }) => id === current.openPanel);
+
+    useLayoutEffect(() => {
+      const grip = gripRef.current!;
+      const enter = () => showTooltip(grip);
+      const leave = () => hideTooltip();
+      grip.addEventListener("mouseenter", enter);
+      grip.addEventListener("mouseleave", leave);
+      return () => {
+        grip.removeEventListener("mouseenter", enter);
+        grip.removeEventListener("mouseleave", leave);
+      };
+    }, []);
+
+    useLayoutEffect(() => {
+      positionPanel();
+      if (focusPanel && panelRef.current) {
+        focusPanel = false;
+        const panel = panelRef.current;
+        scheduleFrame(() => {
+          const target = panel.querySelector<HTMLElement>(
+            "button,[href],input,select,textarea,[tabindex]:not([tabindex='-1'])"
+          );
+          if (target && target.isConnected) target.focus();
+          else if (panel.isConnected) panel.focus();
+        });
+      }
+    });
+
+    return createElement("div", { className: "aa-chrome" },
+      createElement("div", {
+        ref: dockRef,
+        className: "aa-dock",
+        "data-collapsed": String(current.collapsed),
+        style: dockPosition
+          ? { left: `${dockPosition.left}px`, top: `${dockPosition.top}px`, bottom: "auto" }
+          : undefined,
+      },
+        createElement("button", {
+          ref: gripRef,
+          type: "button",
+          className: "aa-grip",
+          "aria-label": "Drag toolbar",
+          onPointerDown: (event: import("react").PointerEvent<HTMLButtonElement>) => {
+            const dock = dockRef.current!;
+            const rect = dock.getBoundingClientRect();
+            drag = { x: event.clientX, y: event.clientY, left: rect.left, top: rect.top };
+            event.currentTarget.setPointerCapture(event.pointerId);
+          },
+          onPointerMove: (event: import("react").PointerEvent<HTMLButtonElement>) => {
+            if (!drag || !dockRef.current) return;
+            dockPosition = {
+              left: Math.max(0, Math.min(innerWidth - dockRef.current.offsetWidth, drag.left + event.clientX - drag.x)),
+              top: Math.max(0, Math.min(innerHeight - dockRef.current.offsetHeight, drag.top + event.clientY - drag.y)),
+            };
+            dockRef.current.style.left = `${dockPosition.left}px`;
+            dockRef.current.style.top = `${dockPosition.top}px`;
+            dockRef.current.style.bottom = "auto";
+            positionTooltip(gripRef.current!);
+            positionPanel();
+          },
+          onPointerUp: () => { drag = null; },
+        }, createElement(GripIcon, { className: "aa-icon" })),
+        ...toolbar.flatMap((contribution) => {
+          const label = localized(contribution.label);
+          const shortcut = shortcuts.find(({ id }) => id === contribution.id);
+          if (contribution.isVisible?.(current) === false && contribution.id !== collapseAction) {
+            return [];
+          }
+          return [createElement(ToolbarButton, {
+            key: contribution.id,
+            contribution,
+            label,
+            shortcut,
+            current,
+          })];
+        })
+      ),
+      panelContribution
+        ? createElement("section", {
+            key: panelContribution.id,
+            ref: panelRef,
+            className: "aa-panel",
+            role: "dialog",
+            "aria-modal": "false",
+            tabIndex: -1,
+            "aria-label": localized(panelContribution.title),
+          },
+            createElement("h2", null, localized(panelContribution.title)),
+            createElement("div", null,
+              createElement(PanelErrorBoundary, {
+                onError: (message) => record("console", `panel render failed: ${message}`),
+                children: createElement(panelContribution.render, {
+                  studio: api,
+                  close: () => api.commands.panels.close(panelContribution.id),
+                }),
+              })
+            )
+          )
+        : null
+    );
+  };
+
+  const refreshInteractiveOverlays = () => {
+    overlayFrame = null;
+    if (destroyed) return;
+    if (captureMode === "idle" || captureMode === "area" || composer || !hover) {
+      hoverOutline?.remove();
+      hoverOutline = null;
+    } else {
+      if (!hoverOutline) {
+        hoverOutline = document.createElement("div");
+        hoverOutline.className = "aa-outline";
+        overlayMount.append(hoverOutline);
+      }
+      const rect = hover.getBoundingClientRect();
+      Object.assign(hoverOutline.style, {
+        left: `${rect.x}px`, top: `${rect.y}px`, width: `${rect.width}px`, height: `${rect.height}px`,
+      });
+    }
+    if (areaRect) {
+      if (!areaNode) {
+        areaNode = document.createElement("div");
+        areaNode.className = "aa-area";
+        overlayMount.append(areaNode);
+      }
+      Object.assign(areaNode.style, {
+        left: `${areaRect.x}px`, top: `${areaRect.y}px`, width: `${areaRect.width}px`, height: `${areaRect.height}px`,
+      });
+    } else {
+      areaNode?.remove();
+      areaNode = null;
+    }
+  };
+  const scheduleInteractiveOverlays = () => {
+    if (overlayFrame !== null) return;
+    overlayFrame = scheduleFrame(refreshInteractiveOverlays);
+  };
+
+  const refreshOverlays = () => {
     if (destroyed) return;
     hideTooltip();
-    panelRoot?.unmount();
-    panelRoot = null;
-    for (const iconRoot of iconRoots.splice(0)) iconRoot.unmount();
-    root.replaceChildren();
-    const dock = document.createElement("div");
-    dock.className = "aa-dock";
-    dock.dataset.collapsed = String(collapsed);
-    if (dockPosition) {
-      Object.assign(dock.style, {
-        left: `${dockPosition.left}px`,
-        top: `${dockPosition.top}px`,
-        bottom: "auto",
-      });
+    if (overlayFrame !== null) {
+      window.cancelAnimationFrame(overlayFrame);
+      frames.delete(overlayFrame);
+      overlayFrame = null;
     }
-    const grip = iconButton("Drag toolbar", GripIcon);
-    grip.className = "aa-grip";
-    dock.append(grip);
-    for (const contribution of toolbar) {
-      const current = snapshot();
-      if (
-        contribution.isVisible?.(current) === false &&
-        contribution.id !== collapseAction
-      ) continue;
-      const shortcut = shortcuts.find(({ id }) => id === contribution.id);
-      const label = localized(contribution.label);
-      const node = iconButton(label, contribution.icon, () => executeContribution(contribution), {
-        "aria-label": `${label}${shortcut ? ` (${shortcut.formatted})` : ""}`,
-        "data-action-id": contribution.id,
-        ...(contribution.isPressed
-          ? { "aria-pressed": String(contribution.isPressed(current)) }
-          : {}),
-        ...(contribution.kind === "panel"
-          ? { "aria-expanded": String(openPanel === contribution.panelId) }
-          : {}),
-      });
-      node.disabled = pendingActions.has(contribution.id)
-        || contribution.isEnabled?.(current) === false;
-      if (contribution.id === collapseAction) {
-        node.dataset.toggle = "true";
-      }
-      dock.append(node);
-    }
-    root.append(dock);
-
-    let drag: { x: number; y: number; left: number; top: number } | null = null;
-    grip.addEventListener("pointerdown", (event) => {
-      const rect = dock.getBoundingClientRect();
-      drag = { x: event.clientX, y: event.clientY, left: rect.left, top: rect.top };
-      grip.setPointerCapture(event.pointerId);
-    });
-    grip.addEventListener("pointermove", (event) => {
-      if (!drag) return;
-      dockPosition = {
-        left: Math.max(0, Math.min(innerWidth - dock.offsetWidth, drag.left + event.clientX - drag.x)),
-        top: Math.max(0, Math.min(innerHeight - dock.offsetHeight, drag.top + event.clientY - drag.y)),
-      };
-      dock.style.left = `${dockPosition.left}px`;
-      dock.style.top = `${dockPosition.top}px`;
-      dock.style.bottom = "auto";
-      positionTooltip(grip);
-      positionPanel();
-    });
-    grip.addEventListener("pointerup", () => { drag = null; });
+    overlayMount.replaceChildren();
+    // The shared tracked nodes were detached by replaceChildren: reset the references
+    // so the next interactive refresh re-creates them exactly once.
+    hoverOutline = null;
+    areaNode = null;
 
     const markerTargets = renderMarkers();
-    if (hover && captureMode !== "area") addOutline(hover.getBoundingClientRect());
     for (const element of selected) addOutline(element.getBoundingClientRect());
-    if (areaRect) {
-      const node = document.createElement("div");
-      node.className = "aa-area";
-      Object.assign(node.style, { left: `${areaRect.x}px`, top: `${areaRect.y}px`, width: `${areaRect.width}px`, height: `${areaRect.height}px` });
-      root.append(node);
-    }
+    // Hover and area outlines always go through the shared tracked nodes.
+    refreshInteractiveOverlays();
     renderComposer();
     renderEditor();
-    renderPanel();
     if (copyFallback) {
       const fallback = document.createElement("div");
       fallback.className = "aa-copy-fallback";
@@ -1142,7 +1249,7 @@ export async function mountAgentAnnotations(
       const close = iconButton("Close", CloseIcon, () => { copyFallback = ""; render(); });
       close.className = "aa-button aa-icon-button";
       fallback.append(textarea, close);
-      root.append(fallback);
+      overlayMount.append(fallback);
       scheduleFrame(() => textarea.select());
     }
     renderStatus();
@@ -1150,6 +1257,12 @@ export async function mountAgentAnnotations(
       ...markerTargets,
       ...(composer && composer.kind !== "region" ? composer.elements : []),
     ]);
+  };
+
+  const render = () => {
+    if (destroyed) return;
+    refreshOverlays();
+    refreshChrome();
   };
 
   const isHostEvent = (event: Event): boolean =>
@@ -1164,11 +1277,11 @@ export async function mountAgentAnnotations(
         width: Math.abs(event.clientX - areaStart.x),
         height: Math.abs(event.clientY - areaStart.y),
       };
-      render();
+      scheduleInteractiveOverlays();
       return;
     }
     hover = targetFromEvent(event) ?? targetAtPoint(event.clientX, event.clientY);
-    render();
+    scheduleInteractiveOverlays();
   };
   const onPointerDown = (event: PointerEvent) => {
     if (captureMode !== "area" || composer || isHostEvent(event)) return;
@@ -1272,9 +1385,16 @@ export async function mountAgentAnnotations(
   const onError = (event: ErrorEvent) => record("window", event.message);
   const onRejection = (event: PromiseRejectionEvent) => record("promise", event.reason);
   const originalConsoleError = console.error;
+  let recording = false;
   const onConsoleError = (...values: unknown[]) => {
     originalConsoleError.apply(console, values);
-    record("console", values.map(String).join(" "));
+    if (recording) return;
+    recording = true;
+    try {
+      record("console", values.map(String).join(" "));
+    } finally {
+      recording = false;
+    }
   };
   console.error = onConsoleError;
   cleanups.push(() => {
@@ -1361,7 +1481,7 @@ export async function mountAgentAnnotations(
       const resolved: Element[] = [];
       for (const annotation of task.annotations) {
         if (annotation.pageContext.routeKey !== routeKey) continue;
-        const marker = Array.from(root.querySelectorAll<HTMLElement>(".aa-marker"))
+        const marker = Array.from(overlayMount.querySelectorAll<HTMLElement>(".aa-marker"))
           .find((node) => node.dataset.annotationId === annotation.annotationId);
         if (!marker) continue;
         const target = annotation.targets?.[0]
@@ -1463,6 +1583,8 @@ export async function mountAgentAnnotations(
   window.addEventListener("scroll", onViewport, true);
   cleanups.push(() => window.removeEventListener("resize", onViewport));
   cleanups.push(() => window.removeEventListener("scroll", onViewport, true));
+  studioRoot = createRoot(uiMount);
+  flushSync(() => studioRoot!.render(createElement(StudioChrome)));
   render();
   const setupCleanups: Array<() => void> = [];
   try {
@@ -1471,7 +1593,8 @@ export async function mountAgentAnnotations(
       if (dispose) setupCleanups.push(dispose);
     }
   } catch (error) {
-    for (const iconRoot of iconRoots.splice(0)) iconRoot.unmount();
+    studioRoot?.unmount();
+    studioRoot = null;
     for (const dispose of setupCleanups.reverse()) dispose();
     for (const unregister of registrations.reverse()) unregister();
     for (const cleanup of cleanups.splice(0)) cleanup();
@@ -1481,13 +1604,14 @@ export async function mountAgentAnnotations(
   const unmount = () => {
     if (destroyed) return;
     destroyed = true;
-    panelRoot?.unmount();
-    panelRoot = null;
-    for (const iconRoot of iconRoots.splice(0)) iconRoot.unmount();
+    studioRoot?.unmount();
+    studioRoot = null;
+    delete hostElement.dataset.studioRenders;
     for (const dispose of setupCleanups.reverse()) dispose();
     for (const unregister of registrations.reverse()) unregister();
     for (const cleanup of cleanups.splice(0)) cleanup();
     listeners.clear();
+    uiListeners.clear();
     disposeInspectionEngine();
     hostElement.remove();
   };

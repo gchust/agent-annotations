@@ -1036,6 +1036,134 @@ describe("client runtime", () => {
     }
   });
 
+  it("renders the chrome through one stable root and preserves panel draft state", async () => {
+    let mounts = 0;
+    let renders = 0;
+    class DraftPanel extends Component<
+      { studio: StudioPublicApi; close(): void },
+      { count: number }
+    > {
+      state = { count: 0 };
+      componentDidMount(): void {
+        mounts += 1;
+      }
+      render() {
+        renders += 1;
+        return createElement(
+          "div",
+          null,
+          createElement("textarea", { "data-draft": "", defaultValue: "draft" }),
+          createElement("button", { type: "button", "data-bump": "", onClick: () => this.setState({ count: this.state.count + 1 }) }, `Count ${this.state.count}`)
+        );
+      }
+    }
+    const memory = new MemoryTaskTransport(taskFixture());
+    const mounted = await mountAgentAnnotations({
+      transport: memory,
+      extensions: [defineClientExtension({
+        id: "draft",
+        apiVersion: 1,
+        panels: [{ id: "draft", title: "Draft", render: DraftPanel }],
+      })],
+    });
+    const host = document.getElementById("agent-annotations-root")!;
+    const shadow = host.shadowRoot!;
+    try {
+      mounted.api.commands.panels.open("draft:draft");
+      const textarea = shadow.querySelector<HTMLTextAreaElement>("textarea[data-draft]")!;
+      textarea.value = "typed draft";
+      // Task, marker, and viewport updates must not remount the panel.
+      await mounted.api.commands.annotations.reopen("ann-1");
+      window.dispatchEvent(new Event("resize"));
+      mounted.api.commands.markers.hide();
+      mounted.api.commands.markers.show();
+      shadow.querySelector<HTMLButtonElement>("button[data-bump]")!.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(shadow.querySelector<HTMLTextAreaElement>("textarea[data-draft]")!.value)
+        .toBe("typed draft");
+      expect(shadow.querySelector<HTMLButtonElement>("button[data-bump]")!.textContent)
+        .toBe("Count 1");
+      expect(mounts).toBe(1);
+      expect(renders).toBeGreaterThan(1); // reconciled, not remounted
+    } finally {
+      mounted.unmount();
+    }
+  });
+
+  it("keeps one hover outline and a flat render counter across pointer movement and full renders", async () => {
+    const targetA = document.createElement("button");
+    const targetB = document.createElement("button");
+    targetA.getBoundingClientRect = () => new DOMRect(10, 10, 20, 20);
+    targetB.getBoundingClientRect = () => new DOMRect(100, 10, 20, 20);
+    document.body.append(targetA, targetB);
+    primitives.getElementAtPoint.mockImplementation(((x: number) => (x < 50 ? targetA : targetB)) as never);
+    const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport(taskFixture()) });
+    const host = document.getElementById("agent-annotations-root")!;
+    const shadow = host.shadowRoot!;
+    const move = (x: number) => document.dispatchEvent(new MouseEvent("pointermove", {
+      bubbles: true,
+      clientX: x,
+      clientY: 5,
+    }));
+    const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 50));
+    try {
+      mounted.api.commands.capture.startPick();
+      const afterStart = Number(host.dataset.studioRenders);
+      expect(afterStart).toBeGreaterThan(0);
+      for (let index = 0; index < 50; index += 1) move(index);
+      for (let index = 50; index < 100; index += 1) move(index);
+      await flush();
+      let outlines = shadow.querySelectorAll(".aa-outline");
+      expect(outlines).toHaveLength(1);
+      expect(outlines[0]!.getAttribute("style")).toContain("left: 100px"); // last event's target
+      expect(Number(host.dataset.studioRenders)).toBe(afterStart); // pointer movement stays flat
+
+      // A full render in between must not duplicate or stale the hover outline.
+      mounted.api.commands.markers.hide();
+      mounted.api.commands.markers.show();
+      const afterFullRender = Number(host.dataset.studioRenders);
+      expect(afterFullRender).toBeGreaterThan(afterStart);
+      for (let index = 0; index < 50; index += 1) move(index);
+      await flush();
+      outlines = shadow.querySelectorAll(".aa-outline");
+      expect(outlines).toHaveLength(1);
+      expect(outlines[0]!.getAttribute("style")).toContain("left: 10px");
+      expect(Number(host.dataset.studioRenders)).toBe(afterFullRender);
+
+      // The area outline follows the same shared node tracking.
+      mounted.api.commands.capture.startArea();
+      document.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, clientX: 10, clientY: 10 }));
+      document.dispatchEvent(new MouseEvent("pointermove", { bubbles: true, clientX: 100, clientY: 100 }));
+      await flush();
+      mounted.api.commands.markers.hide();
+      mounted.api.commands.markers.show();
+      document.dispatchEvent(new MouseEvent("pointermove", { bubbles: true, clientX: 120, clientY: 120 }));
+      await flush();
+      const areas = shadow.querySelectorAll(".aa-area");
+      expect(areas).toHaveLength(1);
+      expect(areas[0]!.getAttribute("style")).toContain("width: 110px");
+    } finally {
+      mounted.unmount();
+      targetA.remove();
+      targetB.remove();
+    }
+  });
+
+  it("renders toolbar icons through the single root and cleans up on unmount", async () => {
+    const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport() });
+    const host = document.getElementById("agent-annotations-root")!;
+    const shadow = host.shadowRoot!;
+    try {
+      const pick = shadow.querySelector<HTMLButtonElement>('[aria-label^="Pick"]')!;
+      expect(pick.querySelector("svg")).not.toBeNull();
+      expect(host.dataset.studioRenders).toBeTruthy();
+    } finally {
+      mounted.unmount();
+    }
+    expect(shadow.querySelector("svg")).toBeNull();
+    expect(host.dataset.studioRenders).toBeUndefined();
+  });
+
   it("runs setup and dispose exactly once per mount and unmount", async () => {
     const setup = vi.fn();
     const dispose = vi.fn();
