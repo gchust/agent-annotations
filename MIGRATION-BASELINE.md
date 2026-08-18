@@ -29,11 +29,10 @@ rg --files tests e2e | rg -i 'portal-studio|react-grab-g01' | wc -l
 49
 ```
 
-All 44 `src/studio/**` files are TypeScript or TSX. The five public Studio scripts are:
+All 44 `src/studio/**` files are TypeScript or TSX. The four public Studio scripts are:
 
 - `scripts/portal-studio-agent.mjs`
 - `scripts/portal-studio-inspection-audit.ts`
-- `scripts/portal-studio-mcp.mjs`
 - `scripts/portal-studio-print.mjs`
 - `scripts/portal-studio-verify.mjs`
 
@@ -60,7 +59,6 @@ studio:complete
 studio:reopen
 studio:print
 studio:verify
-studio:mcp
 studio:inspection:audit
 ```
 

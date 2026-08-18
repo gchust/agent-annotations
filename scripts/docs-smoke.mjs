@@ -10,9 +10,11 @@ for (const text of [
   "agent-annotations reopen <annotation-id>",
   "agent-annotations print [--json|--markdown]",
   "agent-annotations verify",
-  "agent-annotations mcp",
   "agent-annotations audit",
 ]) {
   if (!readme.includes(text)) throw new Error(`README example missing: ${text}`);
+}
+if (/\bmcp\b/i.test(readme)) {
+  throw new Error("README must not mention MCP");
 }
 console.log("[agent-annotations] docs smoke PASS");

@@ -1,4 +1,4 @@
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -6,8 +6,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createAgentAnnotationsTask } from "../../src/core/index.js";
-import { createSourcePathService } from "../../src/server/source-path.js";
-import { annotationFixture, targetFixture } from "../core/test-data.js";
+import { annotationFixture } from "../core/test-data.js";
 
 const script = path.resolve("dist/cli/index.mjs");
 const roots: string[] = [];
@@ -31,42 +30,29 @@ const run = (root: string, args: string[]) => execFileSync(process.execPath, [sc
   env: { ...process.env, AGENT_ANNOTATIONS_DIR: root },
 });
 
-const sourceFixture = () => {
-  const workspace = mkdtempSync(path.join(tmpdir(), "agent-annotations-cli-source-"));
-  roots.push(workspace);
-  const runtime = path.join(workspace, ".agent-annotations");
-  const selected = path.join(workspace, "src/a/Card.tsx");
-  const wrong = path.join(workspace, "src/b/Card.tsx");
-  mkdirSync(path.dirname(selected), { recursive: true });
-  mkdirSync(path.dirname(wrong), { recursive: true });
-  mkdirSync(path.join(runtime, "tasks"), { recursive: true });
-  writeFileSync(selected, "export const A = 1;\n");
-  writeFileSync(wrong, "export const B = 1;\n");
-  const task = createAgentAnnotationsTask({
-    taskId: "task-source",
-    createdAt: "2026-08-12T12:00:00.000Z",
-    annotations: [annotationFixture({
-      targets: [targetFixture({
-        inspection: {
-          ...targetFixture().inspection,
-          source: { filePath: "src/a/Card.tsx", lineNumber: 1, columnNumber: 14, componentName: "A" },
-          sourceStack: [],
-        },
-      })],
-    })],
-  });
-  writeFileSync(path.join(runtime, "tasks/active-task.json"), JSON.stringify(task));
-  return { workspace, runtime, selected, wrong, task };
+const runExpectingFailure = (root: string, args: string[]): { status: number; stdout: string; stderr: string } => {
+  try {
+    execFileSync(process.execPath, [script, ...args], {
+      encoding: "utf8",
+      env: { ...process.env, AGENT_ANNOTATIONS_DIR: root },
+    });
+  } catch (error) {
+    const e = error as { status?: number; stdout?: string; stderr?: string };
+    return { status: e.status ?? -1, stdout: e.stdout ?? "", stderr: e.stderr ?? "" };
+  }
+  throw new Error(`expected ${args.join(" ")} to fail`);
 };
 
 describe("public CLI processes", () => {
   it("shows help from the built public binary", () => {
-    expect(run(fixture(), ["--help"])).toContain("Usage: agent-annotations");
+    const help = run(fixture(), ["--help"]);
+    expect(help).toContain("Usage: agent-annotations");
+    expect(help).not.toContain("mcp");
   });
 
   it("runs every command help plus list, complete, reopen, print, and verify", () => {
     const root = fixture();
-    for (const command of ["list", "complete", "reopen", "print", "verify", "mcp", "audit"]) {
+    for (const command of ["list", "complete", "reopen", "print", "verify", "audit"]) {
       expect(run(root, [command, "--help"])).toContain("Agent Annotations");
     }
     expect(run(root, ["list"])).toContain("ann-1");
@@ -77,90 +63,9 @@ describe("public CLI processes", () => {
     expect(JSON.parse(run(root, ["verify"]))).toMatchObject({ ok: true, taskId: "task-cli", taskRevision: 2 });
   });
 
-  it("offers read-only MCP initialize, tools/list, and task reads", async () => {
-    const root = fixture();
-    const child = spawn(process.execPath, [script, "mcp"], {
-      env: { ...process.env, AGENT_ANNOTATIONS_DIR: root },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    const requests = [
-      { jsonrpc: "2.0", id: 1, method: "initialize", params: {} },
-      { jsonrpc: "2.0", id: 2, method: "tools/list" },
-      { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "print_task", arguments: {} } },
-    ];
-    const responses = await new Promise<any[]>((resolve, reject) => {
-      const values: any[] = [];
-      let buffer = "";
-      child.stdout.on("data", (chunk) => {
-        buffer += String(chunk);
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-        for (const line of lines) if (line) values.push(JSON.parse(line));
-        if (values.length === requests.length) resolve(values);
-      });
-      child.on("error", reject);
-      for (const request of requests) child.stdin.write(`${JSON.stringify(request)}\n`);
-    });
-    child.kill();
-    expect(responses[0].result.serverInfo.name).toBe("agent-annotations");
-    const tools = responses[1].result.tools;
-    expect(tools.map((tool: { name: string }) => tool.name)).toEqual([
-      "list_annotations",
-      "print_task",
-      "verify_task",
-      "read_diagnostics",
-      "list_screenshots",
-      "wait_verification",
-    ]);
-    expect(JSON.stringify(tools)).not.toMatch(/capture_task|portal.studio|schema v[2-9]/i);
-    expect(responses[2].result.content[0].text).toContain("agent-annotations.task.v1");
-
-    const unknown = spawn(process.execPath, [script, "mcp"], {
-      env: { ...process.env, AGENT_ANNOTATIONS_DIR: root },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    const failed = await new Promise<any>((resolve) => {
-      unknown.stdout.once("data", (chunk) => resolve(JSON.parse(String(chunk))));
-      unknown.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "capture_task" } })}\n`);
-    });
-    unknown.kill();
-    expect(failed.result).toMatchObject({ isError: true });
-  });
-
-  it("waits on the exact source revision in a real MCP process", async () => {
-    const { workspace, runtime, selected, wrong, task } = sourceFixture();
-    const baseline = createSourcePathService(workspace).revision(task);
-    const child = spawn(process.execPath, [script, "mcp"], {
-      cwd: workspace,
-      env: { ...process.env, AGENT_ANNOTATIONS_DIR: runtime },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    let settled = false;
-    const response = new Promise<any>((resolve, reject) => {
-      child.stdout.once("data", (chunk) => {
-        settled = true;
-        resolve(JSON.parse(String(chunk)));
-      });
-      child.once("error", reject);
-    });
-    child.stdin.write(`${JSON.stringify({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "tools/call",
-      params: { name: "wait_verification", arguments: { sourceRevision: baseline, timeoutMs: 2_000 } },
-    })}\n`);
-    writeFileSync(wrong, "export const B = 2;\n");
-    await new Promise((resolve) => setTimeout(resolve, 250));
-    expect(settled).toBe(false);
-    writeFileSync(selected, "export const A = 2;\n");
-    const result = await response;
-    child.kill();
-    const payload = JSON.parse(result.result.content[0].text);
-    expect(payload).toEqual({
-      changed: true,
-      sourceRevision: createSourcePathService(workspace).revision(task),
-    });
-    expect(payload.sourceRevision).not.toBe(baseline);
-    expect(payload).not.toHaveProperty("taskRevision");
+  it("rejects mcp as an unknown command with exit code 2", () => {
+    const result = runExpectingFailure(fixture(), ["mcp"]);
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("unknown command: mcp");
   });
 });

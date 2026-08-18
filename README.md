@@ -78,16 +78,12 @@ agent-annotations complete <annotation-id> --verified --summary <text>
 agent-annotations reopen <annotation-id>
 agent-annotations print [--json|--markdown]
 agent-annotations verify
-agent-annotations mcp
 agent-annotations audit
 ```
 
-The MCP server is read-only. It exposes annotation/task reads, diagnostics,
-screenshot references, and bounded exact-source revision verification through
-`wait_verification({ sourceRevision, timeoutMs? })`; it cannot capture or
-create tasks. `audit` enforces the package's single React Grab engine and bans
-legacy source fallbacks, basename lookup, old schemas, host coupling, and
-built-in Registry bypasses.
+`audit` enforces the package's single React Grab engine and bans legacy source
+fallbacks, basename lookup, old schemas, host coupling, and built-in Registry
+bypasses.
 
 ## Security
 

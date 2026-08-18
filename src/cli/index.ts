@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 
 import {
@@ -7,7 +7,6 @@ import {
   parseAgentAnnotationsTask,
 } from "../core/index.js";
 import { FileTaskStore } from "../server/store.js";
-import { createSourcePathService } from "../server/source-path.js";
 import type { AgentAnnotationsMutationOperation, AgentAnnotationsTask } from "../types/index.js";
 
 const HELP = `Agent Annotations 0.1.0-alpha.0
@@ -20,7 +19,6 @@ Commands:
   reopen <annotation-id>
   print [--json|--markdown]
   verify
-  mcp
   audit
 `;
 
@@ -38,34 +36,6 @@ const task = (): AgentAnnotationsTask => {
   const found = new FileTaskStore(runtimeRoot()).read();
   if (!found) return fail(`no task found at ${path.join(runtimeRoot(), "tasks", "active-task.json")}`);
   return found;
-};
-
-const readMcpTask = (): AgentAnnotationsTask => {
-  const found = new FileTaskStore(runtimeRoot()).read();
-  if (!found) throw new Error(`no task found at ${path.join(runtimeRoot(), "tasks", "active-task.json")}`);
-  return found;
-};
-
-const sourceRevision = (current: AgentAnnotationsTask): string =>
-  createSourcePathService(process.cwd()).revision(current);
-
-const readDiagnostics = (): unknown => {
-  try {
-    return JSON.parse(readFileSync(path.join(runtimeRoot(), "diagnostics.json"), "utf8"));
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
-    throw error;
-  }
-};
-
-const screenshots = (): string[] => {
-  const directory = path.join(runtimeRoot(), "evidence");
-  try {
-    return readdirSync(directory).filter((file) => file.endsWith(".png")).sort().map((file) => `evidence/${file}`);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
-    throw error;
-  }
 };
 
 const parseMutationArgs = (command: "complete" | "reopen", args: string[]): {
@@ -113,107 +83,6 @@ const mutate = async (command: "complete" | "reopen", args: string[]): Promise<v
   process.stdout.write(`${command === "complete" ? "completed" : "reopened"} ${annotationId} (taskRevision ${next.taskRevision})\n`);
 };
 
-const TOOLS = [
-  {
-    name: "list_annotations",
-    description: "Read the active Agent Annotations task and list its annotations.",
-    inputSchema: { type: "object", properties: {} },
-  },
-  {
-    name: "print_task",
-    description: "Read the active Agent Annotations task as schema v1 JSON.",
-    inputSchema: { type: "object", properties: {} },
-  },
-  {
-    name: "verify_task",
-    description: "Read and validate the active agent-annotations.task.v1 task without changing it.",
-    inputSchema: { type: "object", properties: {} },
-  },
-  {
-    name: "read_diagnostics",
-    description: "Read the persisted Agent Annotations runtime diagnostics without changing state.",
-    inputSchema: { type: "object", properties: {} },
-  },
-  {
-    name: "list_screenshots",
-    description: "List persisted PNG screenshot evidence references without changing state.",
-    inputSchema: { type: "object", properties: {} },
-  },
-  {
-    name: "wait_verification",
-    description: "Boundedly wait until the exact source revision for the active agent-annotations.task.v1 differs from a caller-provided revision.",
-    inputSchema: {
-      type: "object",
-      properties: { sourceRevision: { type: "string" }, timeoutMs: { type: "number" } },
-      required: ["sourceRevision"],
-    },
-  },
-] as const;
-
-const mcp = async (): Promise<void> => {
-  process.stdin.setEncoding("utf8");
-  let buffer = "";
-  for await (const chunk of process.stdin) {
-    buffer += chunk;
-    const lines = buffer.split("\n");
-    buffer = lines.pop() ?? "";
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      let request: { id?: unknown; method?: string; params?: { name?: string; arguments?: Record<string, unknown> } };
-      try {
-        request = JSON.parse(line);
-      } catch {
-        process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "parse error" } })}\n`);
-        continue;
-      }
-      if (request.id === undefined) continue;
-      try {
-        let result: unknown;
-        if (request.method === "initialize") {
-          result = { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "agent-annotations", version: "0.1.0-alpha.0" } };
-        } else if (request.method === "tools/list") {
-          result = { tools: TOOLS };
-        } else if (request.method === "tools/call") {
-          const name = request.params?.name;
-          const args = request.params?.arguments ?? {};
-          let text: string;
-          if (name === "read_diagnostics") text = JSON.stringify(readDiagnostics(), null, 2);
-          else if (name === "list_screenshots") text = JSON.stringify(screenshots(), null, 2);
-          else if (name === "wait_verification") {
-            const baseline = args.sourceRevision;
-            const timeoutMs = Math.min(Math.max(Number(args.timeoutMs ?? 10_000), 0), 30_000);
-            if (typeof baseline !== "string" || !/^[a-f\d]{64}$/.test(baseline) || !Number.isFinite(timeoutMs)) {
-              throw new Error("wait_verification requires a SHA-256 sourceRevision and optional finite timeoutMs");
-            }
-            const deadline = Date.now() + timeoutMs;
-            let current = readMcpTask();
-            let revision = sourceRevision(current);
-            while (revision === baseline && Date.now() < deadline) {
-              await new Promise((resolve) => setTimeout(resolve, 100));
-              current = readMcpTask();
-              revision = sourceRevision(current);
-            }
-            text = JSON.stringify({ changed: revision !== baseline, sourceRevision: revision });
-          } else {
-            const current = readMcpTask();
-            text = name === "list_annotations"
-              ? current.annotations.map((annotation) => `${annotation.annotationId}: ${annotation.comment}`).join("\n") || "No annotations."
-              : name === "print_task" || name === "verify_task"
-                ? JSON.stringify(current, null, 2)
-                : (() => { throw new Error(`unknown tool: ${name}`); })();
-          }
-          result = { content: [{ type: "text", text }], isError: false };
-        } else {
-          throw new Error(`unsupported method: ${request.method}`);
-        }
-        process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: request.id, result })}\n`);
-      } catch (error) {
-        process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: request.id, result: { content: [{ type: "text", text: (error as Error).message }], isError: true } })}\n`);
-      }
-    }
-  }
-};
-
 const main = async (): Promise<void> => {
   const [command, ...args] = process.argv.slice(2);
   if (!command || command === "--help" || command === "-h" || command === "help") {
@@ -241,7 +110,6 @@ const main = async (): Promise<void> => {
     process.stdout.write(`${JSON.stringify({ ok: true, taskId: verified.taskId, taskRevision: verified.taskRevision })}\n`);
     return;
   }
-  if (command === "mcp") return mcp();
   if (command === "audit") {
     const { runArchitectureAudit } = await import("../audit/index.js");
     const result = runArchitectureAudit(process.cwd());

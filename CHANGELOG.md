@@ -5,7 +5,7 @@
 - Ships as `@gchust/agent-annotations`; the `agent-annotations` CLI and task schema
   identifiers remain unchanged.
 - Added the host-neutral `agent-annotations.task.v1` schema, mutations, formatting,
-  redaction, React runtime, Vite plugin, file transport, CLI, and read-only MCP.
+  redaction, React runtime, Vite plugin, file transport, and CLI.
 - Added the public client Extension Registry and built-in toolbar contributions.
 - Added exact source verification, screenshot evidence, iframe and Shadow Root
   marker recovery, bounded Area capture, and development-only production exclusion.
