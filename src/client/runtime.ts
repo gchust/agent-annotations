@@ -1177,13 +1177,15 @@ export async function mountAgentAnnotations(
   };
   const record = (source: AgentAnnotationsDiagnosticsEntry["source"], value: unknown) => {
     if (destroyed) return;
-    diagnostics.push({
+    const entry: AgentAnnotationsDiagnosticsEntry = {
       source,
       message: redactAgentAnnotationsText(String(value), { maxLength: 500 }),
       timestamp: now(),
-    });
+    };
+    diagnostics.push(entry);
     if (diagnostics.length > 20) diagnostics.shift();
     emit();
+    void options.transport.appendDiagnostics?.([entry]).catch(() => undefined);
   };
   const onError = (event: ErrorEvent) => record("window", event.message);
   const onRejection = (event: PromiseRejectionEvent) => record("promise", event.reason);

@@ -60,6 +60,18 @@ function ReliabilityFixtures() {
   </>;
 }
 
+// Static fixture kept outside the re-rendering ReliabilityFixtures so the capture
+// sanitization never mutates the live DOM during the dynamic marker refresh window.
+function PrivacyFixtures() {
+  return <div id="privacy-fixture" style={{ display: "flex", gap: 12, padding: 16, background: "rgb(240, 240, 240)" }}>
+    <input id="privacy-input" defaultValue="SENTINEL_INPUT" style={{ width: 160, height: 32, background: "rgb(220, 40, 40)" }} />
+    <input id="privacy-password" type="password" defaultValue="SENTINEL_PASSWORD" style={{ width: 160, height: 32, background: "rgb(40, 180, 40)" }} />
+    <textarea id="privacy-textarea" defaultValue="SENTINEL_AREA" style={{ width: 200, height: 64, background: "rgb(40, 40, 220)" }} />
+    <div id="privacy-editable" contentEditable style={{ width: 160, height: 48, background: "rgb(220, 180, 40)" }} dangerouslySetInnerHTML={{ __html: "SENTINEL_EDITABLE" }} />
+    <button id="privacy-capture-target" style={{ width: 120, height: 48, background: "rgb(200, 200, 200)" }}>Capture</button>
+  </div>;
+}
+
 function Home() {
   const [portal, setPortal] = useState(false);
   return <main>
@@ -72,6 +84,7 @@ function Home() {
     <button id="portal-toggle" onClick={() => setPortal(true)}>Open Portal target</button>
     {portal ? createPortal(<button id="portal-target">Portal target</button>, document.body) : null}
     <RealmFixtures />
+    <PrivacyFixtures />
     <ReliabilityFixtures />
   </main>;
 }

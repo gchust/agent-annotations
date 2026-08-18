@@ -78,7 +78,14 @@ agent-annotations complete <annotation-id> --verified --summary <text>
 agent-annotations reopen <annotation-id>
 agent-annotations print [--json|--markdown]
 agent-annotations verify
+agent-annotations diagnostics [--json|--clear]
+agent-annotations evidence [--json]
 ```
+
+`diagnostics` prints the bounded redacted browser diagnostics persisted under
+`.agent-annotations` (with `--clear` emptying only diagnostics); `evidence`
+lists task-referenced screenshot files with their annotation ids and never
+touches files outside the runtime evidence directory.
 
 ## Security
 

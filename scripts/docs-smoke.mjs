@@ -13,6 +13,8 @@ for (const text of [
   `${bin} reopen <annotation-id>`,
   `${bin} print [--json|--markdown]`,
   `${bin} verify`,
+  `${bin} diagnostics [--json|--clear]`,
+  `${bin} evidence [--json]`,
 ]) {
   if (!readme.includes(text)) throw new Error(`README example missing: ${text}`);
 }

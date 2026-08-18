@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -62,6 +62,97 @@ describe("file task store", () => {
     });
     const reference = evidenced.annotations[0].evidence?.[0].ref;
     expect(readFileSync(path.join(store.root, reference!))).toEqual(png);
+  });
+
+  it("keeps unrelated evidence files during ordinary mutations", async () => {
+    const store = new FileTaskStore(root());
+    const task = store.readOrCreate();
+    mkdirSync(path.join(store.root, "evidence"), { recursive: true });
+    writeFileSync(path.join(store.root, "evidence", "unrelated.png"), "x");
+    await store.mutate({
+      taskId: task.taskId,
+      expectedRevision: 0,
+      operations: [{ op: "add", annotation: annotationFixture() }],
+    });
+    expect(existsSync(path.join(store.root, "evidence", "unrelated.png"))).toBe(true);
+  });
+
+  it("preserves a shared evidence ref while any annotation still references it", async () => {
+    const store = new FileTaskStore(root());
+    const task = store.readOrCreate();
+    const added = await store.mutate({
+      taskId: task.taskId,
+      expectedRevision: 0,
+      operations: [{ op: "add", annotation: annotationFixture() }],
+    });
+    const shared = await store.mutate({
+      taskId: added.taskId,
+      expectedRevision: 1,
+      operations: [
+        { op: "add", annotation: annotationFixture({ annotationId: "ann-2" }) },
+        { op: "addEvidence", annotationId: "ann-1", evidence: { kind: "screenshot", ref: "evidence/shared.png", mediaType: "image/png" } },
+        { op: "addEvidence", annotationId: "ann-2", evidence: { kind: "screenshot", ref: "evidence/shared.png", mediaType: "image/png" } },
+      ],
+    });
+    mkdirSync(path.join(store.root, "evidence"), { recursive: true });
+    writeFileSync(path.join(store.root, "evidence", "shared.png"), "png");
+    await store.mutate({
+      taskId: shared.taskId,
+      expectedRevision: 2,
+      operations: [{ op: "remove", annotationId: "ann-1" }],
+    });
+    expect(existsSync(path.join(store.root, "evidence", "shared.png"))).toBe(true);
+    await store.mutate({
+      taskId: shared.taskId,
+      expectedRevision: 3,
+      operations: [{ op: "remove", annotationId: "ann-2" }],
+    });
+    expect(existsSync(path.join(store.root, "evidence", "shared.png"))).toBe(false);
+  });
+
+  it("deletes orphan evidence after remove and remove-completed", async () => {
+    const store = new FileTaskStore(root());
+    const task = store.readOrCreate();
+    const added = await store.mutate({
+      taskId: task.taskId,
+      expectedRevision: 0,
+      operations: [{ op: "add", annotation: annotationFixture() }],
+    });
+    const png = Buffer.from("89504e470d0a1a0a00000000", "hex");
+    const evidenced = await store.writeEvidence(
+      { taskId: added.taskId, expectedRevision: 1, operations: [] },
+      { annotationId: "ann-1", bytes: png, mediaType: "image/png", width: 1600, height: 900 }
+    );
+    const reference = evidenced.annotations[0].evidence?.[0].ref!;
+    expect(existsSync(path.join(store.root, reference))).toBe(true);
+    await store.mutate({
+      taskId: added.taskId,
+      expectedRevision: 2,
+      operations: [{ op: "remove", annotationId: "ann-1" }],
+    });
+    expect(existsSync(path.join(store.root, reference))).toBe(false);
+
+    const second = await store.mutate({
+      taskId: added.taskId,
+      expectedRevision: 3,
+      operations: [{ op: "add", annotation: annotationFixture({ annotationId: "ann-2" }) }],
+    });
+    const evidenced2 = await store.writeEvidence(
+      { taskId: second.taskId, expectedRevision: 4, operations: [] },
+      { annotationId: "ann-2", bytes: png, mediaType: "image/png", width: 1600, height: 900 }
+    );
+    const reference2 = evidenced2.annotations[0].evidence?.[0].ref!;
+    await store.mutate({
+      taskId: second.taskId,
+      expectedRevision: 5,
+      operations: [{ op: "complete", annotationId: "ann-2" }],
+    });
+    await store.mutate({
+      taskId: second.taskId,
+      expectedRevision: 6,
+      operations: [{ op: "removeCompleted" }],
+    });
+    expect(existsSync(path.join(store.root, reference2))).toBe(false);
   });
 
   it("redacts secrets from update comments before persistence", async () => {

@@ -5,6 +5,9 @@
 - `mountAgentAnnotations(options)` mounts the React runtime and returns
   `{ api, unmount }`. `options.transport` implements `TaskTransport`; optional
   `options.extensions` uses public client extensions.
+- `TaskTransport` requires `read`/`mutate` and may add `writeEvidence`,
+  `subscribe`, and `appendDiagnostics` (browser diagnostics are persisted
+  through `HttpTaskTransport` and bounded/redacted server-side).
 - `createAgentAnnotationsTask`, `parseAgentAnnotationsTask`,
   `validateAgentAnnotationsTask`, and `isAgentAnnotationsTask` own schema v1.
 - `applyAgentAnnotationsMutation` applies revision-checked task operations.
@@ -57,3 +60,7 @@ persistent production transport.
 Exports `HttpTaskTransport`, the browser transport used by the Vite virtual
 client. Applications normally receive it through automatic development-server
 injection rather than importing it directly.
+
+Screenshot evidence is written only inside the runtime `evidence` directory;
+`evidence` CLI listings and post-removal cleanup resolve refs strictly inside
+that directory and never follow traversal or symlink paths.

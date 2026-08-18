@@ -6,6 +6,8 @@ import {
   formatAgentAnnotationsTask,
   parseAgentAnnotationsTask,
 } from "../core/index.js";
+import { clearDiagnostics, readDiagnostics } from "../server/diagnostics.js";
+import { listEvidence } from "../server/evidence.js";
 import { FileTaskStore } from "../server/store.js";
 import { PACKAGE_VERSION } from "../metadata.js";
 import type { AgentAnnotationsMutationOperation, AgentAnnotationsTask } from "../types/index.js";
@@ -20,6 +22,8 @@ Commands:
   reopen <annotation-id>
   print [--json|--markdown]
   verify
+  diagnostics [--json|--clear]
+  evidence [--json]
 `;
 
 const runtimeRoot = (): string => path.resolve(
@@ -108,6 +112,41 @@ const main = async (): Promise<void> => {
   if (command === "verify") {
     const verified = parseAgentAnnotationsTask(JSON.parse(readFileSync(path.join(runtimeRoot(), "tasks", "active-task.json"), "utf8")));
     process.stdout.write(`${JSON.stringify({ ok: true, taskId: verified.taskId, taskRevision: verified.taskRevision })}\n`);
+    return;
+  }
+  if (command === "diagnostics") {
+    const json = args.includes("--json");
+    const clear = args.includes("--clear");
+    const unknown = args.filter((arg) => arg !== "--json" && arg !== "--clear");
+    if (unknown.length) return fail(`unknown option: ${unknown[0]}`, 2);
+    if (clear) {
+      clearDiagnostics(runtimeRoot());
+      if (json) process.stdout.write("[]\n");
+      return;
+    }
+    const entries = readDiagnostics(runtimeRoot());
+    if (json) {
+      process.stdout.write(`${JSON.stringify(entries)}\n`);
+    } else {
+      for (const entry of entries) {
+        process.stdout.write(`[${entry.source}] ${entry.timestamp} ${entry.message}\n`);
+      }
+    }
+    return;
+  }
+  if (command === "evidence") {
+    const json = args.includes("--json");
+    const unknown = args.filter((arg) => arg !== "--json");
+    if (unknown.length) return fail(`unknown option: ${unknown[0]}`, 2);
+    const current = new FileTaskStore(runtimeRoot()).read();
+    const entries = current ? listEvidence(runtimeRoot(), current) : [];
+    if (json) {
+      process.stdout.write(`${JSON.stringify(entries)}\n`);
+    } else {
+      for (const entry of entries) {
+        process.stdout.write(`${entry.ref} (${entry.size} bytes) ${entry.annotationIds.join(",")}\n`);
+      }
+    }
     return;
   }
   fail(`unknown command: ${command}`, 2);

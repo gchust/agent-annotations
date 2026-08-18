@@ -1,4 +1,5 @@
 import type {
+  AgentAnnotationsDiagnosticsEntry,
   AgentAnnotationsMutationRequest,
   AgentAnnotationsTask,
   TaskTransport,
@@ -69,6 +70,15 @@ export class HttpTaskTransport implements TaskTransport {
     const payload = await response.json() as { error?: string; task?: AgentAnnotationsTask };
     if (!response.ok || !payload.task) throw new Error(payload.error ?? "request_failed");
     return payload.task;
+  }
+
+  async appendDiagnostics(entries: AgentAnnotationsDiagnosticsEntry[]): Promise<void> {
+    const response = await fetch(`${this.endpoint}/diagnostics`, {
+      method: "POST",
+      headers: { [TOKEN_HEADER]: this.token, "content-type": "application/json" },
+      body: JSON.stringify({ entries }),
+    });
+    if (!response.ok) throw new Error("diagnostics_append_failed");
   }
 
   subscribe(listener: (task: AgentAnnotationsTask) => void): () => void {

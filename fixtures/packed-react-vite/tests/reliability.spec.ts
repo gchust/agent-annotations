@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 import { expect, test } from "@playwright/test";
@@ -118,6 +118,82 @@ test("region is bounded and semantic target survives wrapper-heavy sampling", as
     await page.keyboard.press("Escape");
   }
   console.log(`area-69 worstDurationMs=${Math.max(...durations)}`);
+});
+
+test("screenshot sanitizes form values while preserving layout", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto("/");
+  const fixture = page.locator("#privacy-fixture");
+  await fixture.scrollIntoViewIfNeeded();
+  const before = await fixture.boundingBox();
+  expect(before).not.toBeNull();
+  await save(page, page.locator("#privacy-capture-target"), "Privacy evidence");
+  await expect.poll(() => JSON.parse(readFileSync(taskPath, "utf8")).annotations.at(-1)?.evidence?.length ?? 0, { timeout: 10_000 }).toBe(1);
+  const task = JSON.parse(readFileSync(taskPath, "utf8"));
+  const annotation = task.annotations.at(-1);
+  const evidence = annotation.evidence.at(-1);
+  const png = readFileSync(path.join(runtimeRoot, evidence.ref));
+  expect(png.subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a");
+  // The live DOM is untouched: sentinel values are still present.
+  expect(await page.locator("#privacy-input").inputValue()).toBe("SENTINEL_INPUT");
+  expect(await page.locator("#privacy-password").inputValue()).toBe("SENTINEL_PASSWORD");
+  expect(await page.locator("#privacy-textarea").inputValue()).toBe("SENTINEL_AREA");
+  expect(await page.locator("#privacy-editable").textContent()).toBe("SENTINEL_EDITABLE");
+  // Layout is preserved after the capture.
+  const after = await fixture.boundingBox();
+  expect(after).toEqual(before);
+  // The captured image visibly renders each control at its live position.
+  const samples = await page.evaluate(async (base64) => {
+    const image = new Image();
+    image.src = `data:image/png;base64,${base64}`;
+    await image.decode();
+    const canvas = document.createElement("canvas");
+    canvas.width = image.width;
+    canvas.height = image.height;
+    const context = canvas.getContext("2d")!;
+    context.drawImage(image, 0, 0);
+    const scale = image.width / innerWidth;
+    const sample = (selector: string) => {
+      const rect = document.querySelector<HTMLElement>(selector)!.getBoundingClientRect();
+      const data = context.getImageData(
+        Math.round((rect.x + rect.width / 2) * scale),
+        Math.round((rect.y + rect.height / 2) * scale),
+        1,
+        1
+      ).data;
+      return [data[0], data[1], data[2]];
+    };
+    return {
+      width: image.width,
+      height: image.height,
+      input: sample("#privacy-input"),
+      password: sample("#privacy-password"),
+      textarea: sample("#privacy-textarea"),
+      editable: sample("#privacy-editable"),
+    };
+  }, png.toString("base64"));
+  expect(samples.width).toBeGreaterThan(0);
+  expect(samples.input).toEqual([220, 40, 40]);
+  expect(samples.password).toEqual([40, 180, 40]);
+  expect(samples.textarea).toEqual([40, 40, 220]);
+  expect(samples.editable).toEqual([220, 180, 40]);
+  console.log(`privacy-screenshot ${JSON.stringify(samples)}`);
+});
+
+test("removing an annotation deletes its orphan evidence", async ({ page }) => {
+  await page.goto("/");
+  const initial = JSON.parse(readFileSync(taskPath, "utf8")).annotations.length;
+  await save(page, page.locator("#target"), "Evidence cleanup");
+  await expect.poll(() => JSON.parse(readFileSync(taskPath, "utf8")).annotations.at(-1)?.evidence?.length ?? 0, { timeout: 10_000 }).toBe(1);
+  const task = JSON.parse(readFileSync(taskPath, "utf8"));
+  const annotation = task.annotations.at(-1);
+  const evidence = annotation.evidence.at(-1);
+  const evidencePath = path.join(runtimeRoot, evidence.ref);
+  expect(existsSync(evidencePath)).toBe(true);
+  await shadow(page, `[data-annotation-id="${annotation.annotationId}"]`).click();
+  await shadow(page, 'button[aria-label="Delete"]').click();
+  await expect.poll(() => JSON.parse(readFileSync(taskPath, "utf8")).annotations.length).toBe(initial);
+  expect(existsSync(evidencePath)).toBe(false);
 });
 
 test("dynamic marker refresh stays rAF-bounded and observers stop with hidden markers", async ({ page }) => {

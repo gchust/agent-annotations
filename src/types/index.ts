@@ -257,6 +257,7 @@ export interface TaskTransport {
     height: number;
   }): Promise<AgentAnnotationsTask>;
   subscribe?(listener: (task: AgentAnnotationsTask) => void): () => void;
+  appendDiagnostics?(entries: AgentAnnotationsDiagnosticsEntry[]): Promise<void>;
 }
 
 export type AgentAnnotationsDiagnosticsEntry = {

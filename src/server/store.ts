@@ -17,6 +17,7 @@ import {
   parseAgentAnnotationsTask,
   redactAgentAnnotationsTask,
 } from "../core/index.js";
+import { collectEvidenceRefs, removeEvidenceRefs } from "./evidence.js";
 import type {
   AgentAnnotation,
   AgentAnnotationsMutationRequest,
@@ -35,7 +36,7 @@ export type AgentAnnotationsSession = {
 
 const readJson = (file: string): unknown => JSON.parse(readFileSync(file, "utf8"));
 
-const atomicWrite = (file: string, value: unknown, mode = 0o600): void => {
+export const atomicWriteJson = (file: string, value: unknown, mode = 0o600): void => {
   mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
   try {
@@ -77,7 +78,7 @@ export class FileTaskStore {
 
   #persist(task: AgentAnnotationsTask): AgentAnnotationsTask {
     const redacted = redactAgentAnnotationsTask(task).task;
-    atomicWrite(this.taskPath, redacted);
+    atomicWriteJson(this.taskPath, redacted);
     return redacted;
   }
 
@@ -139,7 +140,15 @@ export class FileTaskStore {
           if (result.error === "revision_conflict") error.task = result.task;
           throw error;
         }
-        return this.#persist(result.task);
+        const redacted = this.#persist(result.task);
+        if (request.operations.some(
+          (operation) => operation.op === "remove" || operation.op === "removeCompleted"
+        )) {
+          const before = collectEvidenceRefs(task);
+          const after = collectEvidenceRefs(redacted);
+          removeEvidenceRefs(this.root, [...before].filter((ref) => !after.has(ref)));
+        }
+        return redacted;
       } finally {
         unlock();
       }
@@ -184,7 +193,7 @@ export class FileTaskStore {
   }
 
   writeSession(session: AgentAnnotationsSession): void {
-    atomicWrite(this.sessionPath, session);
+    atomicWriteJson(this.sessionPath, session);
   }
 
   close(token: string): Promise<void> {

@@ -40,6 +40,17 @@ test("packed browser to file to CLI to browser loop, HMR and session security", 
       "target-context": { demoKind: "packed", kept: "visible" },
     },
   });
+  // Evidence is listed by the CLI with annotation metadata.
+  const evidenceRef = task.annotations[0].evidence.at(-1).ref;
+  expect(JSON.parse(cli("evidence", "--json"))[0]).toMatchObject({
+    ref: evidenceRef,
+    annotationIds: [id],
+  });
+  // Browser diagnostics persist and clear through the CLI.
+  await page.evaluate(() => { console.error("e2e-diagnostic-sentinel"); });
+  await expect.poll(() => cli("diagnostics", "--json")).toContain("e2e-diagnostic-sentinel");
+  cli("diagnostics", "--clear");
+  expect(JSON.parse(cli("diagnostics", "--json"))).toEqual([]);
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await page.keyboard.press("Control+Alt+KeyJ");
   await expect.poll(() => page.evaluate(() => window.__demoExtension?.actionCount)).toBe(1);

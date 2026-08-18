@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import pkg from "../../package.json" with { type: "json" };
 import { createAgentAnnotationsTask } from "../../src/core/index.js";
+import { appendDiagnostics } from "../../src/server/diagnostics.js";
 import { annotationFixture } from "../core/test-data.js";
 
 const script = path.resolve("dist/cli/index.mjs");
@@ -78,5 +79,37 @@ describe("public CLI processes", () => {
     const persisted = readFileSync(path.join(root, "tasks/active-task.json"), "utf8");
     expect(persisted).not.toContain("UNIQUE_SECRET_SENTINEL_cli");
     expect(persisted).toContain("[REDACTED]");
+  });
+
+  it("prints and clears persisted diagnostics without touching the task", () => {
+    const root = fixture();
+    appendDiagnostics(root, [{
+      source: "console",
+      message: "cli-diagnostic",
+      timestamp: "2026-08-12T12:00:00.000Z",
+    }]);
+    expect(JSON.parse(run(root, ["diagnostics", "--json"]))).toEqual([{
+      source: "console",
+      message: "cli-diagnostic",
+      timestamp: "2026-08-12T12:00:00.000Z",
+    }]);
+    expect(run(root, ["diagnostics"])).toContain("cli-diagnostic");
+    run(root, ["diagnostics", "--clear"]);
+    expect(JSON.parse(run(root, ["diagnostics", "--json"]))).toEqual([]);
+    expect(JSON.parse(run(root, ["verify"]))).toMatchObject({ ok: true, taskRevision: 0 });
+  });
+
+  it("lists task-referenced evidence with annotation metadata", () => {
+    const root = fixture();
+    mkdirSync(path.join(root, "evidence"), { recursive: true });
+    writeFileSync(path.join(root, "evidence", "ann-1.png"), "png");
+    const task = JSON.parse(readFileSync(path.join(root, "tasks/active-task.json"), "utf8"));
+    task.annotations[0].evidence = [{ kind: "screenshot", ref: "evidence/ann-1.png" }];
+    writeFileSync(path.join(root, "tasks/active-task.json"), JSON.stringify(task));
+    expect(JSON.parse(run(root, ["evidence", "--json"]))).toEqual([{
+      ref: "evidence/ann-1.png",
+      size: 3,
+      annotationIds: ["ann-1"],
+    }]);
   });
 });

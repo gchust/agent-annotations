@@ -51,4 +51,44 @@ describe("best-effort screenshot evidence", () => {
     expect(svg).toContain("width:1920px;height:1080px");
     expect(svg).toContain("left:-30px;top:-700px");
   });
+
+  it("strips form control values and editable text from the sanitized clone and SVG", () => {
+    document.body.innerHTML = `
+      <input id="text" value="SENTINEL_TEXT">
+      <input id="password" type="password" value="SENTINEL_PASSWORD">
+      <input id="checkbox" type="checkbox" checked>
+      <textarea id="area">SENTINEL_AREA</textarea>
+      <select id="select"><option value="a">A</option><option value="b" selected>B</option></select>
+      <div id="editable" contenteditable="true">SENTINEL_EDITABLE</div>
+    `;
+    const clone = cloneScreenshotRoot(document.body);
+    const serialized = new XMLSerializer().serializeToString(clone);
+    expect(serialized).not.toContain("SENTINEL");
+    expect(clone.querySelector("#text")?.getAttribute("value")).toBeNull();
+    expect(clone.querySelector("#password")?.getAttribute("value")).toBeNull();
+    expect(clone.querySelector("#checkbox")?.hasAttribute("checked")).toBe(false);
+    expect(clone.querySelector("#area")?.textContent).toBe("");
+    expect(clone.querySelector("#select option[selected]")).toBeNull();
+    expect(clone.querySelector("#editable")?.textContent).toBe("");
+    const text = clone.querySelector<HTMLInputElement>("#text")!;
+    expect(text.defaultValue).toBe("");
+    expect(text.value).toBe("");
+    const checkbox = clone.querySelector<HTMLInputElement>("#checkbox")!;
+    expect(checkbox.defaultChecked).toBe(false);
+    expect(checkbox.checked).toBe(false);
+    const area = clone.querySelector<HTMLTextAreaElement>("#area")!;
+    expect(area.defaultValue).toBe("");
+    const select = clone.querySelector<HTMLSelectElement>("#select")!;
+    expect([...select.options].every((option) => option.defaultSelected === false)).toBe(true);
+    const svg = buildScreenshotSvg(serialized, 800, 600, 800, 600, 0, 0);
+    expect(svg).not.toContain("SENTINEL");
+  });
+
+  it("keeps a neutral password placeholder while clearing other live form state", () => {
+    document.body.innerHTML = '<input id="password" type="password" value="SENTINEL_PASSWORD">';
+    const clone = cloneScreenshotRoot(document.body);
+    const input = clone.querySelector<HTMLInputElement>("#password")!;
+    expect(input.value).toBe("••••••");
+    expect(input.getAttribute("value")).toBeNull();
+  });
 });

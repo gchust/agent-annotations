@@ -15,6 +15,7 @@ const STYLE_PROPERTIES = [
   "grid-template-rows", "transform", "transform-origin", "text-decoration-line", "vertical-align",
 ] as const;
 const MEDIA = new Set(["IMG", "VIDEO", "CANVAS", "IFRAME", "AUDIO", "OBJECT", "EMBED"]);
+const FORM_CONTROLS = new Set(["INPUT", "TEXTAREA", "SELECT"]);
 const SECRET = /(?:^|[-_.])(?:token|secret|password|authorization|cookie|api[-_.]?key)(?:$|[-_.])/i;
 
 export type ScreenshotRect = { x: number; y: number; width: number; height: number };
@@ -51,11 +52,38 @@ export function inlineScreenshotStyle(source: Element, clone: Element): void {
   clone.setAttribute("style", `${style}${declarations.join(";")}`);
 }
 
+const sanitizeFormState = (source: Element, clone: Element): void => {
+  if (source.tagName === "INPUT") {
+    const input = clone as HTMLInputElement;
+    const type = (source as HTMLInputElement).type;
+    input.removeAttribute("value");
+    input.removeAttribute("checked");
+    input.checked = false;
+    input.value = type === "password" ? "••••••" : "";
+  } else if (source.tagName === "TEXTAREA") {
+    const textarea = clone as HTMLTextAreaElement;
+    textarea.value = "";
+    textarea.textContent = "";
+  } else if (source.tagName === "SELECT") {
+    const select = clone as HTMLSelectElement;
+    for (const option of select.querySelectorAll("option[selected]")) {
+      option.removeAttribute("selected");
+    }
+    select.value = "";
+  }
+  if ((source as HTMLElement).isContentEditable || source.hasAttribute("contenteditable")) {
+    clone.textContent = "";
+  }
+};
+
 const sanitize = (source: Element, clone: Element): void => {
   for (const attribute of Array.from(clone.attributes)) {
     if (SECRET.test(attribute.name)) clone.removeAttribute(attribute.name);
   }
   inlineScreenshotStyle(source, clone);
+  if (FORM_CONTROLS.has(source.tagName) || (source as HTMLElement).isContentEditable || source.hasAttribute("contenteditable")) {
+    sanitizeFormState(source, clone);
+  }
   if (!MEDIA.has(source.tagName)) return;
   const rect = source.getBoundingClientRect();
   for (const name of ["src", "srcset", "poster", "data"]) clone.removeAttribute(name);

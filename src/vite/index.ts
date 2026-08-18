@@ -8,6 +8,7 @@ import MagicString from "magic-string";
 import type { Plugin } from "vite";
 
 import { FileTaskStore } from "../server/store.js";
+import { appendDiagnostics } from "../server/diagnostics.js";
 import { createSourcePathService } from "../server/source-path.js";
 import { PACKAGE_NAME } from "../metadata.js";
 
@@ -16,6 +17,7 @@ const RESOLVED_VIRTUAL_ID = `\0${VIRTUAL_ID}`;
 const TOKEN_HEADER = "x-agent-annotations-token";
 const MAX_BODY_BYTES = 256 * 1024;
 const MAX_EVIDENCE_BODY_BYTES = 3 * 1024 * 1024;
+const MAX_DIAGNOSTICS_BODY_BYTES = 16 * 1024;
 const SOURCE_MODULE = /\.[cm]?[jt]sx?$/i;
 
 export type AgentAnnotationsPluginOptions = {
@@ -252,6 +254,10 @@ export default function agentAnnotations(
               sourceRevision: task ? sourcePaths.revision(task) : null,
               sourceFiles: task ? sourcePaths.files(task) : [],
             });
+          }
+          if (url.pathname === `${resolvedEndpoint}/diagnostics` && request.method === "POST") {
+            const input = await body(request, MAX_DIAGNOSTICS_BODY_BYTES) as { entries?: unknown };
+            return json(response, 200, { entries: appendDiagnostics(runtimeRoot, input.entries) });
           }
           if (url.pathname === `${resolvedEndpoint}/heartbeat` && request.method === "POST") {
             return json(response, 200, { ok: true, receivedAt: new Date().toISOString() });

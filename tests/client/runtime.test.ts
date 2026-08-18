@@ -47,7 +47,12 @@ import { mountAgentAnnotations } from "../../src/client/index.js";
 import { defineClientExtension } from "../../src/extension/index.js";
 import { FileTaskStore } from "../../src/server/store.js";
 import { MemoryTaskTransport } from "../../src/testing/index.js";
-import type { AgentAnnotationsTask, HostIntegration, TaskTransport } from "../../src/types/index.js";
+import type {
+  AgentAnnotationsDiagnosticsEntry,
+  AgentAnnotationsTask,
+  HostIntegration,
+  TaskTransport,
+} from "../../src/types/index.js";
 import { annotationFixture, targetFixture, taskFixture } from "../core/test-data.js";
 
 afterEach(() => {
@@ -1152,6 +1157,26 @@ describe("client runtime", () => {
       mounted.unmount();
       for (const element of elements) element.remove();
       rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("appends recorded diagnostics to the transport best-effort", async () => {
+    const appendDiagnostics = vi.fn(async (_entries: AgentAnnotationsDiagnosticsEntry[]) => undefined);
+    const memory = new MemoryTaskTransport();
+    const transport: TaskTransport = {
+      read: () => memory.read(),
+      mutate: (request) => memory.mutate(request),
+      appendDiagnostics,
+    };
+    const mounted = await mountAgentAnnotations({ transport });
+    try {
+      console.error("token=console-secret");
+      await vi.waitFor(() => expect(appendDiagnostics).toHaveBeenCalled());
+      const entry = appendDiagnostics.mock.calls[0]![0]![0]!;
+      expect(entry).toMatchObject({ source: "console" });
+      expect(entry.message).not.toContain("console-secret");
+    } finally {
+      mounted.unmount();
     }
   });
 

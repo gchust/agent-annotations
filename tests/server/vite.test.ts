@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -122,6 +122,66 @@ describe("serve-only Vite plugin", () => {
         const map = JSON.parse(Buffer.from(encoded!, "base64").toString("utf8"));
         expect(map.sources).toEqual([pathToFileURL(file).href]);
       }
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("appends bounded redacted diagnostics through the authenticated endpoint", async () => {
+    const { root } = fixture();
+    const server = await createServer({
+      root,
+      logLevel: "silent",
+      server: { host: "127.0.0.1", port: 0 },
+      plugins: [agentAnnotations({ root })],
+    });
+    await server.listen();
+    try {
+      const address = server.httpServer!.address();
+      if (!address || typeof address === "string") throw new Error("no address");
+      const base = `http://127.0.0.1:${address.port}`;
+      const token = JSON.parse(
+        readFileSync(path.join(root, ".agent-annotations", "session.json"), "utf8")
+      ).token;
+      const post = (body: unknown) => fetch(`${base}/__agent-annotations/diagnostics`, {
+        method: "POST",
+        headers: { "x-agent-annotations-token": token, "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const response = await post({
+        entries: [{
+          source: "console",
+          message: "Bearer UNIQUE_SECRET_SENTINEL_vite",
+          timestamp: "2026-08-12T12:00:00.000Z",
+        }],
+      });
+      expect(response.status).toBe(200);
+      const payload = await response.json() as { entries: Array<{ message: string }> };
+      expect(payload.entries[0]!.message).not.toContain("UNIQUE_SECRET_SENTINEL_vite");
+      expect(payload.entries[0]!.message).toContain("[REDACTED]");
+      const denied = await fetch(`${base}/__agent-annotations/diagnostics`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ entries: [] }),
+      });
+      expect(denied.status).toBe(404);
+      const invalid = await post({
+        entries: [{ source: "network", message: "x", timestamp: "2026-08-12T12:00:00.000Z" }],
+      });
+      expect(invalid.status).toBe(400);
+      const oversized = await post({
+        entries: [{
+          source: "console",
+          message: "x".repeat(20_000),
+          timestamp: "2026-08-12T12:00:00.000Z",
+        }],
+      });
+      expect(oversized.status).toBe(400);
+      const persisted = JSON.parse(
+        readFileSync(path.join(root, ".agent-annotations", "diagnostics.json"), "utf8")
+      );
+      expect(JSON.stringify(persisted)).not.toContain("x".repeat(20));
+      expect(persisted).toHaveLength(1);
     } finally {
       await server.close();
     }
