@@ -573,14 +573,10 @@ export function validateAgentAnnotation(
   }
 
   if (input.kind === "region") {
-    if (input.targets !== undefined || !isRecord(input.region)) {
+    if (!isRecord(input.region)) {
       return {
         ok: false,
-        issue: issue(
-          path,
-          "invalid_value",
-          "Region annotations require region and cannot carry targets"
-        ),
+        issue: issue(path, "invalid_value", "Region annotations require region"),
       };
     }
     const regionExtra = unknownField(
@@ -599,6 +595,25 @@ export function validateAgentAnnotation(
           )) ??
       rectValuesIssue(input.region, `${path}.region`);
     if (regionError) return { ok: false, issue: regionError };
+    if (input.targets !== undefined) {
+      if (
+        !Array.isArray(input.targets) ||
+        input.targets.length > MAX_TARGETS_PER_ANNOTATION
+      ) {
+        return {
+          ok: false,
+          issue: issue(
+            `${path}.targets`,
+            "limit_exceeded",
+            `Region annotations allow at most ${MAX_TARGETS_PER_ANNOTATION} targets`
+          ),
+        };
+      }
+      for (const [index, target] of input.targets.entries()) {
+        const found = targetIssue(target, `${path}.targets[${index}]`);
+        if (found) return { ok: false, issue: found };
+      }
+    }
   } else {
     if (input.region !== undefined || !Array.isArray(input.targets)) {
       return {

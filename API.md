@@ -34,6 +34,11 @@ integrations.
   redactors per extension are composed deterministically in stable
   `(extensionId, redactorId)` order; duplicate `(extensionId, redactorId)` pairs
   are rejected.
+- `HostIntegration` may expose `routeKey()`, `subscribe(listener)`, and
+  `navigate(routeKey)`. Annotations persist the route key they were created on;
+  markers render only on their own route. Without `subscribe`, the runtime
+  observes `popstate`, `hashchange`, and patched `pushState`/`replaceState`,
+  and removes those listeners and restores the patched methods on unmount.
 - `StudioPublicApi` exposes snapshots, subscriptions, and commands only. It does
   not expose React setters, reducers, live DOM, or inspection internals.
 

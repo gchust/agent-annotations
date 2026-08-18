@@ -3,6 +3,7 @@ import {
   formatAgentAnnotationsShortcut,
   formatAgentAnnotationsTask,
   matchesAgentAnnotationsShortcut,
+  MAX_TARGETS_PER_ANNOTATION,
   redactAgentAnnotationsTask,
   redactAgentAnnotationsText,
   resolveAgentAnnotationsPlacement,
@@ -16,6 +17,7 @@ import type {
   AgentAnnotationsIconProps,
   AgentAnnotationsMutationOperation,
   AgentAnnotationsRect,
+  AgentAnnotationsTarget,
   AgentAnnotationsTask,
   HostIntegration,
   MountedAgentAnnotations,
@@ -63,6 +65,26 @@ const isEditable = (target: EventTarget | null): boolean => {
   return !!element?.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(element?.tagName ?? "");
 };
 
+const REGION_TARGET_CONCURRENCY = 4;
+
+const mapBounded = async <T, R>(
+  values: readonly T[],
+  limit: number,
+  mapper: (value: T, index: number) => Promise<R>
+): Promise<R[]> => {
+  const results: R[] = new Array(values.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, values.length) }, async () => {
+    while (next < values.length) {
+      const index = next;
+      next += 1;
+      results[index] = await mapper(values[index]!, index);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+};
+
 const pageContext = (host?: HostIntegration) => ({
   url: location.href,
   routeKey: host?.routeKey?.() ?? `${location.pathname}${location.search}${location.hash}`,
@@ -72,6 +94,60 @@ const pageContext = (host?: HostIntegration) => ({
 });
 
 const now = (): string => new Date().toISOString();
+
+const regionAnnotation = async (
+  rect: AgentAnnotationsRect,
+  elements: Element[],
+  comment: string,
+  host: HostIntegration | undefined,
+  enrichers: readonly RegisteredTargetEnricher[]
+): Promise<AgentAnnotation> => {
+  const inspected = await mapBounded(
+    elements,
+    REGION_TARGET_CONCURRENCY,
+    async (element) => {
+      try {
+        return { element, target: await inspectTarget(element, host) };
+      } catch {
+        // Uninspectable region elements are skipped; the region rect remains authoritative.
+        return null;
+      }
+    }
+  );
+  const resolved = inspected
+    .filter(
+      (entry): entry is { element: Element; target: AgentAnnotationsTarget } => entry !== null
+    )
+    .slice(0, MAX_TARGETS_PER_ANNOTATION);
+  const targets = resolved.map(({ target }) => target);
+  const extensions: AgentAnnotation["extensions"] = {};
+  for (const enricher of enrichers) {
+    const values = await mapBounded(
+      resolved,
+      REGION_TARGET_CONCURRENCY,
+      async ({ element, target }) =>
+        enricher.enrich({ element, inspection: target.inspection })
+    );
+    const data = values.filter((value) => value !== null);
+    if (data.length > 0) {
+      extensions[enricher.extensionId] = {
+        ...(extensions[enricher.extensionId] ?? {}),
+        [enricher.id]: data.length === 1 ? data[0]! : { targets: data },
+      };
+    }
+  }
+  return {
+    annotationId: createAgentAnnotationsId(),
+    kind: "region",
+    comment,
+    status: "open",
+    createdAt: now(),
+    pageContext: pageContext(host),
+    region: toAgentAnnotationsDocumentRegion(rect, { x: scrollX, y: scrollY }),
+    targets,
+    extensions,
+  };
+};
 
 const elementAnnotation = async (
   kind: "element" | "multi",
@@ -141,7 +217,7 @@ export async function mountAgentAnnotations(
   let hover: Element | null = null;
   let composer:
     | { kind: "element" | "multi"; elements: Element[] }
-    | { kind: "region"; rect: AgentAnnotationsRect; sampled: number }
+    | { kind: "region"; rect: AgentAnnotationsRect; sampled: number; elements: Element[] }
     | null = null;
   let editingId: string | null = null;
   let areaStart: { x: number; y: number } | null = null;
@@ -155,6 +231,28 @@ export async function mountAgentAnnotations(
   let panelRoot: Root | null = null;
   let iconRoots: Root[] = [];
   let destroyed = false;
+  let routeKey = pageContext(host).routeKey;
+  const applyRouteKey = (next: string) => {
+    if (destroyed || next === routeKey) return;
+    routeKey = next;
+    if (captureMode !== "idle" || composer || editingId) {
+      // Never persist old-route capture state under the new route key.
+      setInspectionFrozen(false);
+      clearCaptureDocuments();
+      captureMode = "idle";
+      selected = [];
+      hover = null;
+      areaStart = null;
+      areaRect = null;
+      composer = null;
+      editingId = null;
+    }
+    scheduleFrame(() => {
+      render();
+      emit();
+    });
+  };
+  const refreshRoute = () => applyRouteKey(pageContext(host).routeKey);
   const listeners = new Set<(snapshot: StudioPublicSnapshot) => void>();
   const diagnostics: AgentAnnotationsDiagnosticsEntry[] = [];
   const cleanups: Array<() => void> = [];
@@ -198,6 +296,33 @@ export async function mountAgentAnnotations(
         emit();
       });
     }));
+  }
+  if (host?.subscribe) {
+    cleanups.push(host.subscribe((next) => applyRouteKey(next)));
+  } else {
+    const onRouteEvent = () => refreshRoute();
+    window.addEventListener("popstate", onRouteEvent);
+    window.addEventListener("hashchange", onRouteEvent);
+    const originalPushState = history.pushState;
+    const originalReplaceState = history.replaceState;
+    const wrap = (
+      original: typeof history.pushState
+    ): typeof history.pushState =>
+      function (this: History, ...args: Parameters<typeof history.pushState>) {
+        const result = original.apply(this, args);
+        refreshRoute();
+        return result;
+      };
+    const pushState = wrap(originalPushState);
+    const replaceState = wrap(originalReplaceState);
+    history.pushState = pushState;
+    history.replaceState = replaceState;
+    cleanups.push(() => {
+      window.removeEventListener("popstate", onRouteEvent);
+      window.removeEventListener("hashchange", onRouteEvent);
+      if (history.pushState === pushState) history.pushState = originalPushState;
+      if (history.replaceState === replaceState) history.replaceState = originalReplaceState;
+    });
   }
 
   const hostElement = document.createElement("div");
@@ -395,6 +520,17 @@ export async function mountAgentAnnotations(
   };
   const focusAnnotation = (id: string) => {
     if (destroyed) return;
+    const annotation = task.annotations.find((entry) => entry.annotationId === id);
+    if (!annotation) return;
+    if (annotation.pageContext.routeKey !== routeKey) {
+      if (host?.navigate) {
+        host.navigate(annotation.pageContext.routeKey);
+        setStatus("Navigating to annotation route");
+      } else {
+        setStatus("Annotation is on another route");
+      }
+      return;
+    }
     editingId = id;
     openPanel = null;
     render();
@@ -568,6 +704,7 @@ export async function mountAgentAnnotations(
     if (!markersVisible) return resolved;
     task.annotations.forEach((annotation, index) => {
       if (annotation.status === "completed") return;
+      if (annotation.pageContext.routeKey !== routeKey) return;
       if (annotation.region) {
         addOutline({
           x: annotation.region.x - scrollX,
@@ -625,19 +762,17 @@ export async function mountAgentAnnotations(
       event.preventDefault();
       const comment = textarea.value.trim();
       if (!comment) return textarea.focus();
+      const submittedRouteKey = routeKey;
       save.disabled = true;
       try {
         const annotation = composer?.kind === "region"
-          ? {
-              annotationId: createAgentAnnotationsId(),
-              kind: "region" as const,
+          ? await regionAnnotation(
+              composer.rect,
+              composer.elements,
               comment,
-              status: "open" as const,
-              createdAt: now(),
-              pageContext: pageContext(host),
-              region: toAgentAnnotationsDocumentRegion(composer.rect, { x: scrollX, y: scrollY }),
-              extensions: {},
-            }
+              host,
+              registry.getTargetEnrichers()
+            )
           : await elementAnnotation(
               composer!.kind,
               composer!.elements,
@@ -645,15 +780,15 @@ export async function mountAgentAnnotations(
               host,
               registry.getTargetEnrichers()
             );
-        if (destroyed) return;
+        if (destroyed || routeKey !== submittedRouteKey) return;
         const persisted = await mutate([{ op: "add", annotation }]);
         if (destroyed) return;
-        if (persisted && options.transport.writeEvidence) {
+        if (persisted && options.transport.writeEvidence && routeKey === submittedRouteKey) {
           const overlays = composer?.kind === "region"
             ? [composer.rect]
             : composer?.elements.map(targetBounds) ?? [];
           const screenshot = await captureViewportPng(overlays);
-          if (screenshot && !destroyed) {
+          if (screenshot && !destroyed && routeKey === submittedRouteKey) {
             try {
               task = await options.transport.writeEvidence({
                 taskId: persisted.taskId,
@@ -975,7 +1110,7 @@ export async function mountAgentAnnotations(
     if (rect.width < 8 || rect.height < 8) return render();
     const targets = sampleRegionTargets(rect);
     const sampled = targets.length;
-    composer = { kind: "region", rect, sampled };
+    composer = { kind: "region", rect, sampled, elements: targets };
     if (targets.length > 0) setInspectionFrozen(true, targets);
     render();
   };
@@ -1141,6 +1276,7 @@ export async function mountAgentAnnotations(
       markerFrame = null;
       const resolved: Element[] = [];
       for (const annotation of task.annotations) {
+        if (annotation.pageContext.routeKey !== routeKey) continue;
         const marker = Array.from(root.querySelectorAll<HTMLElement>(".aa-marker"))
           .find((node) => node.dataset.annotationId === annotation.annotationId);
         if (!marker) continue;
@@ -1196,10 +1332,13 @@ export async function mountAgentAnnotations(
   };
   const hasPersistedFrameTarget = (): boolean => task.annotations.some((annotation) =>
     annotation.status === "open" &&
+    annotation.pageContext.routeKey === routeKey &&
     annotation.targets?.some(({ selector }) => selector.includes(">>iframe>>"))
   );
   const hasUnresolvedFrameTarget = (): boolean => task.annotations.some((annotation) => {
-    const selector = annotation.status === "open" ? annotation.targets?.[0]?.selector : undefined;
+    const selector = annotation.status === "open" && annotation.pageContext.routeKey === routeKey
+      ? annotation.targets?.[0]?.selector
+      : undefined;
     return !!selector?.includes(">>iframe>>") && !resolveTarget(selector);
   });
   function syncMarkerTracking(targets: Element[]): void {

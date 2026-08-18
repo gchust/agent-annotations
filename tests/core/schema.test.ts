@@ -13,6 +13,10 @@ import {
   validateAgentAnnotationsTask,
 } from "../../src/core/index.js";
 import { annotationFixture, targetFixture, taskFixture } from "./test-data.js";
+import type {
+  AgentAnnotationsRegion,
+  AgentAnnotationsTarget,
+} from "../../src/types/index.js";
 
 describe("agent-annotations.task.v1 schema", () => {
   it("uses the frozen schema constants and creates a valid task", () => {
@@ -157,6 +161,42 @@ describe("agent-annotations.task.v1 schema", () => {
     expect(validateAgentAnnotationsTask(oversized)).toMatchObject({
       ok: false,
       issue: { code: "limit_exceeded" },
+    });
+  });
+
+  it("accepts region annotations with 0-50 individually validated targets", () => {
+    const region: AgentAnnotationsRegion = {
+      coordinateSpace: "document",
+      x: 1,
+      y: 2,
+      width: 300,
+      height: 100,
+    };
+    const regionAnnotation = (targets: AgentAnnotationsTarget[]) =>
+      taskFixture({
+        annotations: [annotationFixture({ kind: "region", targets, region })],
+      });
+    expect(validateAgentAnnotationsTask(regionAnnotation([])).ok).toBe(true);
+    expect(validateAgentAnnotationsTask(regionAnnotation([targetFixture()])).ok).toBe(true);
+    expect(
+      validateAgentAnnotationsTask(
+        regionAnnotation(Array.from({ length: 50 }, () => targetFixture()))
+      ).ok
+    ).toBe(true);
+    expect(
+      validateAgentAnnotationsTask(
+        regionAnnotation(Array.from({ length: 51 }, () => targetFixture()))
+      )
+    ).toMatchObject({ ok: false, issue: { path: "task.annotations[0].targets" } });
+    expect(
+      validateAgentAnnotationsTask(
+        regionAnnotation([
+          { ...targetFixture(), selector: 42 } as unknown as AgentAnnotationsTarget,
+        ])
+      )
+    ).toMatchObject({
+      ok: false,
+      issue: { path: "task.annotations[0].targets[0].selector" },
     });
   });
 

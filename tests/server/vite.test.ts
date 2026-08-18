@@ -12,15 +12,16 @@ import agentAnnotations, { createSourcePathService, isAgentAnnotationsRequestAll
 
 const roots: string[] = [];
 const fixture = () => {
-  const root = mkdtempSync(path.join(tmpdir(), "agent-annotations-vite-"));
-  roots.push(root);
+  const parent = mkdtempSync(path.join(tmpdir(), "agent-annotations-vite-"));
+  roots.push(parent);
+  const root = path.join(parent, "workspace");
   const a = path.join(root, "src/duplicate-a/Card.tsx");
   const b = path.join(root, "src/duplicate-b/Card.tsx");
   mkdirSync(path.dirname(a), { recursive: true });
   mkdirSync(path.dirname(b), { recursive: true });
   writeFileSync(a, "export const Card = () => null;\n");
   writeFileSync(b, "export const Card = () => null;\n");
-  return { root, a, b };
+  return { parent, root, a, b };
 };
 
 afterEach(() => roots.splice(0).forEach((root) => rmSync(root, { recursive: true, force: true })));
@@ -31,7 +32,7 @@ describe("serve-only Vite plugin", () => {
     const resolveId = plugin.resolveId as Function;
     const load = plugin.load as Function;
     expect(plugin.apply).toBe("serve");
-    expect(plugin.transform).toMatchObject({ order: "post" });
+    expect(plugin.transform).toMatchObject({ order: "pre" });
     expect(resolveId.call({} as never, "virtual:agent-annotations/client", undefined, {} as never)).toBe("\0virtual:agent-annotations/client");
     const loaded = load.call({} as never, "\0virtual:agent-annotations/client", {} as never);
     expect(String(loaded)).toContain("/tmp/demo/extension.ts");
@@ -60,51 +61,35 @@ describe("serve-only Vite plugin", () => {
     expect(() => agentAnnotations({ endpoint: "https://evil.test" })).toThrow("root-relative");
   });
 
-  it("normalizes only the post-React single basename sourcemap source to the exact module", () => {
-    const { root, a, b } = fixture();
+  it("returns a canonical identity { code, map } for modules under root", () => {
+    const { parent, root, a, b } = fixture();
     const plugin = agentAnnotations({ root });
     const transform = (plugin.transform as { handler: Function }).handler;
-    const map = {
-      version: 3,
-      names: ["Card"],
-      sources: ["Card.tsx"],
-      sourcesContent: ["export const Card = () => null;"],
-      mappings: "AAAA",
-    };
-    const result = transform.call(
-      { getCombinedSourcemap: () => map },
-      "export const Card = () => null;",
-      a,
-      { ssr: false }
-    );
-    expect(result).toBeUndefined();
-    expect(map).toMatchObject({
-      mappings: "AAAA",
-      names: ["Card"],
-      sources: [pathToFileURL(a).href],
-      file: a,
-      sourceRoot: undefined,
+    const code = "export const Card = () => null;\n";
+    const result = transform.call({} as never, code, a, { ssr: false });
+    expect(result).toEqual({
+      code,
+      map: {
+        version: 3,
+        file: a,
+        sources: [pathToFileURL(a).href],
+        sourcesContent: [code],
+        names: [],
+        mappings: expect.any(String),
+      },
     });
-
-    expect(transform.call(
-      { getCombinedSourcemap: () => ({ ...map, sources: ["../../../outside.tsx"] }) },
-      "code",
-      `${a}?direct#fragment`
-    )).toBeUndefined();
-    expect(transform.call(
-      { getCombinedSourcemap: () => map },
-      "code",
-      path.join(root, "node_modules/pkg/Card.tsx")
-    )).toBeUndefined();
-    const absoluteMap = { ...map, sources: [b] };
-    const second = transform.call(
-      { getCombinedSourcemap: () => absoluteMap },
-      "code",
-      b
-    );
-    expect(second).toBeUndefined();
-    expect(absoluteMap.sources).toEqual([pathToFileURL(b).href]);
-    expect(transform.call({ getCombinedSourcemap: () => map }, "code", a, { ssr: true })).toBeUndefined();
+    expect((result as { map: { mappings: string } }).map.mappings.length).toBeGreaterThan(0);
+    expect(transform.call({} as never, "code", b, { ssr: false })).toMatchObject({
+      map: { sources: [pathToFileURL(b).href], file: b },
+    });
+    expect(transform.call({} as never, "code", `${a}?direct#fragment`, { ssr: false })).toMatchObject({
+      map: { sources: [pathToFileURL(a).href], file: a },
+    });
+    expect(transform.call({} as never, "code", path.join(root, "node_modules/pkg/Card.tsx"), { ssr: false })).toBeUndefined();
+    expect(transform.call({} as never, "code", a, { ssr: true })).toBeUndefined();
+    const outside = path.join(parent, "outside.ts");
+    writeFileSync(outside, "outside");
+    expect(transform.call({} as never, "code", outside, { ssr: false })).toBeUndefined();
   });
 
   it("injects the virtual client under the resolved Vite base", () => {

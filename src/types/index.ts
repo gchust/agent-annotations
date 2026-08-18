@@ -279,6 +279,8 @@ export type AgentAnnotationsIconProps = {
 export interface HostIntegration {
   locale?(): string;
   routeKey?(): string;
+  navigate?(routeKey: string): void;
+  subscribe?(listener: (routeKey: string) => void): () => void;
   messages?: AgentAnnotationsLocaleMessages;
   identity?(element: Element): Record<string, string>;
 }

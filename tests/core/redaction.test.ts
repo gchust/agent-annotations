@@ -152,6 +152,38 @@ describe("generic redaction", () => {
     expect(result.task.annotations[0].extensions).toEqual({});
   });
 
+  it("redacts region target inspections and namespaced extension data", () => {
+    const task = taskFixture({
+      annotations: [
+        annotationFixture({
+          kind: "region",
+          targets: [
+            targetFixture({
+              inspection: {
+                ...targetFixture().inspection,
+                text: "Bearer region-secret",
+              },
+            }),
+          ],
+          region: {
+            coordinateSpace: "document",
+            x: 1,
+            y: 2,
+            width: 300,
+            height: 100,
+          },
+          extensions: {
+            "region.context": { token: "region-token", keep: "yes" },
+          },
+        }),
+      ],
+    });
+    const result = redactAgentAnnotationsTask(task);
+    expect(result.task.annotations[0].targets?.[0].inspection.text).not.toContain("region-secret");
+    expect(result.task.annotations[0].targets?.[0].inspection.text).toContain("[REDACTED]");
+    expect(result.task.annotations[0].extensions["region.context"]).toEqual({ keep: "yes" });
+  });
+
   it("executes composed redactors in stable (extensionId, redactorId) order", () => {
     const task = taskFixture({
       annotations: [

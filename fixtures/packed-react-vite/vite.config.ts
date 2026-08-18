@@ -6,6 +6,9 @@ import { defineConfig } from "vite";
 
 export default defineConfig({
   plugins: [react(), agentAnnotations({
-    clientExtensions: [path.resolve(import.meta.dirname, "src/demo-extension.ts")],
+    clientExtensions: [
+      path.resolve(import.meta.dirname, "src/demo-extension.ts"),
+      path.resolve(import.meta.dirname, "src/route-host.ts"),
+    ],
   })],
 });

@@ -2,8 +2,9 @@ import { randomBytes } from "node:crypto";
 import { existsSync, realpathSync, statSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { pathToFileURL } from "node:url";
 
+import MagicString from "magic-string";
 import type { Plugin } from "vite";
 
 import { FileTaskStore } from "../server/store.js";
@@ -167,7 +168,7 @@ export default function agentAnnotations(
       ].filter(Boolean).join("\n");
     },
     transform: {
-      order: "post",
+      order: "pre",
       handler(code, id, transformOptions) {
         const file = id.split(/[?#]/, 1)[0]!;
         if (
@@ -180,44 +181,15 @@ export default function agentAnnotations(
         ) return;
         const realModule = realpathSync(file);
         if (!statSync(realModule).isFile() || !inside(realRoot, realModule)) return;
-        const map = this.getCombinedSourcemap();
-        if (!map?.version || !map.sources.length) return;
-        const sourceRoot = (map as typeof map & { sourceRoot?: string }).sourceRoot;
-        const sources: string[] = [];
-        for (const source of map.sources) {
-          let candidate: string;
-          try {
-            if (source.startsWith("file:")) {
-              candidate = fileURLToPath(source);
-            } else if (/^[a-zA-Z][a-zA-Z\d+.-]*:|^\/\//.test(source)) {
-              return;
-            } else if (path.isAbsolute(source)) {
-              candidate = source;
-            } else {
-              let base = path.dirname(file);
-              if (sourceRoot) {
-                if (sourceRoot.startsWith("file:")) {
-                  base = fileURLToPath(sourceRoot);
-                } else if (/^[a-zA-Z][a-zA-Z\d+.-]*:|^\/\//.test(sourceRoot)) {
-                  return;
-                } else {
-                  base = path.resolve(base, sourceRoot);
-                }
-              }
-              candidate = path.resolve(base, source);
-            }
-            if (!existsSync(candidate)) return;
-            const realSource = realpathSync(candidate);
-            if (!statSync(realSource).isFile() || !inside(realRoot, realSource)) return;
-            sources.push(pathToFileURL(realSource).href);
-          } catch {
-            return;
-          }
-        }
-        map.sources.splice(0, map.sources.length, ...sources);
-        (map as typeof map & { sourceRoot?: string }).sourceRoot = undefined;
-        map.file = file;
-        return;
+        const map = {
+          ...new MagicString(code).generateMap({
+            source: pathToFileURL(realModule).href,
+            includeContent: true,
+            hires: true,
+          }),
+          file,
+        };
+        return { code, map };
       },
     },
     transformIndexHtml() {

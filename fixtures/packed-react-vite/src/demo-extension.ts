@@ -110,6 +110,13 @@ export default defineClientExtension({
     redact(data) {
       return Object.fromEntries(Object.entries(data).map(([id, value]) => {
         const result = { ...(value as Record<string, unknown>) };
+        if (Array.isArray(result.targets)) {
+          result.targets = result.targets.map((target) => {
+            const clean = { ...(target as Record<string, unknown>) };
+            delete clean.redactMe;
+            return clean;
+          });
+        }
         delete result.redactMe;
         return [id, result];
       }));

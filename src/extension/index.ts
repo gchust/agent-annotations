@@ -166,7 +166,7 @@ const validateExtension = (extension: AgentAnnotationsClientExtension): void => 
     if (!extension.host || typeof extension.host !== "object") {
       throw new TypeError(`Invalid host integration: ${extension.id}`);
     }
-    for (const callback of ["locale", "routeKey", "identity"] as const) {
+    for (const callback of ["locale", "routeKey", "navigate", "subscribe", "identity"] as const) {
       if (
         extension.host[callback] !== undefined &&
         typeof extension.host[callback] !== "function"

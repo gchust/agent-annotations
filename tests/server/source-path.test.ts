@@ -76,6 +76,41 @@ describe("source path integrity", () => {
     expect(source.revision(task)).not.toBe(initial);
   });
 
+  it("includes region-only target sources in the revision", () => {
+    const { root, source } = fixture();
+    const regionOnly = path.join(root, "src", "a", "RegionOnly.tsx");
+    writeFileSync(regionOnly, "export const RegionOnly = 1;\n");
+    const task = taskFixture({
+      annotations: [{
+        ...taskFixture().annotations[0]!,
+        kind: "region",
+        targets: [{
+          ...taskFixture().annotations[0]!.targets![0]!,
+          inspection: {
+            ...taskFixture().annotations[0]!.targets![0]!.inspection,
+            source: {
+              filePath: "src/a/RegionOnly.tsx",
+              lineNumber: 1,
+              columnNumber: 14,
+              componentName: "RegionOnly",
+            },
+            sourceStack: [],
+          },
+        }],
+        region: {
+          coordinateSpace: "document",
+          x: 1,
+          y: 2,
+          width: 300,
+          height: 100,
+        },
+      }],
+    });
+    const initial = source.revision(task);
+    writeFileSync(regionOnly, "export const RegionOnly = 2;\n");
+    expect(source.revision(task)).not.toBe(initial);
+  });
+
   it("turns unresolved persisted frames into null or removes them from the stack", () => {
     const { source } = fixture();
     const annotation = taskFixture().annotations[0]!;

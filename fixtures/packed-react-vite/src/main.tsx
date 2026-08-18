@@ -2,6 +2,8 @@ import React, { forwardRef, memo, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { createRoot } from "react-dom/client";
 
+import { RouteA } from "./route-a/RouteA";
+import { RouteB } from "./route-b/RouteB";
 import { DuplicateA } from "./duplicate-a/Card";
 import { DuplicateB } from "./duplicate-b/Card";
 
@@ -58,7 +60,7 @@ function ReliabilityFixtures() {
   </>;
 }
 
-function App() {
+function Home() {
   const [portal, setPortal] = useState(false);
   return <main>
     <h1>Packed fixture</h1>
@@ -72,6 +74,22 @@ function App() {
     <RealmFixtures />
     <ReliabilityFixtures />
   </main>;
+}
+
+function App() {
+  const [path, setPath] = useState(location.pathname);
+  useEffect(() => {
+    const onChange = () => setPath(location.pathname);
+    window.addEventListener("popstate", onChange);
+    window.addEventListener("hashchange", onChange);
+    return () => {
+      window.removeEventListener("popstate", onChange);
+      window.removeEventListener("hashchange", onChange);
+    };
+  }, []);
+  if (path === "/route-a") return <RouteA />;
+  if (path === "/route-b") return <RouteB />;
+  return <Home />;
 }
 
 createRoot(document.getElementById("root")!).render(<App />);

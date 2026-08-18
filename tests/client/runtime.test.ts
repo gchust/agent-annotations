@@ -6,19 +6,8 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 
-const primitives = vi.hoisted(() => ({
-  freeze: vi.fn(),
-  getElementAtPoint: vi.fn((): Element | null => null),
-  getElementBounds: vi.fn(() => ({ x: 0, y: 0, width: 1, height: 1 })),
-  unfreeze: vi.fn(),
-}));
-
-vi.mock("react-grab/primitives", () => ({
-  disposeBaselineStyles: vi.fn(),
-  freeze: primitives.freeze,
-  getElementAtPoint: primitives.getElementAtPoint,
-  getElementBounds: primitives.getElementBounds,
-  getElementContext: vi.fn(() => ({
+const primitives = vi.hoisted(() => {
+  const context = () => ({
     htmlPreview: "<button>Save</button>",
     stack: [],
     componentName: null,
@@ -26,18 +15,39 @@ vi.mock("react-grab/primitives", () => ({
     lineNumber: null,
     columnNumber: null,
     styles: "",
-  })),
+  });
+  return {
+    context,
+    freeze: vi.fn(),
+    getElementAtPoint: vi.fn((): Element | null => null),
+    getElementBounds: vi.fn(() => ({ x: 0, y: 0, width: 1, height: 1 })),
+    getElementContext: vi.fn<(element: Element) => unknown>(context),
+    getElementsAtPoint: vi.fn((): Element[] => []),
+    unfreeze: vi.fn(),
+  };
+});
+const screenshot = vi.hoisted(() => ({ captureViewportPng: vi.fn() }));
+
+vi.mock("react-grab/primitives", () => ({
+  disposeBaselineStyles: vi.fn(),
+  freeze: primitives.freeze,
+  getElementAtPoint: primitives.getElementAtPoint,
+  getElementBounds: primitives.getElementBounds,
+  getElementContext: primitives.getElementContext,
   getElementSelector: vi.fn(() => "button"),
-  getElementsAtPoint: vi.fn(() => []),
+  getElementsAtPoint: primitives.getElementsAtPoint,
   isElementGrabbable: vi.fn(() => true),
   unfreeze: primitives.unfreeze,
+}));
+vi.mock("../../src/client/screenshot.js", () => ({
+  captureViewportPng: screenshot.captureViewportPng,
 }));
 
 import { mountAgentAnnotations } from "../../src/client/index.js";
 import { defineClientExtension } from "../../src/extension/index.js";
 import { FileTaskStore } from "../../src/server/store.js";
 import { MemoryTaskTransport } from "../../src/testing/index.js";
-import type { AgentAnnotationsTask, TaskTransport } from "../../src/types/index.js";
+import type { AgentAnnotationsTask, HostIntegration, TaskTransport } from "../../src/types/index.js";
 import { annotationFixture, targetFixture, taskFixture } from "../core/test-data.js";
 
 afterEach(() => {
@@ -46,6 +56,9 @@ afterEach(() => {
   primitives.getElementAtPoint.mockReturnValue(null);
   primitives.getElementBounds.mockReset();
   primitives.getElementBounds.mockReturnValue({ x: 0, y: 0, width: 1, height: 1 });
+  primitives.getElementContext.mockImplementation(primitives.context);
+  primitives.getElementsAtPoint.mockReturnValue([]);
+  screenshot.captureViewportPng.mockReset();
   primitives.freeze.mockClear();
   primitives.unfreeze.mockClear();
   vi.useRealTimers();
@@ -106,6 +119,7 @@ describe("client runtime", () => {
 
   it("recovers an unresolved nested iframe marker after the outer document is populated", async () => {
     vi.useFakeTimers();
+    history.pushState({}, "", "/settings");
     document.body.innerHTML = '<div id="root"></div>';
     const mounted = await mountAgentAnnotations({
       transport: new MemoryTaskTransport(taskFixture({
@@ -202,6 +216,7 @@ describe("client runtime", () => {
 
   it("positions the editor beside its marker and clamps it after viewport changes", async () => {
     vi.useFakeTimers();
+    history.pushState({}, "", "/settings");
     vi.spyOn(window, "innerWidth", "get").mockReturnValue(1000);
     vi.spyOn(window, "innerHeight", "get").mockReturnValue(800);
     let markerRect = new DOMRect(422, 88, 28, 28);
@@ -290,6 +305,7 @@ describe("client runtime", () => {
   });
 
   it("keeps failed comment edits retryable and closes the editor after persistence", async () => {
+    history.pushState({}, "", "/settings");
     const transport = new MemoryTaskTransport(taskFixture());
     const mutate = vi.spyOn(transport, "mutate")
       .mockRejectedValueOnce(new Error("revision conflict"));
@@ -706,6 +722,7 @@ describe("client runtime", () => {
   });
 
   it("redacts secrets through the browser mutation path before persistence", async () => {
+    history.pushState({}, "", "/settings");
     const root = mkdtempSync(path.join(tmpdir(), "agent-annotations-runtime-redact-"));
     const store = new FileTaskStore(root);
     const task = store.readOrCreate();
@@ -732,6 +749,473 @@ describe("client runtime", () => {
       expect(persisted.annotations[0].comment).toContain("[REDACTED]");
     } finally {
       mounted.unmount();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("filters markers by the current route and refreshes on history navigation", async () => {
+    vi.useFakeTimers();
+    history.pushState({}, "", "/route-a");
+    const shared = document.createElement("button");
+    shared.id = "shared";
+    document.body.append(shared);
+    const task = taskFixture({
+      annotations: [
+        annotationFixture({
+          annotationId: "ann-a",
+          pageContext: { ...annotationFixture().pageContext, routeKey: "/route-a" },
+          targets: [targetFixture({ selector: "#shared" })],
+        }),
+        annotationFixture({
+          annotationId: "ann-b",
+          pageContext: { ...annotationFixture().pageContext, routeKey: "/route-b" },
+          targets: [targetFixture({ selector: "#shared" })],
+        }),
+      ],
+    });
+    const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport(task) });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      expect(shadow.querySelector('[data-annotation-id="ann-a"]')).not.toBeNull();
+      expect(shadow.querySelector('[data-annotation-id="ann-b"]')).toBeNull();
+      history.pushState({}, "", "/route-b");
+      await vi.runAllTimersAsync();
+      expect(shadow.querySelector('[data-annotation-id="ann-b"]')).not.toBeNull();
+      expect(shadow.querySelector('[data-annotation-id="ann-a"]')).toBeNull();
+      history.pushState({}, "", "/route-a");
+      await vi.runAllTimersAsync();
+      expect(shadow.querySelector('[data-annotation-id="ann-a"]')).not.toBeNull();
+      expect(shadow.querySelector('[data-annotation-id="ann-b"]')).toBeNull();
+    } finally {
+      mounted.unmount();
+      shared.remove();
+    }
+  });
+
+  it("refreshes markers through host route subscriptions and disposes them on unmount", async () => {
+    vi.useFakeTimers();
+    let notify!: (routeKey: string) => void;
+    const unsubscribe = vi.fn();
+    const host: HostIntegration = {
+      routeKey: () => "/host-a",
+      subscribe: (listener) => {
+        notify = listener;
+        return unsubscribe;
+      },
+    };
+    const task = taskFixture({
+      annotations: [annotationFixture({
+        pageContext: { ...annotationFixture().pageContext, routeKey: "/host-a" },
+      })],
+    });
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(task),
+      extensions: [defineClientExtension({ id: "route-host", apiVersion: 1, host })],
+    });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      expect(shadow.querySelector(".aa-marker")).not.toBeNull();
+      notify("/host-b");
+      await vi.runAllTimersAsync();
+      expect(shadow.querySelector(".aa-marker")).toBeNull();
+    } finally {
+      mounted.unmount();
+    }
+    expect(unsubscribe).toHaveBeenCalledOnce();
+  });
+
+  it("restores patched history methods and removes default route listeners on unmount", async () => {
+    const originalPushState = history.pushState;
+    const originalReplaceState = history.replaceState;
+    const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport() });
+    expect(history.pushState).not.toBe(originalPushState);
+    expect(history.replaceState).not.toBe(originalReplaceState);
+    mounted.unmount();
+    expect(history.pushState).toBe(originalPushState);
+    expect(history.replaceState).toBe(originalReplaceState);
+  });
+
+  it("navigates for cross-route focus when the host provides navigation", async () => {
+    history.pushState({}, "", "/route-a");
+    const navigate = vi.fn();
+    const host: HostIntegration = {
+      routeKey: () => location.pathname,
+      navigate,
+    };
+    const task = taskFixture({
+      annotations: [annotationFixture({
+        pageContext: { ...annotationFixture().pageContext, routeKey: "/route-b" },
+      })],
+    });
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(task),
+      extensions: [defineClientExtension({ id: "route-host", apiVersion: 1, host })],
+    });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      mounted.api.commands.markers.focus("ann-1");
+      expect(navigate).toHaveBeenCalledWith("/route-b");
+      expect(shadow.querySelector(".aa-editor")).toBeNull();
+    } finally {
+      mounted.unmount();
+    }
+  });
+
+  it("keeps cross-route focus unresolved without host navigation", async () => {
+    history.pushState({}, "", "/route-a");
+    const task = taskFixture({
+      annotations: [annotationFixture({
+        pageContext: { ...annotationFixture().pageContext, routeKey: "/route-b" },
+      })],
+    });
+    const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport(task) });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      mounted.api.commands.markers.focus("ann-1");
+      expect(shadow.querySelector(".aa-editor")).toBeNull();
+      expect(shadow.querySelector('[role="status"]')?.textContent)
+        .toBe("Annotation is on another route");
+    } finally {
+      mounted.unmount();
+    }
+  });
+
+  it("persists inspected region targets with namespaced redacted extension data", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "agent-annotations-runtime-region-"));
+    const store = new FileTaskStore(root);
+    const task = store.readOrCreate();
+    const transport: TaskTransport = {
+      read: () => Promise.resolve(store.readOrCreate()),
+      mutate: (request) => store.mutate(request),
+    };
+    const elements = Array.from({ length: 3 }, () => {
+      const element = document.createElement("button");
+      element.textContent = "Region target";
+      document.body.append(element);
+      return element;
+    });
+    primitives.getElementsAtPoint.mockReturnValue(elements);
+    const mounted = await mountAgentAnnotations({
+      transport,
+      extensions: [
+        defineClientExtension({
+          id: "region.data",
+          apiVersion: 1,
+          targetEnrichers: [{ id: "target", enrich: () => ({ secret: "value", keep: "yes" }) }],
+          redactors: [{ id: "redact", redact: () => ({ safe: true }) }],
+        }),
+      ],
+    });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      mounted.api.commands.capture.startArea();
+      document.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, clientX: 10, clientY: 10 }));
+      document.dispatchEvent(new MouseEvent("pointermove", { bubbles: true, clientX: 100, clientY: 100 }));
+      document.dispatchEvent(new MouseEvent("pointerup", { bubbles: true, clientX: 100, clientY: 100 }));
+      const composer = shadow.querySelector<HTMLElement>(".aa-composer")!;
+      expect(composer.textContent).toContain("Area (3 sampled targets)");
+      const textarea = composer.querySelector<HTMLTextAreaElement>("textarea")!;
+      textarea.value = "Region comment";
+      composer.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      await vi.waitFor(() => expect(store.read()!.annotations).toHaveLength(1));
+      const annotation = store.read()!.annotations[0]!;
+      expect(annotation.kind).toBe("region");
+      expect(annotation.region).toMatchObject({
+        coordinateSpace: "document",
+        x: 10,
+        y: 10,
+        width: 90,
+        height: 90,
+      });
+      expect(annotation.targets).toHaveLength(3);
+      expect(annotation.targets![0]!.inspection.tagName).toBe("button");
+      expect(annotation.extensions["region.data"]).toEqual({ safe: true });
+      expect(JSON.stringify(store.read())).not.toContain('"secret"');
+    } finally {
+      mounted.unmount();
+      for (const element of elements) element.remove();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("persists an empty region without fabricating targets", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "agent-annotations-runtime-region-empty-"));
+    const store = new FileTaskStore(root);
+    const task = store.readOrCreate();
+    const transport: TaskTransport = {
+      read: () => Promise.resolve(store.readOrCreate()),
+      mutate: (request) => store.mutate(request),
+    };
+    primitives.getElementsAtPoint.mockReturnValue([]);
+    const mounted = await mountAgentAnnotations({ transport });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      mounted.api.commands.capture.startArea();
+      document.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, clientX: 10, clientY: 10 }));
+      document.dispatchEvent(new MouseEvent("pointermove", { bubbles: true, clientX: 100, clientY: 100 }));
+      document.dispatchEvent(new MouseEvent("pointerup", { bubbles: true, clientX: 100, clientY: 100 }));
+      const composer = shadow.querySelector<HTMLElement>(".aa-composer")!;
+      expect(composer.textContent).toContain("Area (0 sampled targets)");
+      const textarea = composer.querySelector<HTMLTextAreaElement>("textarea")!;
+      textarea.value = "Empty region";
+      composer.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      await vi.waitFor(() => expect(store.read()!.annotations).toHaveLength(1));
+      const annotation = store.read()!.annotations[0]!;
+      expect(annotation.kind).toBe("region");
+      expect(annotation.targets).toEqual([]);
+    } finally {
+      mounted.unmount();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("persists region targets in the original sample order under concurrent inspection", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "agent-annotations-runtime-region-order-"));
+    const store = new FileTaskStore(root);
+    const task = store.readOrCreate();
+    const transport: TaskTransport = {
+      read: () => Promise.resolve(store.readOrCreate()),
+      mutate: (request) => store.mutate(request),
+    };
+    const elements: Element[] = Array.from({ length: 3 }, (_, index) => {
+      const element = document.createElement("button");
+      element.textContent = `Region target ${index}`;
+      document.body.append(element);
+      return element;
+    });
+    primitives.getElementsAtPoint.mockReturnValue(elements);
+    primitives.getElementContext.mockImplementation((element: Element) => {
+      const index = elements.indexOf(element);
+      const delay = [30, 0, 10][index] ?? 0;
+      return new Promise((resolve) => {
+        setTimeout(() => resolve(primitives.context()), delay);
+      });
+    });
+    const mounted = await mountAgentAnnotations({ transport });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      mounted.api.commands.capture.startArea();
+      document.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, clientX: 10, clientY: 10 }));
+      document.dispatchEvent(new MouseEvent("pointermove", { bubbles: true, clientX: 100, clientY: 100 }));
+      document.dispatchEvent(new MouseEvent("pointerup", { bubbles: true, clientX: 100, clientY: 100 }));
+      const composer = shadow.querySelector<HTMLElement>(".aa-composer")!;
+      const textarea = composer.querySelector<HTMLTextAreaElement>("textarea")!;
+      textarea.value = "Ordered region";
+      composer.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      await vi.waitFor(() => expect(store.read()!.annotations).toHaveLength(1));
+      const annotation = store.read()!.annotations[0]!;
+      expect(annotation.targets?.map((target) => target.inspection.text))
+        .toEqual(["Region target 0", "Region target 1", "Region target 2"]);
+    } finally {
+      mounted.unmount();
+      for (const element of elements) element.remove();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("cancels an in-progress composer when the route changes", async () => {
+    vi.useFakeTimers();
+    history.pushState({}, "", "/route-a");
+    const element = document.createElement("button");
+    document.body.append(element);
+    primitives.getElementsAtPoint.mockReturnValue([element]);
+    const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport() });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      mounted.api.commands.capture.startArea();
+      document.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, clientX: 10, clientY: 10 }));
+      document.dispatchEvent(new MouseEvent("pointermove", { bubbles: true, clientX: 100, clientY: 100 }));
+      document.dispatchEvent(new MouseEvent("pointerup", { bubbles: true, clientX: 100, clientY: 100 }));
+      expect(shadow.querySelector(".aa-composer")).not.toBeNull();
+      history.pushState({}, "", "/route-b");
+      await vi.runAllTimersAsync();
+      expect(shadow.querySelector(".aa-composer")).toBeNull();
+      expect(mounted.api.getSnapshot().captureMode).toBe("idle");
+    } finally {
+      mounted.unmount();
+      element.remove();
+    }
+  });
+
+  it("does not overwrite a later history wrapper when unmounting", async () => {
+    const originalPushState = history.pushState;
+    const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport() });
+    const laterWrapper = vi.fn(function (this: History, ...args: unknown[]) {
+      return (originalPushState as (...rest: unknown[]) => unknown).apply(this, args);
+    });
+    history.pushState = laterWrapper as typeof history.pushState;
+    mounted.unmount();
+    expect(history.pushState).toBe(laterWrapper);
+    history.pushState = originalPushState;
+  });
+
+  it("discards a submitted region when the route changes during inspection", async () => {
+    history.pushState({}, "", "/route-a");
+    const root = mkdtempSync(path.join(tmpdir(), "agent-annotations-runtime-region-route-"));
+    const store = new FileTaskStore(root);
+    const task = store.readOrCreate();
+    const transport: TaskTransport = {
+      read: () => Promise.resolve(store.readOrCreate()),
+      mutate: (request) => store.mutate(request),
+    };
+    const mutate = vi.spyOn(transport, "mutate");
+    const elements = Array.from({ length: 2 }, (_, index) => {
+      const element = document.createElement("button");
+      element.textContent = `Region target ${index}`;
+      document.body.append(element);
+      return element;
+    });
+    primitives.getElementsAtPoint.mockReturnValue(elements);
+    primitives.getElementContext.mockImplementation(() => new Promise((resolve) => {
+      setTimeout(() => resolve(primitives.context()), 50);
+    }));
+    const mounted = await mountAgentAnnotations({ transport });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      mounted.api.commands.capture.startArea();
+      document.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, clientX: 10, clientY: 10 }));
+      document.dispatchEvent(new MouseEvent("pointermove", { bubbles: true, clientX: 100, clientY: 100 }));
+      document.dispatchEvent(new MouseEvent("pointerup", { bubbles: true, clientX: 100, clientY: 100 }));
+      const composer = shadow.querySelector<HTMLElement>(".aa-composer")!;
+      const textarea = composer.querySelector<HTMLTextAreaElement>("textarea")!;
+      textarea.value = "Route race region";
+      composer.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      // The route changes while the region inspection is still in flight.
+      history.pushState({}, "", "/route-b");
+      await vi.waitFor(() => expect(store.read()!.annotations).toHaveLength(0));
+      // Give the in-flight submit time to finish; it must not persist.
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(store.read()!.annotations).toHaveLength(0);
+      expect(mutate).not.toHaveBeenCalled();
+    } finally {
+      mounted.unmount();
+      for (const element of elements) element.remove();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("bounds region enrichment concurrency to the inspection limit", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "agent-annotations-runtime-region-concurrency-"));
+    const store = new FileTaskStore(root);
+    const task = store.readOrCreate();
+    const transport: TaskTransport = {
+      read: () => Promise.resolve(store.readOrCreate()),
+      mutate: (request) => store.mutate(request),
+    };
+    const elements: Element[] = Array.from({ length: 60 }, (_, index) => {
+      const element = document.createElement("button");
+      element.textContent = `Region target ${index}`;
+      document.body.append(element);
+      return element;
+    });
+    primitives.getElementsAtPoint.mockReturnValue(elements);
+    let active = 0;
+    let peak = 0;
+    const mounted = await mountAgentAnnotations({
+      transport,
+      extensions: [
+        defineClientExtension({
+          id: "region.concurrency",
+          apiVersion: 1,
+          targetEnrichers: [{
+            id: "target",
+            enrich: async () => {
+              active += 1;
+              peak = Math.max(peak, active);
+              await new Promise((resolve) => setTimeout(resolve, 10));
+              active -= 1;
+              return { kept: true };
+            },
+          }],
+        }),
+      ],
+    });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      mounted.api.commands.capture.startArea();
+      document.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, clientX: 10, clientY: 10 }));
+      document.dispatchEvent(new MouseEvent("pointermove", { bubbles: true, clientX: 100, clientY: 100 }));
+      document.dispatchEvent(new MouseEvent("pointerup", { bubbles: true, clientX: 100, clientY: 100 }));
+      const composer = shadow.querySelector<HTMLElement>(".aa-composer")!;
+      const textarea = composer.querySelector<HTMLTextAreaElement>("textarea")!;
+      textarea.value = "Concurrency region";
+      composer.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      await vi.waitFor(() => expect(store.read()!.annotations).toHaveLength(1));
+      expect(peak).toBeLessThanOrEqual(4);
+      const annotation = store.read()!.annotations[0]!;
+      expect(annotation.targets).toHaveLength(50);
+      const extensionData = annotation.extensions["region.concurrency"] as {
+        target: { targets: unknown[] };
+      };
+      expect(extensionData.target.targets).toHaveLength(50);
+    } finally {
+      mounted.unmount();
+      for (const element of elements) element.remove();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("never attaches evidence captured after a route change to the annotation", async () => {
+    history.pushState({}, "", "/route-a");
+    const root = mkdtempSync(path.join(tmpdir(), "agent-annotations-runtime-evidence-route-"));
+    const store = new FileTaskStore(root);
+    const task = store.readOrCreate();
+    let releaseMutate!: () => void;
+    const writeEvidence = vi.fn(async (input: {
+      taskId: string;
+      expectedRevision: number;
+      annotationId: string;
+      png: string;
+      width: number;
+      height: number;
+    }) => store.mutate({
+      taskId: input.taskId,
+      expectedRevision: input.expectedRevision,
+      operations: [{
+        op: "addEvidence",
+        annotationId: input.annotationId,
+        evidence: {
+          kind: "screenshot",
+          ref: `evidence/${input.annotationId}.png`,
+          mediaType: "image/png",
+          width: input.width,
+          height: input.height,
+        },
+      }],
+    }));
+    const transport: TaskTransport = {
+      read: () => Promise.resolve(store.readOrCreate()),
+      mutate: (request) => new Promise((resolve) => {
+        releaseMutate = () => {
+          void store.mutate(request).then(resolve);
+        };
+      }),
+      writeEvidence,
+    };
+    screenshot.captureViewportPng.mockResolvedValue({ png: "fake-png", width: 100, height: 100 });
+    const target = document.createElement("button");
+    document.body.append(target);
+    primitives.getElementAtPoint.mockReturnValue(target);
+    const mounted = await mountAgentAnnotations({ transport });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      mounted.api.commands.capture.startPick();
+      document.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 10 }));
+      const composer = shadow.querySelector<HTMLElement>(".aa-composer")!;
+      const textarea = composer.querySelector<HTMLTextAreaElement>("textarea")!;
+      textarea.value = "Evidence race";
+      composer.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      await vi.waitFor(() => expect(releaseMutate).toBeDefined());
+      // The route changes while the annotation mutation is still in flight.
+      history.pushState({}, "", "/route-b");
+      releaseMutate();
+      await vi.waitFor(() => expect(store.read()!.annotations).toHaveLength(1));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(writeEvidence).not.toHaveBeenCalled();
+      expect(store.read()!.annotations[0]!.evidence ?? []).toHaveLength(0);
+    } finally {
+      mounted.unmount();
+      target.remove();
       rmSync(root, { recursive: true, force: true });
     }
   });

@@ -186,6 +186,8 @@ describe("ClientExtensionRegistry", () => {
       { redactors: [{ ...redactor("bad"), redact: "bad" as never }] },
       { messages: { bad: 1 } as never },
       { host: { locale: "bad" } as never },
+      { host: { navigate: "bad" } as never },
+      { host: { subscribe: "bad" } as never },
       { setup: "bad" as never },
     ];
     for (const [index, values] of invalid.entries()) {
@@ -194,6 +196,16 @@ describe("ClientExtensionRegistry", () => {
       expect(registry.getExtensions()).toEqual([]);
       expect(registry.getToolbarContributions()).toEqual([]);
     }
+  });
+
+  it("accepts host route navigate and subscribe callbacks", () => {
+    const registry = new ClientExtensionRegistry();
+    const navigate = () => undefined;
+    const subscribe = () => () => undefined;
+    expect(() => registry.register(extension("route-host", {
+      host: { routeKey: () => "/a", navigate, subscribe },
+    }))).not.toThrow();
+    expect(registry.getHostIntegration()).toMatchObject({ navigate, subscribe });
   });
 
   it("preserves defineClientExtension identity", () => {

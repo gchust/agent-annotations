@@ -139,6 +139,34 @@ describe("shared formatter", () => {
     `);
   });
 
+  it("describes region targets with source context in markdown", () => {
+    const task = taskFixture({
+      annotations: [
+        annotationFixture({
+          annotationId: "ann-region",
+          kind: "region",
+          comment: "Region with targets",
+          targets: [
+            targetFixture(),
+            targetFixture({ selector: "main > a" }),
+          ],
+          region: {
+            coordinateSpace: "document",
+            x: 1,
+            y: 2,
+            width: 300,
+            height: 100,
+          },
+        }),
+      ],
+    });
+    const output = formatAgentAnnotationsTaskMarkdown(task);
+    expect(output).toContain("- region: 1,2 300x100");
+    expect(output).toContain("#### Target 1");
+    expect(output).toContain("#### Target 2");
+    expect(output).toContain("- source: src/pages/settings.tsx:12:4 (SaveButton)");
+  });
+
   it("supports the JSON public formatter", () => {
     expect(JSON.parse(formatAgentAnnotationsTask(task, { format: "json" }))).toEqual(task);
   });
