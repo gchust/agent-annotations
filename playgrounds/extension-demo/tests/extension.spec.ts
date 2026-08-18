@@ -23,9 +23,9 @@ test("external extension shares the public registry and survives HMR", async ({ 
     "agent-annotations.builtin:copy",
     "demo.extension:demo-copy-json",
     "agent-annotations.builtin:visibility",
-    "agent-annotations.builtin:list",
-    "demo.extension:demo-panel-action",
     "agent-annotations.builtin:help",
+    "demo.extension:demo-panel-action",
+    "agent-annotations.builtin:list",
     "agent-annotations.builtin:toggle",
   ]);
   if (evidenceRoot) {

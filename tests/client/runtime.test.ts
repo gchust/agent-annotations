@@ -1393,6 +1393,10 @@ describe("client runtime", () => {
         width: 90,
         height: 90,
       });
+      // Area stays armed after the save with only transient state cleared.
+      expect(mounted.api.getSnapshot().captureMode).toBe("area");
+      expect(shadow.querySelector(".aa-composer")).toBeNull();
+      expect(shadow.querySelector(".aa-area")).toBeNull();
       expect(annotation.targets).toHaveLength(3);
       expect(annotation.targets![0]!.inspection.tagName).toBe("button");
       expect(annotation.extensions["region.data"]).toEqual({ safe: true });
@@ -2425,6 +2429,488 @@ describe("client runtime", () => {
       mounted.unmount();
       frame.remove();
       bodyApp.remove();
+    }
+  });
+  it("renders features in the exact toolbar order with separate collapse chrome after a divider", async () => {
+    const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport() });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      const labels = [...shadow.querySelectorAll<HTMLButtonElement>(".aa-dock .aa-action")]
+        .map((node) => node.getAttribute("aria-label"));
+      expect(labels).toEqual([
+        "Pick (Ctrl+Alt+P)",
+        "Multi (Ctrl+Alt+M)",
+        "Area (Ctrl+Alt+A)",
+        "Copy (Ctrl+Alt+C)",
+        "Markers (Ctrl+Alt+V)",
+        "Shortcut help (Shift+/)",
+        "Annotations (Ctrl+Alt+L)",
+        "Collapse toolbar (Ctrl+Alt+K)",
+      ]);
+      const divider = shadow.querySelector<HTMLElement>(".aa-dock .aa-divider");
+      expect(divider).not.toBeNull();
+      const collapse = shadow.querySelector('[aria-label^="Collapse toolbar"]')!;
+      const help = shadow.querySelector('[aria-label^="Shortcut help"]')!;
+      const list = shadow.querySelector('[aria-label^="Annotations"]')!;
+      expect(divider!.compareDocumentPosition(help) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+      expect(divider!.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+      expect(divider!.compareDocumentPosition(collapse) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    } finally {
+      mounted.unmount();
+    }
+  });
+
+  it("keeps collapse as the last chrome after the divider even with later host contributions", async () => {
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(),
+      extensions: [defineClientExtension({
+        id: "late-host",
+        apiVersion: 1,
+        toolbar: [{
+          id: "late",
+          group: "host",
+          order: 1,
+          label: "Late host action",
+          icon: () => null,
+          kind: "action",
+          execute: () => undefined,
+        }],
+      })],
+    });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      const actions = [...shadow.querySelectorAll<HTMLButtonElement>(".aa-dock .aa-action")];
+      expect(actions.at(-1)!.getAttribute("aria-label")).toContain("Collapse toolbar");
+      const divider = shadow.querySelector<HTMLElement>(".aa-divider")!;
+      expect(divider.nextElementSibling).toBe(actions.at(-1)!);
+      const late = shadow.querySelector('[aria-label="Late host action"]')!;
+      expect(divider.compareDocumentPosition(late) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+    } finally {
+      mounted.unmount();
+    }
+  });
+
+  it("shows the open count capped at 99+ or the annotation icon when collapsed", async () => {
+    vi.useFakeTimers();
+    const hundred = taskFixture({
+      annotations: Array.from({ length: 100 }, (_, index) =>
+        annotationFixture({ annotationId: `ann-${index}` })),
+    });
+    const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport(hundred) });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      shadow.querySelector<HTMLButtonElement>('[aria-label^="Collapse toolbar"]')!.click();
+      const count = shadow.querySelector<HTMLElement>(".aa-collapsed-count")!;
+      expect(count.textContent).toBe("99+");
+      expect(count.getAttribute("aria-label")).toBe("100 open annotations");
+      expect(count.getAttribute("aria-expanded")).toBe("false");
+      // The count chrome shows a tooltip on hover and focus like other controls.
+      count.dispatchEvent(new MouseEvent("mouseenter"));
+      vi.advanceTimersByTime(300);
+      expect(shadow.querySelector('[role="tooltip"]')?.textContent).toBe("100 open annotations");
+      // Clicking the count opens the annotation list and reflects aria-expanded.
+      count.click();
+      expect(shadow.querySelector('[aria-label="Annotation list"]')).not.toBeNull();
+      expect(shadow.querySelector<HTMLElement>(".aa-collapsed-count")!.getAttribute("aria-expanded"))
+        .toBe("true");
+    } finally {
+      mounted.unmount();
+    }
+  });
+
+  it("shows the annotation icon at zero open annotations when collapsed", async () => {
+    const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport() });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      shadow.querySelector<HTMLButtonElement>('[aria-label^="Collapse toolbar"]')!.click();
+      const count = shadow.querySelector<HTMLElement>(".aa-collapsed-count")!;
+      expect(count.querySelector("svg")).not.toBeNull();
+      expect(count.textContent?.trim()).toBe("");
+      expect(count.getAttribute("aria-label")).toBe("Annotation list (Ctrl+Alt+L)");
+      expect(shadow.querySelectorAll(".aa-collapsed-count .aa-count-badge")).toHaveLength(0);
+    } finally {
+      mounted.unmount();
+    }
+  });
+
+  it("persists the dock position per origin and project task and clamps it after reload and resize", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(window, "innerWidth", "get").mockReturnValue(1000);
+    vi.spyOn(window, "innerHeight", "get").mockReturnValue(800);
+    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains("aa-dock") ? 420 : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains("aa-dock") ? 50 : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this.classList.contains("aa-dock")) {
+        return new DOMRect(Number.parseFloat(this.style.left) || 290, Number.parseFloat(this.style.top) || 730, 420, 50);
+      }
+      if (this.classList.contains("aa-grip")) {
+        const dock = this.parentElement!.getBoundingClientRect();
+        return new DOMRect(dock.left + 6, dock.top + 6, 34, 34);
+      }
+      return new DOMRect();
+    });
+    const dragTo = async (grip: HTMLButtonElement) => {
+      grip.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, clientX: 300, clientY: 740 }));
+      grip.dispatchEvent(new MouseEvent("pointermove", { bubbles: true, clientX: 400, clientY: 640 }));
+      grip.dispatchEvent(new MouseEvent("pointerup", { bubbles: true }));
+    };
+    const sameTask = taskFixture();
+    const first = await mountAgentAnnotations({ transport: new MemoryTaskTransport(sameTask) });
+    let grip = document.getElementById("agent-annotations-root")!.shadowRoot!
+      .querySelector<HTMLButtonElement>(".aa-grip")!;
+    grip.setPointerCapture = vi.fn();
+    await dragTo(grip);
+    const key = "agent-annotations:dock-position:task-1";
+    expect(localStorage.getItem(key)).toContain('"left":390');
+    expect(localStorage.getItem("agent-annotations:dock-position")).toBeNull();
+    first.unmount();
+    // A fresh mount with the same task restores the saved position.
+    const second = await mountAgentAnnotations({ transport: new MemoryTaskTransport(sameTask) });
+    let shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    let dock = shadow.querySelector<HTMLElement>(".aa-dock")!;
+    expect(dock.style.left).toBe("390px");
+    expect(dock.style.top).toBe("630px");
+    // A resize clamps the saved position back into the viewport.
+    vi.spyOn(window, "innerWidth", "get").mockReturnValue(400);
+    vi.spyOn(window, "innerHeight", "get").mockReturnValue(40);
+    window.dispatchEvent(new Event("resize"));
+    expect(dock.style.left).toBe("0px");
+    expect(dock.style.top).toBe("0px");
+    second.unmount();
+    // A different task does not inherit the position.
+    const otherTask = taskFixture({ taskId: "task-other" });
+    const third = await mountAgentAnnotations({ transport: new MemoryTaskTransport(otherTask) });
+    shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    dock = shadow.querySelector<HTMLElement>(".aa-dock")!;
+    expect(dock.style.left).toBe("");
+    third.unmount();
+    // A corrupted stored value is ignored instead of crashing.
+    localStorage.setItem("agent-annotations:dock-position:task-1", "{not json");
+    const fourth = await mountAgentAnnotations({ transport: new MemoryTaskTransport(sameTask) });
+    shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    dock = shadow.querySelector<HTMLElement>(".aa-dock")!;
+    expect(dock.style.left).toBe("");
+    fourth.unmount();
+    localStorage.removeItem("agent-annotations:dock-position:task-1");
+  });
+
+  it("shows the same tooltip on keyboard focus as on hover and clamps it onscreen", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(window, "innerWidth", "get").mockReturnValue(200);
+    vi.spyOn(window, "innerHeight", "get").mockReturnValue(100);
+    const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport() });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      const pick = shadow.querySelector<HTMLButtonElement>('[aria-label^="Pick"]')!;
+      pick.dispatchEvent(new FocusEvent("focus"));
+      vi.advanceTimersByTime(300);
+      const tooltip = shadow.querySelector<HTMLElement>('[role="tooltip"]')!;
+      expect(tooltip.textContent).toBe("Pick (Ctrl+Alt+P)");
+      expect(Number.parseFloat(tooltip.style.left)).toBeGreaterThanOrEqual(0);
+      expect(Number.parseFloat(tooltip.style.left)).toBeLessThan(200);
+      expect(Number.parseFloat(tooltip.style.top)).toBeGreaterThanOrEqual(0);
+      pick.dispatchEvent(new FocusEvent("blur"));
+      expect(shadow.querySelector('[role="tooltip"]')).toBeNull();
+    } finally {
+      mounted.unmount();
+    }
+  });
+
+  it("collapsing through the API clears hover outlines while preserving an open draft", async () => {
+    const target = document.createElement("button");
+    document.body.append(target);
+    primitives.getElementAtPoint.mockReturnValue(target);
+    const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport() });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      mounted.api.commands.capture.startPick();
+      document.dispatchEvent(new MouseEvent("pointermove", { bubbles: true, clientX: 5, clientY: 5 }));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(shadow.querySelector(".aa-outline")).not.toBeNull();
+      document.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 5, clientY: 5 }));
+      const textarea = shadow.querySelector<HTMLTextAreaElement>("[aria-label='Annotation comment']")!;
+      textarea.value = "kept draft";
+      mounted.api.commands.toolbar.toggleCollapsed();
+      expect(mounted.api.getSnapshot().collapsed).toBe(true);
+      expect(shadow.querySelector(".aa-outline")).toBeNull();
+      expect(shadow.querySelector(".aa-multi-complete")).toBeNull();
+      expect(shadow.querySelector<HTMLTextAreaElement>("[aria-label='Annotation comment']")!.value)
+        .toBe("kept draft");
+    } finally {
+      mounted.unmount();
+      target.remove();
+    }
+  });
+
+  it("dismisses a hover tooltip with Escape even when the page has focus", async () => {
+    vi.useFakeTimers();
+    const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport() });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      const pick = shadow.querySelector<HTMLButtonElement>('[aria-label^="Pick"]')!;
+      pick.dispatchEvent(new MouseEvent("mouseenter"));
+      vi.advanceTimersByTime(300);
+      expect(shadow.querySelector('[role="tooltip"]')).not.toBeNull();
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+      expect(shadow.querySelector('[role="tooltip"]')).toBeNull();
+    } finally {
+      mounted.unmount();
+    }
+  });
+
+  it("returns focus to the collapsed count after the list panel closes", async () => {
+    vi.useFakeTimers();
+    const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport(taskFixture()) });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      shadow.querySelector<HTMLButtonElement>('[aria-label^="Collapse toolbar"]')!.click();
+      const count = shadow.querySelector<HTMLElement>(".aa-collapsed-count")!;
+      expect(count.getAttribute("data-action-id")).toBe("agent-annotations.builtin:list");
+      count.click();
+      expect(shadow.querySelector('[aria-label="Annotation list"]')).not.toBeNull();
+      await vi.runAllTimersAsync();
+      // The panel has focus inside the shadow; Escape from there closes it and
+      // returns focus to the visible count trigger.
+      const shadowRoot = document.getElementById("agent-annotations-root")!.shadowRoot!;
+      const panelFocus = shadowRoot.activeElement as HTMLElement;
+      panelFocus.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, composed: true }));
+      await vi.runAllTimersAsync();
+      expect(shadow.querySelector('[aria-label="Annotation list"]')).toBeNull();
+      expect(shadowRoot.activeElement).toBe(count);
+    } finally {
+      mounted.unmount();
+    }
+  });
+
+  it("offers a visible multi completion action without a permanent toolbar contribution", async () => {
+    const a = document.createElement("button");
+    const b = document.createElement("button");
+    document.body.append(a, b);
+    primitives.getElementAtPoint.mockImplementation(((x: number) => (x < 50 ? a : b)) as never);
+    const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport() });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      expect(shadow.querySelector(".aa-multi-complete")).toBeNull();
+      mounted.api.commands.capture.startMulti();
+      document.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 5 }));
+      expect(shadow.querySelector(".aa-multi-complete")).toBeNull();
+      document.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 90, clientY: 5 }));
+      const chip = shadow.querySelector<HTMLButtonElement>(".aa-multi-complete")!;
+      expect(chip.textContent).toContain("2");
+      chip.click();
+      expect(shadow.querySelector('[aria-label="Annotation composer"]')).not.toBeNull();
+      expect([...shadow.querySelectorAll<HTMLButtonElement>(".aa-dock .aa-action")]
+        .some((node) => node.textContent?.includes("Finish"))).toBe(false);
+    } finally {
+      mounted.unmount();
+      a.remove();
+      b.remove();
+    }
+  });
+
+  it("clamps the multi completion chip when the viewport shrinks", async () => {
+    vi.spyOn(window, "innerWidth", "get").mockReturnValue(1000);
+    vi.spyOn(window, "innerHeight", "get").mockReturnValue(800);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this.classList.contains("aa-dock")) return new DOMRect(290, 730, 420, 50);
+      return new DOMRect();
+    });
+    const a = document.createElement("button");
+    const b = document.createElement("button");
+    document.body.append(a, b);
+    primitives.getElementAtPoint.mockImplementation(((x: number) => (x < 50 ? a : b)) as never);
+    const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport() });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      mounted.api.commands.capture.startMulti();
+      document.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 5 }));
+      document.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 90, clientY: 5 }));
+      const chip = shadow.querySelector<HTMLElement>(".aa-multi-complete")!;
+      expect(chip.style.left).toBe("290px");
+      expect(chip.style.top).toBe("722px");
+      // A shrunk viewport clamps the chip back onscreen without losing it.
+      vi.spyOn(window, "innerWidth", "get").mockReturnValue(100);
+      window.dispatchEvent(new Event("resize"));
+      expect(chip.style.left).toBe("92px");
+      expect(chip.style.top).toBe("722px");
+      expect(shadow.querySelector(".aa-multi-complete")).not.toBeNull();
+    } finally {
+      mounted.unmount();
+      a.remove();
+      b.remove();
+    }
+  });
+
+  it("keeps pick armed and clears only transient selection after a successful save", async () => {
+    const target = document.createElement("button");
+    document.body.append(target);
+    primitives.getElementAtPoint.mockReturnValue(target);
+    const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport() });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      mounted.api.commands.capture.startPick();
+      document.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 5, clientY: 5 }));
+      const composer = shadow.querySelector<HTMLElement>('[aria-label="Annotation composer"]')!;
+      const textarea = composer.querySelector<HTMLTextAreaElement>("textarea")!;
+      textarea.value = "Keep pick";
+      composer.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(mounted.api.getSnapshot().captureMode).toBe("pick");
+      expect(shadow.querySelector('[aria-label="Annotation composer"]')).toBeNull();
+      // Still armed: the next click opens a fresh composer.
+      document.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 5, clientY: 5 }));
+      expect(shadow.querySelector('[aria-label="Annotation composer"]')).not.toBeNull();
+    } finally {
+      mounted.unmount();
+      target.remove();
+    }
+  });
+
+  it("clears only transient selection after a successful multi save and stays armed", async () => {
+    const a = document.createElement("button");
+    const b = document.createElement("button");
+    document.body.append(a, b);
+    primitives.getElementAtPoint.mockImplementation(((x: number) => (x < 50 ? a : b)) as never);
+    const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport() });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      mounted.api.commands.capture.startMulti();
+      document.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 5 }));
+      document.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 90, clientY: 5 }));
+      shadow.querySelector<HTMLButtonElement>(".aa-multi-complete")!.click();
+      const composer = shadow.querySelector<HTMLElement>('[aria-label="Annotation composer"]')!;
+      const textarea = composer.querySelector<HTMLTextAreaElement>("textarea")!;
+      textarea.value = "Multi save";
+      composer.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(mounted.api.getSnapshot().captureMode).toBe("multi");
+      expect(shadow.querySelector(".aa-multi-complete")).toBeNull();
+      // Still armed with an empty selection: two new clicks bring the chip back.
+      document.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 5 }));
+      document.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 90, clientY: 5 }));
+      expect(shadow.querySelector(".aa-multi-complete")).not.toBeNull();
+    } finally {
+      mounted.unmount();
+      a.remove();
+      b.remove();
+    }
+  });
+
+  it("collapse cancels active capture interception but keeps an open draft and blocks capture hotkeys", async () => {
+    const target = document.createElement("button");
+    document.body.append(target);
+    primitives.getElementAtPoint.mockReturnValue(target);
+    const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport() });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      mounted.api.commands.capture.startPick();
+      document.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 5, clientY: 5 }));
+      const textarea = shadow.querySelector<HTMLTextAreaElement>("[aria-label='Annotation comment']")!;
+      textarea.value = "typed draft";
+      shadow.querySelector<HTMLButtonElement>('[aria-label^="Collapse toolbar"]')!.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(mounted.api.getSnapshot().captureMode).toBe("idle");
+      expect(shadow.querySelector<HTMLTextAreaElement>("[aria-label='Annotation comment']")!.value)
+        .toBe("typed draft");
+      // Closing the draft leaves the page non-intercepted.
+      shadow.querySelector<HTMLButtonElement>('[aria-label="Cancel"]')!.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(shadow.querySelector(".aa-composer")).toBeNull();
+      document.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 5, clientY: 5 }));
+      expect(shadow.querySelector(".aa-composer")).toBeNull();
+      // Capture hotkeys are blocked while collapsed; collapse hotkey still works.
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "p", ctrlKey: true, altKey: true, bubbles: true }));
+      expect(mounted.api.getSnapshot().captureMode).toBe("idle");
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true, altKey: true, bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(mounted.api.getSnapshot().collapsed).toBe(false);
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "p", ctrlKey: true, altKey: true, bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(mounted.api.getSnapshot().captureMode).toBe("pick");
+    } finally {
+      mounted.unmount();
+      target.remove();
+    }
+  });
+
+  it("removes completed annotations from the list only after confirmation and keeps open ones", async () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const task = taskFixture({
+      annotations: [
+        annotationFixture({ annotationId: "open-1" }),
+        annotationFixture({ annotationId: "done-1", status: "completed", completedAt: "2026-08-12T12:30:00.000Z" }),
+        annotationFixture({ annotationId: "done-2", status: "completed", completedAt: "2026-08-12T13:00:00.000Z" }),
+      ],
+    });
+    const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport(task) });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      mounted.api.commands.panels.open("agent-annotations.builtin:list");
+      const remove = shadow.querySelector<HTMLButtonElement>('[aria-label^="Remove completed"]')!;
+      expect(remove.getAttribute("aria-label")).toBe("Remove completed (2)");
+      remove.click();
+      expect(confirm).toHaveBeenCalledOnce();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(mounted.api.getSnapshot().task.annotations.map((entry) => entry.annotationId))
+        .toEqual(["open-1", "done-1", "done-2"]);
+      confirm.mockReturnValue(true);
+      remove.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const remaining = mounted.api.getSnapshot().task.annotations;
+      expect(remaining.map((entry) => entry.annotationId)).toEqual(["open-1"]);
+      expect(remaining[0]!.status).toBe("open");
+      const disabled = shadow.querySelector<HTMLButtonElement>('[aria-label^="Remove completed"]')!;
+      expect(disabled.disabled).toBe(true);
+      expect(disabled.getAttribute("aria-label")).toBe("Remove completed (0)");
+    } finally {
+      mounted.unmount();
+    }
+  });
+
+  it("keeps an editor draft only for its own annotation and preserves it across collapse", async () => {
+    const task = taskFixture({
+      annotations: [
+        annotationFixture({ annotationId: "ann-a", comment: "A comment" }),
+        annotationFixture({ annotationId: "ann-b", comment: "B comment" }),
+      ],
+    });
+    const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport(task) });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      mounted.api.commands.markers.focus("ann-a");
+      let textarea = shadow.querySelector<HTMLTextAreaElement>(".aa-editor textarea")!;
+      textarea.value = "Draft for A";
+      // Collapsing rebuilds chrome but must keep the same editor's draft.
+      shadow.querySelector<HTMLButtonElement>('[aria-label^="Collapse toolbar"]')!.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      textarea = shadow.querySelector<HTMLTextAreaElement>(".aa-editor textarea")!;
+      expect(textarea.value).toBe("Draft for A");
+      shadow.querySelector<HTMLButtonElement>('[aria-label^="Collapse toolbar"]')!.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      // Switching to another annotation must never inherit the previous draft.
+      mounted.api.commands.markers.focus("ann-b");
+      textarea = shadow.querySelector<HTMLTextAreaElement>(".aa-editor textarea")!;
+      expect(textarea.value).toBe("B comment");
+    } finally {
+      mounted.unmount();
+    }
+  });
+
+  it("copy leaves the task and marker visibility untouched", async () => {
+    const task = taskFixture();
+    const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport(task) });
+    try {
+      const before = JSON.stringify(mounted.api.getSnapshot().task);
+      await mounted.api.commands.annotations.copyOpen();
+      expect(JSON.stringify(mounted.api.getSnapshot().task)).toBe(before);
+      expect(mounted.api.getSnapshot().markersVisible).toBe(true);
+      expect(mounted.api.getSnapshot().captureMode).toBe("idle");
+    } finally {
+      mounted.unmount();
     }
   });
 });

@@ -15,7 +15,8 @@ const env = {
   ...process.env,
   NO_PROXY: bypass,
   no_proxy: bypass,
-  AGENT_ANNOTATIONS_EVIDENCE: path.join(temporary, "evidence"),
+  AGENT_ANNOTATIONS_EVIDENCE: process.env.AGENT_ANNOTATIONS_EVIDENCE
+    ?? path.join(temporary, "evidence"),
 };
 const run = (args, cwd = root, stdio = "inherit") =>
   execFileSync("pnpm", args, { cwd, env, stdio, encoding: "utf8" });

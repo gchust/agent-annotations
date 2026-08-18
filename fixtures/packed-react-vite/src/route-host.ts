@@ -5,6 +5,7 @@ export default defineClientExtension({
   apiVersion: 1,
   host: {
     routeKey: () => `${location.pathname}${location.search}${location.hash}`,
+    theme: () => "system",
     navigate(routeKey) {
       history.pushState({}, "", routeKey);
       window.dispatchEvent(new PopStateEvent("popstate"));

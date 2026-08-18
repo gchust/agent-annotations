@@ -57,6 +57,8 @@ const HelpPanel: PanelContribution["render"] = ({ studio, close }) =>
 
 const AnnotationList: PanelContribution["render"] = ({ studio, close }) => {
   const [filter, setFilter] = useState<"open" | "all">("open");
+  const completedCount = studio.getSnapshot().task.annotations
+    .filter((annotation) => annotation.status === "completed").length;
   return createElement(
     "div",
     null,
@@ -124,6 +126,27 @@ const AnnotationList: PanelContribution["render"] = ({ studio, close }) => {
               ),
             ]
       )
+    ),
+    createElement(
+      "div",
+      { className: "aa-filter" },
+      createElement(
+        "button",
+        {
+          type: "button",
+          className: "aa-button aa-danger",
+          disabled: completedCount === 0,
+          "aria-label": `Remove completed (${completedCount})`,
+          onClick: () => {
+            const wording = completedCount === 1
+              ? "Remove 1 completed annotation?"
+              : `Remove ${completedCount} completed annotations?`;
+            if (!window.confirm(wording)) return;
+            studio.commands.annotations.removeCompleted();
+          },
+        },
+        `Remove completed (${completedCount})`
+      )
     )
   );
 };
@@ -134,8 +157,8 @@ const toolbar: ToolbarContribution[] = [
   { id: "area", group: "capture", order: 30, label: "Area", icon: AreaIcon, kind: "toggle", shortcut: shortcut("A", "KeyA"), isPressed: ({ captureMode }) => captureMode === "area", execute: ({ studio }) => studio.commands.capture.startArea() },
   { id: "copy", group: "handoff", order: 10, label: "Copy", icon: CopyIcon, kind: "action", shortcut: shortcut("C", "KeyC"), execute: ({ studio }) => studio.commands.annotations.copyOpen() },
   { id: "visibility", group: "view", order: 10, label: "Markers", icon: MarkersIcon, kind: "toggle", shortcut: shortcut("V", "KeyV"), isPressed: ({ markersVisible }) => markersVisible, execute: ({ studio }) => studio.getSnapshot().markersVisible ? studio.commands.markers.hide() : studio.commands.markers.show() },
-  { id: "list", group: "view", order: 20, label: "Annotations", icon: AnnotationsIcon, kind: "panel", shortcut: shortcut("L", "KeyL"), panelId: "list", isPressed: ({ openPanel }) => openPanel === "agent-annotations.builtin:list" },
-  { id: "help", group: "view", order: 30, label: "Shortcut help", icon: HelpIcon, kind: "panel", shortcut: shortcut("/", "Slash", false, false, true), panelId: "help", isPressed: ({ openPanel }) => openPanel === "agent-annotations.builtin:help" },
+  { id: "help", group: "view", order: 20, label: "Shortcut help", icon: HelpIcon, kind: "panel", shortcut: shortcut("/", "Slash", false, false, true), panelId: "help", isPressed: ({ openPanel }) => openPanel === "agent-annotations.builtin:help" },
+  { id: "list", group: "view", order: 30, label: "Annotations", icon: AnnotationsIcon, kind: "panel", shortcut: shortcut("L", "KeyL"), panelId: "list", isPressed: ({ openPanel }) => openPanel === "agent-annotations.builtin:list" },
   { id: "toggle", group: "view", order: 40, label: "Collapse toolbar", icon: CollapseIcon, kind: "toggle", shortcut: shortcut("K", "KeyK"), isVisible: showCollapse, isPressed: toggleCollapsed, execute: ({ studio }) => studio.commands.toolbar.toggleCollapsed() },
 ];
 

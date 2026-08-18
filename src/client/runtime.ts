@@ -44,6 +44,7 @@ import {
 } from "./inspection-engine.js";
 import { builtinClientExtension } from "./builtin-extension.js";
 import {
+  AnnotationsIcon,
   CloseIcon,
   CompleteIcon,
   DeleteIcon,
@@ -451,6 +452,10 @@ export async function mountAgentAnnotations(
         "";
   const platform = /Mac|iPhone|iPad/.test(navigator.platform) ? "mac" : "other";
   const toolbar = registry.getToolbarContributions();
+  collapseAction = toolbar.find(
+    (contribution) => contribution.id === "agent-annotations.builtin:toggle"
+  )?.id ?? null;
+  const collapseContribution = toolbar.find((contribution) => contribution.id === collapseAction);
   const buildShortcuts = () => toolbar.flatMap((contribution) =>
     contribution.shortcut
       ? [{
@@ -500,6 +505,31 @@ export async function mountAgentAnnotations(
     toast.setAttribute("role", "status");
     toast.textContent = status;
     overlayMount.append(toast);
+  };
+  const renderMultiComplete = () => {
+    overlayMount.querySelector(".aa-multi-complete")?.remove();
+    if (captureMode !== "multi" || composer || selected.length < 2) return;
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "aa-multi-complete";
+    chip.setAttribute("aria-label", `Complete selection (${selected.length})`);
+    chip.textContent = `Finish (${selected.length})`;
+    chip.addEventListener("click", () => {
+      if (destroyed || captureMode !== "multi" || composer) return;
+      composer = { kind: "multi", elements: [...selected] };
+      setInspectionFrozen(true, selected);
+      render();
+    });
+    overlayMount.append(chip);
+    positionMultiComplete();
+  };
+  const positionMultiComplete = () => {
+    const chip = overlayMount.querySelector<HTMLElement>(".aa-multi-complete");
+    const dock = root.querySelector<HTMLElement>(".aa-dock");
+    if (!chip || !dock) return;
+    const rect = dock.getBoundingClientRect();
+    chip.style.left = `${Math.max(8, Math.min(rect.left, innerWidth - chip.offsetWidth - 8))}px`;
+    chip.style.top = `${Math.max(8, rect.top - chip.offsetHeight - 8)}px`;
   };
   const setStatus = (message: string) => {
     if (destroyed) return;
@@ -613,29 +643,39 @@ export async function mountAgentAnnotations(
     render();
     emit();
   };
-  const toggleCollapsed = () => {
-    const before = snapshot();
-    collapsed = !collapsed;
-    collapseAction = collapsed
-      ? toolbar.find(
-          (contribution) =>
-            contribution.isPressed?.(before) === false &&
-            contribution.isPressed?.(snapshot()) === true
-        )?.id ?? null
-      : null;
+  const setCollapsed = (next: boolean) => {
+    if (collapsed === next) return;
+    collapsed = next;
+    if (next && captureMode !== "idle") {
+      // Collapsing cancels invisible capture interception while an open
+      // composer/editor draft is deliberately preserved: refreshOverlays
+      // carries live drafts into the rebuilt surfaces, so a full render both
+      // clears the transient overlays (hover/area/multi chip) and keeps text.
+      clearCaptureDocuments();
+      setInspectionFrozen(false);
+      captureMode = "idle";
+      selected = [];
+      hover = null;
+      areaStart = null;
+      areaRect = null;
+    }
     render();
     emit();
   };
+  const toggleCollapsed = () => setCollapsed(!collapsed);
 
-  const cancelCapture = () => {
+  const clearTransientSelection = () => {
     setInspectionFrozen(false);
-    clearCaptureDocuments();
-    captureMode = "idle";
     selected = [];
     hover = null;
     areaStart = null;
     areaRect = null;
     composer = null;
+  };
+  const cancelCapture = () => {
+    clearCaptureDocuments();
+    captureMode = "idle";
+    clearTransientSelection();
     render();
     emit();
   };
@@ -814,8 +854,16 @@ export async function mountAgentAnnotations(
     const tooltip = overlayMount.querySelector<HTMLElement>(".aa-tooltip");
     if (!tooltip) return;
     const rect = trigger.getBoundingClientRect();
-    tooltip.style.left = `${Math.max(4, rect.left)}px`;
-    tooltip.style.top = `${Math.max(4, rect.top - 34)}px`;
+    const left = Math.max(4, Math.min(rect.left, innerWidth - tooltip.offsetWidth - 4));
+    const above = rect.top - 34;
+    if (above >= 4) {
+      tooltip.style.left = `${left}px`;
+      tooltip.style.top = `${above}px`;
+    } else {
+      // Flip below the trigger and keep the tooltip fully onscreen.
+      tooltip.style.left = `${left}px`;
+      tooltip.style.top = `${Math.min(rect.bottom + 8, innerHeight - tooltip.offsetHeight - 4)}px`;
+    }
   };
   const showTooltip = (trigger: HTMLElement) => {
     hideTooltip();
@@ -880,7 +928,7 @@ export async function mountAgentAnnotations(
     return resolved;
   };
 
-  const renderComposer = () => {
+  const renderComposer = (previousDraft: string) => {
     if (!composer) return;
     const surface = document.createElement("form");
     surface.className = "aa-composer";
@@ -893,6 +941,7 @@ export async function mountAgentAnnotations(
     textarea.className = "aa-textarea";
     textarea.setAttribute("aria-label", "Annotation comment");
     textarea.placeholder = "Describe the requested change";
+    textarea.value = previousDraft;
     const actions = document.createElement("div");
     actions.className = "aa-actions";
     const cancel = iconButton("Cancel", CloseIcon, cancelCapture);
@@ -950,7 +999,9 @@ export async function mountAgentAnnotations(
           }
         }
         if (destroyed) return;
-        cancelCapture();
+        clearTransientSelection();
+        render();
+        emit();
         setStatus("Annotation saved");
       } catch (error) {
         save.disabled = false;
@@ -1000,17 +1051,18 @@ export async function mountAgentAnnotations(
     });
   };
 
-  const renderEditor = () => {
+  const renderEditor = (previousDraft: string | null) => {
     const annotation = task.annotations.find((entry) => entry.annotationId === editingId);
     if (!annotation) return;
     const surface = document.createElement("form");
     surface.className = "aa-editor";
     surface.setAttribute("role", "dialog");
     surface.setAttribute("aria-label", "Annotation editor");
+    surface.dataset.annotationId = annotation.annotationId;
     const textarea = document.createElement("textarea");
     textarea.className = "aa-textarea";
     textarea.setAttribute("aria-label", "Annotation comment");
-    textarea.value = annotation.comment;
+    textarea.value = previousDraft ?? annotation.comment;
     const actions = document.createElement("div");
     actions.className = "aa-actions";
     const save = submitButton("Save comment", SaveIcon);
@@ -1077,6 +1129,40 @@ export async function mountAgentAnnotations(
   };
 
   let drag: { x: number; y: number; left: number; top: number } | null = null;
+  const dockPositionKey = (): string => `agent-annotations:dock-position:${task.taskId}`;
+  const readDockPosition = (): { left: number; top: number } | null => {
+    try {
+      const raw = localStorage.getItem(dockPositionKey());
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as { left?: unknown; top?: unknown };
+      if (typeof parsed.left !== "number" || typeof parsed.top !== "number"
+        || !Number.isFinite(parsed.left) || !Number.isFinite(parsed.top)) {
+        return null;
+      }
+      return { left: parsed.left, top: parsed.top };
+    } catch {
+      return null;
+    }
+  };
+  const persistDockPosition = (): void => {
+    try {
+      if (dockPosition) localStorage.setItem(dockPositionKey(), JSON.stringify(dockPosition));
+    } catch {
+      // Storage can be unavailable (private mode); position persistence is best-effort.
+    }
+  };
+  const clampDockPosition = (): void => {
+    const dock = root.querySelector<HTMLElement>(".aa-dock");
+    if (!dock || !dockPosition) return;
+    const left = Math.max(0, Math.min(innerWidth - dock.offsetWidth, dockPosition.left));
+    const top = Math.max(0, Math.min(innerHeight - dock.offsetHeight, dockPosition.top));
+    if (left !== dockPosition.left || top !== dockPosition.top) {
+      dockPosition = { left, top };
+    }
+    dock.style.left = `${dockPosition.left}px`;
+    dock.style.top = `${dockPosition.top}px`;
+    dock.style.bottom = "auto";
+  };
   let hoverOutline: HTMLElement | null = null;
   let areaNode: HTMLElement | null = null;
   let overlayFrame: number | null = null;
@@ -1094,9 +1180,13 @@ export async function mountAgentAnnotations(
       const leave = () => hideTooltip();
       node.addEventListener("mouseenter", enter);
       node.addEventListener("mouseleave", leave);
+      node.addEventListener("focus", enter);
+      node.addEventListener("blur", leave);
       return () => {
         node.removeEventListener("mouseenter", enter);
         node.removeEventListener("mouseleave", leave);
+        node.removeEventListener("focus", enter);
+        node.removeEventListener("blur", leave);
       };
     }, []);
     const { contribution, label, shortcut, current } = props;
@@ -1119,10 +1209,56 @@ export async function mountAgentAnnotations(
     }, createElement(contribution.icon, { className: "aa-icon" }));
   };
 
+  const CollapsedCount = (props: {
+    openCount: number;
+    current: StudioPublicSnapshot;
+  }): import("react").ReactNode => {
+    const ref = useRef<HTMLButtonElement | null>(null);
+    useLayoutEffect(() => {
+      const node = ref.current!;
+      const enter = () => showTooltip(node);
+      const leave = () => hideTooltip();
+      node.addEventListener("mouseenter", enter);
+      node.addEventListener("mouseleave", leave);
+      node.addEventListener("focus", enter);
+      node.addEventListener("blur", leave);
+      return () => {
+        node.removeEventListener("mouseenter", enter);
+        node.removeEventListener("mouseleave", leave);
+        node.removeEventListener("focus", enter);
+        node.removeEventListener("blur", leave);
+      };
+    }, []);
+    const { openCount, current } = props;
+    const listOpen = current.openPanel === "agent-annotations.builtin:list";
+    const listPanel = registry.getPanels().find((panel) => panel.id === "agent-annotations.builtin:list");
+    const listContribution = toolbar.find((entry) => entry.id === "agent-annotations.builtin:list");
+    const listShortcut = shortcuts.find((entry) => entry.id === "agent-annotations.builtin:list");
+    const listLabel = listPanel ? localized(listPanel.title) : "Annotation list";
+    const zeroLabel = listShortcut ? `${listLabel} (${listShortcut.formatted})` : listLabel;
+    return createElement("button", {
+      ref,
+      type: "button",
+      className: "aa-collapsed-count",
+      "aria-label": openCount === 0 ? zeroLabel : `${openCount} open annotations`,
+      "aria-expanded": String(listOpen),
+      "data-action-id": listContribution?.id ?? "agent-annotations.builtin:list",
+      onClick: () => {
+        // Route through the registered contribution so closing the panel returns
+        // focus to this visible control (same data-action-id as the toolbar list).
+        if (listContribution) executeContribution(listContribution);
+        else api.commands.panels.open("agent-annotations.builtin:list");
+      },
+    }, openCount === 0
+      ? createElement(AnnotationsIcon, { className: "aa-icon" })
+      : createElement("span", { className: "aa-count-badge" }, openCount > 99 ? "99+" : String(openCount)));
+  };
+
   const StudioChrome = (): import("react").ReactNode => {
     studioRenders += 1;
     hostElement.dataset.studioRenders = String(studioRenders);
     const current = useSyncExternalStore(uiSubscribe, uiGetSnapshot);
+    const openCount = current.task.annotations.filter((entry) => entry.status === "open").length;
     const dockRef = useRef<HTMLDivElement | null>(null);
     const gripRef = useRef<HTMLButtonElement | null>(null);
     const panelRef = useRef<HTMLElement | null>(null);
@@ -1134,9 +1270,13 @@ export async function mountAgentAnnotations(
       const leave = () => hideTooltip();
       grip.addEventListener("mouseenter", enter);
       grip.addEventListener("mouseleave", leave);
+      grip.addEventListener("focus", enter);
+      grip.addEventListener("blur", leave);
       return () => {
         grip.removeEventListener("mouseenter", enter);
         grip.removeEventListener("mouseleave", leave);
+        grip.removeEventListener("focus", enter);
+        grip.removeEventListener("blur", leave);
       };
     }, []);
 
@@ -1186,13 +1326,21 @@ export async function mountAgentAnnotations(
             dockRef.current.style.bottom = "auto";
             positionTooltip(gripRef.current!);
             positionPanel();
+            positionMultiComplete();
           },
-          onPointerUp: () => { drag = null; },
+          onPointerUp: () => {
+            drag = null;
+            persistDockPosition();
+          },
         }, createElement(GripIcon, { className: "aa-icon" })),
+        ...(current.collapsed
+          ? [createElement(CollapsedCount, { key: "collapsed-count", openCount, current })]
+          : []),
         ...toolbar.flatMap((contribution) => {
+          if (contribution.id === collapseAction) return [];
           const label = localized(contribution.label);
           const shortcut = shortcuts.find(({ id }) => id === contribution.id);
-          if (contribution.isVisible?.(current) === false && contribution.id !== collapseAction) {
+          if (contribution.isVisible?.(current) === false) {
             return [];
           }
           return [createElement(ToolbarButton, {
@@ -1202,7 +1350,19 @@ export async function mountAgentAnnotations(
             shortcut,
             current,
           })];
-        })
+        }),
+        ...(collapseContribution
+          ? [
+              createElement("div", { key: "aa-divider", className: "aa-divider", role: "separator" }),
+              createElement(ToolbarButton, {
+                key: collapseContribution.id,
+                contribution: collapseContribution,
+                label: localized(collapseContribution.label),
+                shortcut: shortcuts.find(({ id }) => id === collapseContribution.id),
+                current,
+              }),
+            ]
+          : [])
       ),
       panelContribution
         ? createElement("section", {
@@ -1273,6 +1433,17 @@ export async function mountAgentAnnotations(
       frames.delete(overlayFrame);
       overlayFrame = null;
     }
+    // Live drafts are captured before the wipe so pending-action rebuilds never
+    // lose what the user already typed into the composer or editor. An editor
+    // draft only belongs to the annotation it was typed in: switching to another
+    // annotation must never inherit the previous textarea.
+    const composerDraft = overlayMount.querySelector<HTMLTextAreaElement>(".aa-composer textarea")?.value ?? "";
+    const previousEditor = overlayMount.querySelector<HTMLElement>(".aa-editor");
+    const editorDraft = previousEditor
+      ? (previousEditor.dataset.annotationId === editingId
+          ? previousEditor.querySelector<HTMLTextAreaElement>("textarea")?.value ?? null
+          : null)
+      : null;
     overlayMount.replaceChildren();
     // The shared tracked nodes were detached by replaceChildren: reset the references
     // so the next interactive refresh re-creates them exactly once.
@@ -1283,8 +1454,9 @@ export async function mountAgentAnnotations(
     for (const element of selected) addOutline(element.getBoundingClientRect());
     // Hover and area outlines always go through the shared tracked nodes.
     refreshInteractiveOverlays();
-    renderComposer();
-    renderEditor();
+    renderComposer(composerDraft);
+    renderEditor(editorDraft);
+    renderMultiComplete();
     if (copyFallback) {
       const fallback = document.createElement("div");
       fallback.className = "aa-copy-fallback";
@@ -1405,21 +1577,27 @@ export async function mountAgentAnnotations(
     render();
   };
   const onKeyDown = (event: KeyboardEvent) => {
+    if (event.key === "Escape") hideTooltip();
     if (isHostEvent(event)) {
       if (event.key === "Escape" && openPanel) {
         event.preventDefault();
         api.commands.panels.close(openPanel);
-      } else if (event.key === "Escape" && captureMode !== "idle") {
+        return;
+      }
+      if (event.key === "Escape" && captureMode !== "idle") {
         event.preventDefault();
         cancelCapture();
+        return;
       }
-      return;
+      // Non-editable host chrome (toolbar buttons) still receives the global
+      // shortcuts so keyboard-only flows keep working after focus lands there.
     }
     if (event.key === "Escape" && captureMode !== "idle") {
       event.preventDefault();
       return cancelCapture();
     }
-    if (captureMode === "multi" && event.key === "Enter" && selected.length >= 2 && !isEditable(event.target)) {
+    if (!isHostEvent(event) && captureMode === "multi" && event.key === "Enter"
+      && selected.length >= 2 && !isEditable(event.target)) {
       event.preventDefault();
       composer = { kind: "multi", elements: [...selected] };
       setInspectionFrozen(true, selected);
@@ -1442,7 +1620,11 @@ export async function mountAgentAnnotations(
     if (!shortcut) return;
     event.preventDefault();
     const contribution = toolbar.find(({ id }) => id === shortcut.id);
-    if (contribution) executeContribution(contribution);
+    if (contribution) {
+      // Collapsed chrome must never start an invisible capture session.
+      if (collapsed && contribution.group === "capture") return;
+      executeContribution(contribution);
+    }
   };
   const record = (source: AgentAnnotationsDiagnosticsEntry["source"], value: unknown) => {
     if (destroyed) return;
@@ -1689,7 +1871,9 @@ export async function mountAgentAnnotations(
   }
 
   const onViewport = () => {
+    clampDockPosition();
     positionPanel();
+    positionMultiComplete();
     if (markerObserver || editingId || composer) scheduleMarkerRefresh();
   };
   window.addEventListener("resize", onViewport);
@@ -1699,6 +1883,11 @@ export async function mountAgentAnnotations(
   studioRoot = createRoot(uiMount);
   flushSync(() => studioRoot!.render(createElement(StudioChrome)));
   render();
+  const savedDockPosition = readDockPosition();
+  if (savedDockPosition) {
+    dockPosition = savedDockPosition;
+    clampDockPosition();
+  }
   const setupCleanups: Array<() => void> = [];
   try {
     for (const extension of registry.getExtensions()) {

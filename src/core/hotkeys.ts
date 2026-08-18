@@ -10,8 +10,8 @@ export const AGENT_ANNOTATIONS_SHORTCUTS = [
   { id: "area", key: "A", code: "KeyA", primary: true, alt: true, shift: false },
   { id: "copy", key: "C", code: "KeyC", primary: true, alt: true, shift: false },
   { id: "visibility", key: "V", code: "KeyV", primary: true, alt: true, shift: false },
-  { id: "list", key: "L", code: "KeyL", primary: true, alt: true, shift: false },
   { id: "help", key: "/", code: "Slash", primary: false, alt: false, shift: true },
+  { id: "list", key: "L", code: "KeyL", primary: true, alt: true, shift: false },
   { id: "toggle", key: "K", code: "KeyK", primary: true, alt: true, shift: false },
 ] as const satisfies readonly AgentAnnotationsShortcutDefinition[];
 
