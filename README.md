@@ -69,20 +69,36 @@ export default defineConfig({
 
 ## CLI
 
-The CLI reads `.agent-annotations/tasks/active-task.json`, which always uses
-`agent-annotations.task.v1`:
+The CLI reads `active-task.json` from the resolved runtime data directory
+(`.agent-annotations` by default), which always uses `agent-annotations.task.v1`:
 
 ```text
+agent-annotations --root <path> --dir <path> <command> [options]
 agent-annotations list [--json]
 agent-annotations complete <annotation-id> --verified --summary <text>
 agent-annotations reopen <annotation-id>
 agent-annotations print [--json|--markdown]
-agent-annotations verify [--json]
+agent-annotations validate-task [--json]
 agent-annotations revision [--json]
 agent-annotations wait --source-revision <sha256> [--timeout-ms <n>] [--json]
 agent-annotations diagnostics [--json|--clear]
 agent-annotations evidence [--json]
 ```
+
+`validate-task` strictly validates the persisted task file with the schema
+parser and reports the task id, revision, schema, and valid state; it never
+claims anything about the browser or the running dev server. `--json` prints
+exactly one parseable JSON value on stdout; without it the CLI prints stable
+human-readable text; errors go to stderr with stable exit codes.
+
+The workspace root and the runtime data directory are resolved separately.
+`--root`/`AGENT_ANNOTATIONS_ROOT` set the workspace root; `--dir`/
+`AGENT_ANNOTATIONS_DIR` set the runtime data directory (their existing
+meaning). Without explicit paths, the CLI discovers the nearest ancestor
+`.agent-annotations/session.json` written by the Vite plugin, then falls back to
+the nearest ancestor workspace (a directory containing `package.json` or
+`.git`), then the current directory. Running from a monorepo subdirectory keeps
+`revision` and `wait` anchored to the session's workspace root.
 
 `diagnostics` prints the bounded redacted browser diagnostics persisted under
 `.agent-annotations` (with `--clear` emptying only diagnostics); `evidence`
@@ -110,8 +126,8 @@ secrets. Extension redactors run on the client and are composed deterministicall
 in stable `(extensionId, redactorId)` order; generic redaction always runs again
 after them and again before persistence. Extension setup receives `{ studio }`
 only — raw `TaskTransport` is never exposed to extensions. The CLI is scoped to
-that runtime directory and does not execute shell commands or expose arbitrary
-file reads.
+the resolved runtime data directory and does not execute shell commands or
+expose arbitrary file reads.
 
 ## Release verification
 

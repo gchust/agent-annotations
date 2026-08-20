@@ -11,27 +11,41 @@ import { listEvidence } from "../server/evidence.js";
 import { createSourcePathService } from "../server/source-path.js";
 import { FileTaskStore } from "../server/store.js";
 import { PACKAGE_VERSION } from "../metadata.js";
+import { parseCliArguments } from "./arguments.js";
+import { resolveCliPaths } from "./paths.js";
 import type { AgentAnnotationsMutationOperation, AgentAnnotationsTask } from "../types/index.js";
 
 const HELP = `Agent Annotations ${PACKAGE_VERSION}
 
-Usage: agent-annotations <command> [options]
+Usage: agent-annotations [--root <path>] [--dir <path>] <command> [options]
+
+Global options:
+  --root <path>  Workspace root (also AGENT_ANNOTATIONS_ROOT)
+  --dir <path>   Runtime data directory (also AGENT_ANNOTATIONS_DIR)
 
 Commands:
   list [--json]
   complete <annotation-id> --verified --summary <text>
   reopen <annotation-id>
   print [--json|--markdown]
-  verify [--json]
+  validate-task [--json]
   revision [--json]
   wait --source-revision <sha256> [--timeout-ms <n>] [--json]
   diagnostics [--json|--clear]
   evidence [--json]
 `;
 
-const runtimeRoot = (): string => path.resolve(
-  process.env.AGENT_ANNOTATIONS_DIR ?? path.join(process.cwd(), ".agent-annotations")
-);
+const KNOWN_COMMANDS = new Set([
+  "list",
+  "complete",
+  "reopen",
+  "print",
+  "validate-task",
+  "revision",
+  "wait",
+  "diagnostics",
+  "evidence",
+]);
 
 const fail = (message: string, code = 1): never => {
   process.stderr.write(`[agent-annotations] ${message}\n`);
@@ -39,9 +53,12 @@ const fail = (message: string, code = 1): never => {
   throw new Error("__handled__");
 };
 
-const task = (): AgentAnnotationsTask => {
-  const found = new FileTaskStore(runtimeRoot()).read();
-  if (!found) return fail(`no task found at ${path.join(runtimeRoot(), "tasks", "active-task.json")}`);
+const taskPath = (runtimeRoot: string): string =>
+  path.join(runtimeRoot, "tasks", "active-task.json");
+
+const task = (runtimeRoot: string): AgentAnnotationsTask => {
+  const found = new FileTaskStore(runtimeRoot).read();
+  if (!found) return fail(`no task found at ${taskPath(runtimeRoot)}`);
   return found;
 };
 
@@ -76,13 +93,13 @@ const parseMutationArgs = (command: "complete" | "reopen", args: string[]): {
   };
 };
 
-const mutate = async (command: "complete" | "reopen", args: string[]): Promise<void> => {
-  const current = task();
+const mutate = async (command: "complete" | "reopen", args: string[], runtimeRoot: string): Promise<void> => {
+  const current = task(runtimeRoot);
   const { annotationId, operation } = parseMutationArgs(command, args);
   if (!current.annotations.some((annotation) => annotation.annotationId === annotationId)) {
     fail(`annotation "${annotationId}" not found`);
   }
-  const next = await new FileTaskStore(runtimeRoot()).mutate({
+  const next = await new FileTaskStore(runtimeRoot).mutate({
     taskId: current.taskId,
     expectedRevision: current.taskRevision,
     operations: [operation],
@@ -91,20 +108,27 @@ const mutate = async (command: "complete" | "reopen", args: string[]): Promise<v
 };
 
 const main = async (): Promise<void> => {
-  const [command, ...args] = process.argv.slice(2);
-  if (!command || command === "--help" || command === "-h" || command === "help") {
+  const parsed = parseCliArguments(process.argv.slice(2));
+  if ("error" in parsed) return fail(parsed.error, 2);
+  const { command, args, root, dir } = parsed;
+  if (command === null || command === "help") {
     process.stdout.write(HELP);
     return;
   }
+  if (!KNOWN_COMMANDS.has(command)) return fail(`unknown command: ${command}`, 2);
   if (args.includes("--help") || args.includes("-h")) {
     process.stdout.write(HELP);
     return;
   }
+  const resolution = resolveCliPaths({ cwd: process.cwd(), root, dir, env: process.env });
+  if (!resolution.ok) return fail(resolution.message, resolution.code);
+  const { workspaceRoot, runtimeRoot } = resolution;
+
   if (command === "list") {
     const unknown = args.filter((arg) => arg !== "--json");
     if (unknown.length) return fail(`unknown option: ${unknown[0]}`, 2);
     const json = args.includes("--json");
-    const current = task();
+    const current = task(runtimeRoot);
     if (json) {
       process.stdout.write(`${JSON.stringify({
         taskId: current.taskId,
@@ -118,30 +142,61 @@ const main = async (): Promise<void> => {
     }
     return;
   }
-  if (command === "complete" || command === "reopen") return mutate(command, args);
+  if (command === "complete" || command === "reopen") return mutate(command, args, runtimeRoot);
   if (command === "print") {
     const format = args[0] === "--markdown" ? "markdown" : args[0] === "--json" || !args.length ? "json" : fail(`unknown option: ${args[0]}`, 2);
-    process.stdout.write(`${formatAgentAnnotationsTask(task(), { format, annotations: "all" })}\n`);
+    process.stdout.write(`${formatAgentAnnotationsTask(task(runtimeRoot), { format, annotations: "all" })}\n`);
     return;
   }
-  if (command === "verify") {
+  if (command === "validate-task") {
     const unknown = args.filter((arg) => arg !== "--json");
     if (unknown.length) return fail(`unknown option: ${unknown[0]}`, 2);
-    const verified = parseAgentAnnotationsTask(JSON.parse(readFileSync(path.join(runtimeRoot(), "tasks", "active-task.json"), "utf8")));
-    process.stdout.write(`${JSON.stringify({ ok: true, taskId: verified.taskId, taskRevision: verified.taskRevision })}\n`);
+    const json = args.includes("--json");
+    let raw: string;
+    try {
+      raw = readFileSync(taskPath(runtimeRoot), "utf8");
+    } catch {
+      return fail(`no task found at ${taskPath(runtimeRoot)}`);
+    }
+    let validated: AgentAnnotationsTask;
+    try {
+      validated = parseAgentAnnotationsTask(JSON.parse(raw));
+    } catch (error) {
+      return fail(`invalid task: ${(error as Error).message}`, 1);
+    }
+    if (json) {
+      process.stdout.write(`${JSON.stringify({
+        ok: true,
+        taskId: validated.taskId,
+        taskRevision: validated.taskRevision,
+        schema: validated.schema,
+      })}\n`);
+      return;
+    }
+    process.stdout.write(
+      `task ${validated.taskId} is valid (taskRevision ${validated.taskRevision}, schema ${validated.schema})\n`
+    );
     return;
   }
   if (command === "revision") {
     const unknown = args.filter((arg) => arg !== "--json");
     if (unknown.length) return fail(`unknown option: ${unknown[0]}`, 2);
-    const current = new FileTaskStore(runtimeRoot()).read();
-    if (!current) return fail(`no task found at ${path.join(runtimeRoot(), "tasks", "active-task.json")}`);
-    const sourcePaths = createSourcePathService(process.cwd());
-    process.stdout.write(`${JSON.stringify({
+    const json = args.includes("--json");
+    const current = new FileTaskStore(runtimeRoot).read();
+    if (!current) return fail(`no task found at ${taskPath(runtimeRoot)}`);
+    const sourcePaths = createSourcePathService(workspaceRoot);
+    const revision = {
       taskRevision: current.taskRevision,
       sourceRevision: sourcePaths.revision(current),
       sourceFiles: sourcePaths.files(current),
-    })}\n`);
+    };
+    if (json) {
+      process.stdout.write(`${JSON.stringify(revision)}\n`);
+      return;
+    }
+    process.stdout.write(
+      `taskRevision ${revision.taskRevision} sourceRevision ${revision.sourceRevision} sourceFiles: ${revision.sourceFiles.join(", ") || "(none)"}\n`
+    );
     return;
   }
   if (command === "wait") {
@@ -173,19 +228,21 @@ const main = async (): Promise<void> => {
       return fail("--source-revision must be a 64-character hex sha256", 2);
     }
     const baseline = target.toLowerCase();
-    const store = new FileTaskStore(runtimeRoot());
-    const sourcePaths = createSourcePathService(process.cwd());
+    const store = new FileTaskStore(runtimeRoot);
+    const sourcePaths = createSourcePathService(workspaceRoot);
     const deadline = Date.now() + timeoutMs;
     let observed: string | null = null;
     while (true) {
       const current = store.read();
       observed = current ? sourcePaths.revision(current) : null;
       if (observed !== baseline) {
-        process.stdout.write(`${JSON.stringify({ changed: true, sourceRevision: observed })}\n`);
+        if (json) process.stdout.write(`${JSON.stringify({ changed: true, sourceRevision: observed })}\n`);
+        else process.stdout.write(`changed: true, sourceRevision: ${observed}\n`);
         return;
       }
       if (Date.now() >= deadline) {
-        process.stdout.write(`${JSON.stringify({ changed: false, sourceRevision: observed })}\n`);
+        if (json) process.stdout.write(`${JSON.stringify({ changed: false, sourceRevision: observed })}\n`);
+        else process.stdout.write(`changed: false, sourceRevision: ${observed}\n`);
         return;
       }
       await new Promise((resolve) => setTimeout(resolve, 250));
@@ -197,11 +254,11 @@ const main = async (): Promise<void> => {
     const unknown = args.filter((arg) => arg !== "--json" && arg !== "--clear");
     if (unknown.length) return fail(`unknown option: ${unknown[0]}`, 2);
     if (clear) {
-      clearDiagnostics(runtimeRoot());
+      clearDiagnostics(runtimeRoot);
       if (json) process.stdout.write("[]\n");
       return;
     }
-    const entries = readDiagnostics(runtimeRoot());
+    const entries = readDiagnostics(runtimeRoot);
     if (json) {
       process.stdout.write(`${JSON.stringify(entries)}\n`);
     } else {
@@ -215,8 +272,8 @@ const main = async (): Promise<void> => {
     const json = args.includes("--json");
     const unknown = args.filter((arg) => arg !== "--json");
     if (unknown.length) return fail(`unknown option: ${unknown[0]}`, 2);
-    const current = new FileTaskStore(runtimeRoot()).read();
-    const entries = current ? listEvidence(runtimeRoot(), current) : [];
+    const current = new FileTaskStore(runtimeRoot).read();
+    const entries = current ? listEvidence(runtimeRoot, current) : [];
     if (json) {
       process.stdout.write(`${JSON.stringify(entries)}\n`);
     } else {

@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { existsSync, realpathSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync, statSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -106,7 +106,7 @@ export default function agentAnnotations(
   let realRoot = existsSync(root) ? realpathSync(root) : root;
   let runtimeRoot = path.resolve(root, options.dir ?? ".agent-annotations");
   const assertRuntimeRoot = (): void => {
-    if (runtimeRoot !== root && !runtimeRoot.startsWith(`${root}${path.sep}`)) {
+    if (!inside(root, runtimeRoot)) {
       throw new Error("agentAnnotations dir must stay inside root");
     }
   };
@@ -130,12 +130,15 @@ export default function agentAnnotations(
   const persistSession = (address: ReturnType<NonNullable<import("node:http").Server["address"]>>): void => {
     if (!address || typeof address === "string") return;
     const origin = `http://127.0.0.1:${address.port}`;
+    mkdirSync(runtimeRoot, { recursive: true });
     store.writeSession({
       endpoint: resolvedEndpoint,
       origin,
       pid: process.pid,
       startedAt: new Date().toISOString(),
       token,
+      workspaceRoot: realRoot,
+      runtimeRoot: realpathSync(runtimeRoot),
     });
   };
 

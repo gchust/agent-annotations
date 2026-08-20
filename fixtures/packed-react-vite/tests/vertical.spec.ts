@@ -62,7 +62,7 @@ test("packed browser to file to CLI to browser loop, HMR and session security", 
     taskId: task.taskId,
     taskRevision: expect.any(Number),
   });
-  expect(JSON.parse(cli("verify", "--json"))).toMatchObject({ ok: true, taskId: task.taskId });
+  expect(JSON.parse(cli("validate-task", "--json"))).toMatchObject({ ok: true, taskId: task.taskId });
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await page.keyboard.press("Control+Alt+KeyJ");
   await expect.poll(() => page.evaluate(() => window.__demoExtension?.actionCount)).toBe(1);
@@ -70,13 +70,13 @@ test("packed browser to file to CLI to browser loop, HMR and session security", 
     .toMatchObject({ format: "demo-json" });
   expect(cli("list")).toContain(id);
   expect(cli("print", "--markdown")).toContain("Make target purple");
-  const beforeComplete = JSON.parse(cli("verify")).taskRevision;
+  const beforeComplete = JSON.parse(cli("validate-task", "--json")).taskRevision;
   expect(cli("complete", id, "--verified", "--summary", "Playwright verified")).toContain(`taskRevision ${beforeComplete + 1}`);
   await expect.poll(() => page.evaluate(() =>
     window.__demoExtension?.studio?.getSnapshot().task.annotations[0]?.status
   )).toBe("completed");
   await expect(shadow(page, '[aria-label="Annotation 1: edit"]')).toHaveCount(0);
-  expect(JSON.parse(cli("verify"))).toMatchObject({ ok: true, taskRevision: beforeComplete + 1 });
+  expect(JSON.parse(cli("validate-task", "--json"))).toMatchObject({ ok: true, taskRevision: beforeComplete + 1 });
   expect(cli("reopen", id)).toContain(`taskRevision ${beforeComplete + 2}`);
   await expect.poll(() => page.evaluate(() =>
     document.getElementById("agent-annotations-root")?.shadowRoot

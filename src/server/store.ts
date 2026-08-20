@@ -38,6 +38,8 @@ export type AgentAnnotationsSession = {
   pid: number;
   startedAt: string;
   token: string;
+  workspaceRoot: string;
+  runtimeRoot: string;
 };
 
 const readJson = (file: string): unknown => JSON.parse(readFileSync(file, "utf8"));

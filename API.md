@@ -79,3 +79,25 @@ injection rather than importing it directly.
 Screenshot evidence is written only inside the runtime `evidence` directory;
 `evidence` CLI listings and post-removal cleanup resolve refs strictly inside
 that directory and never follow traversal or symlink paths.
+
+## CLI
+
+The `agent-annotations` bin exposes `list`, `complete`, `reopen`, `print`,
+`validate-task`, `revision`, `wait`, `diagnostics`, and `evidence`.
+`validate-task` strictly validates the persisted task file with
+`parseAgentAnnotationsTask()` and reports task id, revision, schema, and valid
+state; it does not claim anything about browser or dev-server state. Commands
+honor a single output contract: `--json` writes exactly one parseable JSON
+value to stdout, the default writes stable human-readable text, and errors go
+to stderr with exit code 1 (runtime) or 2 (usage). The removed `verify` command
+has no alias.
+
+Path resolution is shared by every command and distinguishes the workspace
+root from the runtime data directory: `--root`/`AGENT_ANNOTATIONS_ROOT` set the
+workspace root; `--dir`/`AGENT_ANNOTATIONS_DIR` set the runtime data directory.
+Without explicit paths the CLI discovers the nearest ancestor
+`.agent-annotations/session.json` (recorded by the Vite plugin with canonical
+`workspaceRoot` and `runtimeRoot`), then the nearest ancestor workspace
+(`package.json` or `.git`), then the current directory. A session runtime root
+outside the workspace root is rejected unless `--dir`/`AGENT_ANNOTATIONS_DIR`
+was provided explicitly.

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -140,9 +140,12 @@ describe("serve-only Vite plugin", () => {
       const address = server.httpServer!.address();
       if (!address || typeof address === "string") throw new Error("no address");
       const base = `http://127.0.0.1:${address.port}`;
-      const token = JSON.parse(
+      const session = JSON.parse(
         readFileSync(path.join(root, ".agent-annotations", "session.json"), "utf8")
-      ).token;
+      );
+      expect(session.workspaceRoot).toBe(realpathSync(path.resolve(root)));
+      expect(session.runtimeRoot).toBe(realpathSync(path.join(path.resolve(root), ".agent-annotations")));
+      const token = session.token;
       const post = (body: unknown) => fetch(`${base}/__agent-annotations/diagnostics`, {
         method: "POST",
         headers: { "x-agent-annotations-token": token, "content-type": "application/json" },

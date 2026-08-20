@@ -21,7 +21,15 @@ afterEach(() => roots.splice(0).forEach((value) => rmSync(value, { recursive: tr
 describe("file task store", () => {
   it("writes a private session and removes only its own session on close", async () => {
     const store = new FileTaskStore(root());
-    const session = { endpoint: "/__agent-annotations", origin: "http://127.0.0.1:5173", pid: 1, startedAt: new Date().toISOString(), token: "secret" };
+    const session = {
+      endpoint: "/__agent-annotations",
+      origin: "http://127.0.0.1:5173",
+      pid: 1,
+      startedAt: new Date().toISOString(),
+      token: "secret",
+      workspaceRoot: root(),
+      runtimeRoot: root(),
+    };
     store.writeSession(session);
     expect(statSync(store.sessionPath).mode & 0o777).toBe(0o600);
     expect(JSON.parse(readFileSync(store.sessionPath, "utf8"))).toEqual(session);
