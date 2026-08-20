@@ -4,6 +4,10 @@ import { RevisionConflictError } from "../../src/core/index.js";
 import { MemoryTaskTransport } from "../../src/testing/index.js";
 
 describe("MemoryTaskTransport", () => {
+  it("rejects an invalid initial task with a schema validation error", () => {
+    expect(() => new MemoryTaskTransport({ invalid: true } as never)).toThrow(/task/);
+  });
+
   it("owns revisions without leaking mutable task references", async () => {
     const transport = new MemoryTaskTransport();
     const task = await transport.read();

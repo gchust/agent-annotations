@@ -209,10 +209,75 @@ describe("client runtime", () => {
     expect(unsubscribe).toHaveBeenCalledOnce();
   });
 
+  it("fails before creating UI when the transport read returns an invalid task", async () => {
+    const transport: TaskTransport = {
+      read: async () => ({ invalid: true }) as never,
+      mutate: async () => {
+        throw new Error("unused");
+      },
+    };
+    await expect(mountAgentAnnotations({ transport })).rejects.toThrow(/invalid task from transport/);
+    expect(document.getElementById("agent-annotations-root")).toBeNull();
+  });
+
+  it("throws a locatable error for invalid subscribed tasks without polluting state", async () => {
+    const task = await new MemoryTaskTransport().read();
+    let publish!: (task: AgentAnnotationsTask) => void;
+    const transport: TaskTransport = {
+      read: async () => task,
+      mutate: async () => task,
+      subscribe(listener) {
+        publish = listener;
+        return () => undefined;
+      },
+    };
+    const mounted = await mountAgentAnnotations({ transport });
+    expect(() => publish({ ...task, taskRevision: 99, annotations: "broken" } as never)).toThrow(/invalid task from transport/);
+    expect(mounted.api.getSnapshot().task.taskRevision).toBe(task.taskRevision);
+    expect(mounted.api.getSnapshot().task.annotations).toHaveLength(task.annotations.length);
+    mounted.unmount();
+  });
+
+  it("replaces an old high-revision task when a new task id arrives at revision 0", async () => {
+    vi.useFakeTimers();
+    const taskA = await new MemoryTaskTransport(taskFixture({ taskId: "task-a", taskRevision: 12 })).read();
+    let publish!: (task: AgentAnnotationsTask) => void;
+    const transport: TaskTransport = {
+      read: async () => taskA,
+      mutate: async () => taskA,
+      subscribe(listener) {
+        publish = listener;
+        return () => undefined;
+      },
+    };
+    const mounted = await mountAgentAnnotations({ transport });
+    expect(mounted.api.getSnapshot().task.taskId).toBe("task-a");
+    // The same task id with an older revision is ignored.
+    publish({ ...taskA, taskRevision: 10 });
+    await vi.runAllTimersAsync();
+    expect(mounted.api.getSnapshot().task.taskRevision).toBe(12);
+    // A replacement task id at revision 0 must replace task-a@12.
+    publish({ ...taskA, taskId: "task-b", taskRevision: 0 });
+    await vi.runAllTimersAsync();
+    expect(mounted.api.getSnapshot().task.taskId).toBe("task-b");
+    expect(mounted.api.getSnapshot().task.taskRevision).toBe(0);
+    // The same replacement at an equal revision is ignored.
+    publish({ ...taskA, taskId: "task-b", taskRevision: 0 });
+    await vi.runAllTimersAsync();
+    expect(mounted.api.getSnapshot().task.taskId).toBe("task-b");
+    expect(mounted.api.getSnapshot().task.taskRevision).toBe(0);
+    mounted.unmount();
+  });
+
   it("does not render markers for completed annotations", async () => {
     const mounted = await mountAgentAnnotations({
       transport: new MemoryTaskTransport(taskFixture({
-        annotations: [{ ...taskFixture().annotations[0]!, status: "completed" }],
+        status: "completed",
+        annotations: [{
+          ...taskFixture().annotations[0]!,
+          status: "completed",
+          completedAt: "2026-08-12T12:05:00.000Z",
+        }],
       })),
     });
     expect(document.getElementById("agent-annotations-root")!.shadowRoot!.querySelector(".aa-marker"))
@@ -1656,6 +1721,7 @@ describe("client runtime", () => {
     });
     const completed = taskFixture({
       ...latest,
+      status: "completed",
       taskRevision: 2,
       annotations: [{
         ...latest.annotations[0]!,
@@ -2490,24 +2556,26 @@ describe("client runtime", () => {
     }
   });
 
-  it("shows the open count capped at 99+ or the annotation icon when collapsed", async () => {
+  it("shows the open count when collapsed", async () => {
     vi.useFakeTimers();
-    const hundred = taskFixture({
-      annotations: Array.from({ length: 100 }, (_, index) =>
+    // The strict schema boundary caps tasks at 50 annotations, so the count
+    // chrome is exercised at the schema maximum.
+    const fifty = taskFixture({
+      annotations: Array.from({ length: 50 }, (_, index) =>
         annotationFixture({ annotationId: `ann-${index}` })),
     });
-    const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport(hundred) });
+    const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport(fifty) });
     const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
     try {
       shadow.querySelector<HTMLButtonElement>('[aria-label^="Collapse toolbar"]')!.click();
       const count = shadow.querySelector<HTMLElement>(".aa-collapsed-count")!;
-      expect(count.textContent).toBe("99+");
-      expect(count.getAttribute("aria-label")).toBe("100 open annotations");
+      expect(count.textContent).toBe("50");
+      expect(count.getAttribute("aria-label")).toBe("50 open annotations");
       expect(count.getAttribute("aria-expanded")).toBe("false");
       // The count chrome shows a tooltip on hover and focus like other controls.
       count.dispatchEvent(new MouseEvent("mouseenter"));
       vi.advanceTimersByTime(300);
-      expect(shadow.querySelector('[role="tooltip"]')?.textContent).toBe("100 open annotations");
+      expect(shadow.querySelector('[role="tooltip"]')?.textContent).toBe("50 open annotations");
       // Clicking the count opens the annotation list and reflects aria-expanded.
       count.click();
       expect(shadow.querySelector('[aria-label="Annotation list"]')).not.toBeNull();

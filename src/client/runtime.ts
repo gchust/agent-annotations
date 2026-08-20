@@ -11,6 +11,8 @@ import {
   toAgentAnnotationsDocumentRegion,
 } from "../core/index.js";
 import { ClientExtensionRegistry } from "../extension/index.js";
+import { createValidatedTaskTransport } from "./validated-transport.js";
+import { isTaskIdentityNewer, taskIdentity } from "../core/transport.js";
 import type {
   AgentAnnotation,
   AgentAnnotationsCaptureMode,
@@ -243,9 +245,13 @@ export async function mountAgentAnnotations(
   }
   const host = registry.getHostIntegration();
 
+  // Unconditional transport boundary: every task entering the runtime is
+  // schema-parsed, including third-party custom TaskTransport implementations.
+  const transport = createValidatedTaskTransport(options.transport);
+
   let task: AgentAnnotationsTask;
   try {
-    task = await options.transport.read();
+    task = await transport.read();
   } catch (error) {
     for (const unregister of registrations.reverse()) unregister();
     throw error;
@@ -409,9 +415,11 @@ export async function mountAgentAnnotations(
     timers.clear();
     frames.clear();
   });
-  if (options.transport.subscribe) {
-    cleanups.push(options.transport.subscribe((next) => {
-      if (destroyed || next.taskRevision <= task.taskRevision) return;
+  if (transport.subscribe) {
+    cleanups.push(transport.subscribe((next) => {
+      // Identity rule: a different task id replaces the current task even at
+      // revision 0; the same task id only advances on a larger revision.
+      if (destroyed || !isTaskIdentityNewer(taskIdentity(next), taskIdentity(task))) return;
       task = next;
       scheduleFrame(() => {
         render();
@@ -561,15 +569,19 @@ export async function mountAgentAnnotations(
             }
           : operation
       );
-      const next = await options.transport.mutate({
+      const next = await transport.mutate({
         taskId: task.taskId,
         expectedRevision,
         operations: redactedOperations,
       });
       if (destroyed) return undefined;
-      task = next;
-      render();
-      emit();
+      // A successful mutation updates last-seen only when the identity rule
+      // accepts it; an older result can never regress the current task.
+      if (isTaskIdentityNewer(taskIdentity(next), taskIdentity(task))) {
+        task = next;
+        render();
+        emit();
+      }
       return next;
     };
     try {
@@ -976,14 +988,14 @@ export async function mountAgentAnnotations(
         if (destroyed || routeKey !== submittedRouteKey) return;
         const persisted = await mutate([{ op: "add", annotation }]);
         if (destroyed) return;
-        if (persisted && options.transport.writeEvidence && routeKey === submittedRouteKey) {
+        if (persisted && transport.writeEvidence && routeKey === submittedRouteKey) {
           const overlays = composer?.kind === "region"
             ? [composer.rect]
             : composer?.elements.map(targetBounds) ?? [];
           const screenshot = await captureViewportPng(overlays);
           if (screenshot && !destroyed && routeKey === submittedRouteKey) {
             try {
-              task = await options.transport.writeEvidence({
+              const evidence = await transport.writeEvidence({
                 taskId: persisted.taskId,
                 expectedRevision: persisted.taskRevision,
                 annotationId: annotation.annotationId,
@@ -991,6 +1003,9 @@ export async function mountAgentAnnotations(
                 width: screenshot.width,
                 height: screenshot.height,
               });
+              if (!destroyed && isTaskIdentityNewer(taskIdentity(evidence), taskIdentity(task))) {
+                task = evidence;
+              }
               render();
               emit();
             } catch {
@@ -1636,7 +1651,7 @@ export async function mountAgentAnnotations(
     diagnostics.push(entry);
     if (diagnostics.length > 20) diagnostics.shift();
     emit();
-    void options.transport.appendDiagnostics?.([entry]).catch(() => undefined);
+    void transport.appendDiagnostics?.([entry]).catch(() => undefined);
   };
   const onError = (event: ErrorEvent) => record("window", event.message);
   const onRejection = (event: PromiseRejectionEvent) => record("promise", event.reason);

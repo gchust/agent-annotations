@@ -13,7 +13,10 @@ export class MemoryTaskTransport implements TaskTransport {
 
   constructor(task?: AgentAnnotationsTask) {
     const now = new Date().toISOString();
-    this.#task = task ?? createAgentAnnotationsTask({ taskId: createAgentAnnotationsId(), createdAt: now });
+    const initial = task ?? createAgentAnnotationsTask({ taskId: createAgentAnnotationsId(), createdAt: now });
+    // The initial task is a validation boundary: invalid input is rejected
+    // with the strict schema parser instead of being stored and served later.
+    this.#task = parseAgentAnnotationsTask(initial);
   }
 
   async read(): Promise<AgentAnnotationsTask> {
