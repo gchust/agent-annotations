@@ -5,7 +5,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
-const fixture = path.join(root, "fixtures/packed-react-vite");
+// AGENT_ANNOTATIONS_PACKED_FIXTURE lets release tests run this exact gate
+// against a temporary fixture copy; production/CI always uses the repo fixture.
+const fixture = process.env.AGENT_ANNOTATIONS_PACKED_FIXTURE
+  ? path.resolve(process.env.AGENT_ANNOTATIONS_PACKED_FIXTURE)
+  : path.join(root, "fixtures/packed-react-vite");
 const temporary = mkdtempSync(path.join(tmpdir(), "agent-annotations-packed-e2e-"));
 const consumer = path.join(temporary, "consumer");
 const tarball = path.join(consumer, "gchust-agent-annotations.tgz");

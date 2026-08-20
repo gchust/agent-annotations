@@ -68,6 +68,7 @@
     "pretest": "pnpm build",
     "test": "vitest run",
     "test:e2e": "node scripts/packed-e2e.mjs",
+    "test:e2e:repeat": "node scripts/repeat-e2e.mjs",
     "prepack": "pnpm build && node scripts/verify-dist.mjs",
     "prepublishOnly": "pnpm release:verify",
     "release:verify": "pnpm typecheck && pnpm test && pnpm check:architecture && pnpm check:docs && pnpm check:package && pnpm check:tarball && pnpm test:e2e",

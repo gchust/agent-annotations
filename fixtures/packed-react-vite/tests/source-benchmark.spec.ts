@@ -19,12 +19,15 @@ const expected = {
   "#portal-target": position("src/main.tsx", '<button id="portal-target"'),
 } as const;
 
-const capture = async (page: Page, selector: string) => {
-  await shadow(page, 'button[aria-label^="Pick"]').click();
-  await page.locator(selector).click();
-  await shadow(page, '[aria-label="Annotation comment"]').fill(`source ${selector}`);
-  await shadow(page, 'button[aria-label="Save annotation"]').click();
-};
+const rows = (task: any) => task.annotations.map((annotation: any) => {
+  const source = annotation.targets[0].inspection.source;
+  return {
+    selector: annotation.targets[0].selector,
+    filePath: source?.filePath ?? null,
+    lineNumber: source?.lineNumber ?? null,
+    columnNumber: source?.columnNumber ?? null,
+  };
+});
 
 const revision = async (page: Page, token: string) => page.evaluate(async (value) => {
   const session = await (await fetch("/__agent-annotations/revision", {
@@ -33,21 +36,49 @@ const revision = async (page: Page, token: string) => page.evaluate(async (value
   return session;
 }, token);
 
+const capture = async (page: Page, selector: string) => {
+  const comment = `source ${selector}`;
+  const expectedCount = JSON.parse(readFileSync(taskPath, "utf8")).annotations.length + 1;
+  await shadow(page, 'button[aria-label^="Pick"]').click();
+  await page.locator(selector).click();
+  await shadow(page, '[aria-label="Annotation comment"]').fill(comment);
+  await shadow(page, 'button[aria-label="Save annotation"]').click();
+  // The save handler persists asynchronously (an add mutation followed by
+  // best-effort screenshot evidence). Instead of a fixed delay, wait for an
+  // observable state: the task file must reach the expected annotation count
+  // and already carry this annotation's comment and target selector.
+  await expect.poll(() => {
+    const task = JSON.parse(readFileSync(taskPath, "utf8"));
+    const annotation = task.annotations.find((entry: any) => entry.comment === comment);
+    return task.annotations.length === expectedCount
+      && annotation?.targets?.[0]?.selector.includes(selector.slice(1)) === true;
+  }, { timeout: 10_000, message: `annotation ${selector} was not persisted` }).toBe(true);
+};
+
 test("source-benchmark duplicate-basename exact path, line, column, and revision", async ({ page }) => {
   await page.goto("/");
   await page.locator("#portal-toggle").click();
   for (const selector of Object.keys(expected)) await capture(page, selector);
 
+  // The final save must be fully drained before the task file is read again:
+  // wait until every expected annotation is visible on disk with its exact
+  // source path/line/column, and until the composer closes (the runtime writes
+  // best-effort screenshot evidence after every save, which mutates the file).
+  await expect.poll(() => {
+    const task = JSON.parse(readFileSync(taskPath, "utf8"));
+    if (task.annotations.length !== Object.keys(expected).length) return false;
+    return Object.entries(expected).every(([selector, source]) => {
+      const row = rows(task).find((entry: any) => entry.selector.includes(selector.slice(1)));
+      return row !== undefined
+        && row.filePath === source.filePath
+        && row.lineNumber === source.lineNumber
+        && row.columnNumber === source.columnNumber;
+    });
+  }, { timeout: 10_000, message: "expected annotations are not all persisted with exact source info" }).toBe(true);
+  await expect(shadow(page, ".aa-composer")).toHaveCount(0);
+
   const task = JSON.parse(readFileSync(taskPath, "utf8"));
-  const actual = task.annotations.map((annotation: any) => {
-    const source = annotation.targets[0].inspection.source;
-    return {
-      selector: annotation.targets[0].selector,
-      filePath: source?.filePath ?? null,
-      lineNumber: source?.lineNumber ?? null,
-      columnNumber: source?.columnNumber ?? null,
-    };
-  });
+  const actual = rows(task);
   for (const [selector, source] of Object.entries(expected)) {
     const row = actual.find((entry: any) => entry.selector.includes(selector.slice(1)));
     expect(row, `${selector} expected=${JSON.stringify(source)} actual=${JSON.stringify(row)}`).toMatchObject(source);

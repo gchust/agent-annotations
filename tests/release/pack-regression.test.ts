@@ -60,8 +60,21 @@ describe("pack lifecycle regression", () => {
   it("compiles a packed public type consumer", { timeout: 240_000 }, () => {
     const temporary = mkdtempSync(path.join(tmpdir(), "agent-annotations-type-consumer-"));
     try {
+      // Pack from a hermetic checkout (like the tarball regression above): the
+      // prepack build must never race other tests that spawn the shared root
+      // dist while `pnpm test` is running.
+      const checkout = path.join(temporary, "checkout");
+      cpSync(root, checkout, {
+        recursive: true,
+        filter(source) {
+          const relative = path.relative(root, source);
+          return !relative.split(path.sep).some((part) => ["node_modules", ".git", "dist", "test-results", "playwright-report"].includes(part));
+        },
+      });
+      symlinkSync(path.join(root, "node_modules"), path.join(checkout, "node_modules"), "dir");
+      rmSync(path.join(checkout, "dist"), { recursive: true, force: true });
       const destination = path.join(temporary, "packed");
-      run(["pack", "--pack-destination", destination], root);
+      run(["pack", "--pack-destination", destination], checkout);
       const tarball = readdirSync(destination).find((file) => file.endsWith(".tgz"));
       expect(tarball).toBeDefined();
       const consumer = path.join(temporary, "consumer");

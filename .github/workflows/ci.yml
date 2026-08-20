@@ -4,9 +4,13 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   test:
     name: ${{ matrix.os }} / node ${{ matrix.node }}
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
@@ -39,3 +43,26 @@ jobs:
       - name: Fresh packed E2E (Linux)
         if: runner.os == 'Linux'
         run: pnpm test:e2e
+
+  release:
+    name: release verify (ubuntu / node 20)
+    timeout-minutes: 50
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Install Chromium and system dependencies for the packed E2E
+        run: pnpm exec playwright install --with-deps chromium
+      # The complete release gate: typecheck, tests, architecture/docs audits,
+      # package/tarball checks and the packed consumer E2E, all in one command.
+      # No continue-on-error and no dependency on matrix jobs: a single failed
+      # spec or gate fails this job.
+      - name: Full release verification
+        run: pnpm release:verify
