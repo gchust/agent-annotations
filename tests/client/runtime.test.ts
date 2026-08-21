@@ -1111,6 +1111,51 @@ describe("client runtime", () => {
     mounted.unmount();
   });
 
+  it("adopts the second conflict latest task and records a diagnostic even after a route change", async () => {
+    const pageTarget = document.createElement("button");
+    document.body.append(pageTarget);
+    primitives.getElementAtPoint.mockReturnValue(pageTarget);
+    screenshot.captureViewportPng.mockResolvedValue({ png: "fake-png", width: 100, height: 100, durationMs: 1, bestEffort: true });
+    const memory = new MemoryTaskTransport();
+    const diagnostics: string[] = [];
+    const appendDiagnostics = vi.fn(async (entries: AgentAnnotationsDiagnosticsEntry[]) => {
+      diagnostics.push(entries[0]!.message);
+    });
+    let attempts = 0;
+    const transport: TaskTransport = {
+      read: () => memory.read(),
+      mutate: (request) => memory.mutate(request),
+      writeEvidence: async (input) => {
+        attempts += 1;
+        const latest = await memory.read();
+        const advanced = taskFixture({ ...latest, taskRevision: latest.taskRevision + attempts });
+        if (attempts === 2) {
+          // The route changes at the same moment the second conflict arrives.
+          history.pushState({}, "", "/route-b");
+          window.dispatchEvent(new PopStateEvent("popstate"));
+        }
+        throw new RevisionConflictError(advanced, input.expectedRevision, advanced.taskRevision);
+      },
+      appendDiagnostics,
+    };
+    const mounted = await mountAgentAnnotations({ transport });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    mounted.api.commands.capture.startPick();
+    document.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 10 }));
+    const composer = shadow.querySelector<HTMLElement>(".aa-composer")!;
+    const textarea = composer.querySelector<HTMLTextAreaElement>("textarea")!;
+    textarea.value = "Second conflict on route change";
+    composer.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(diagnostics.length).toBeGreaterThan(0));
+    // Exactly one retry; the second conflict's latest task is adopted and the
+    // diagnostic is recorded even though the route changed simultaneously.
+    expect(attempts).toBe(2);
+    expect(mounted.api.getSnapshot().task.taskRevision).toBe(3);
+    expect(diagnostics[0]).toContain("screenshot evidence failed");
+    mounted.unmount();
+    pageTarget.remove();
+  });
+
   it("does not update the manual capture status after a route change", async () => {
     history.pushState({}, "", "/settings");
     const initial = taskFixture();

@@ -672,9 +672,11 @@ export async function mountAgentAnnotations(
         await attempt(latest.taskRevision);
         return true;
       } catch (retryError) {
-        if (destroyed || routeKey !== input.routeKey) return false;
-        // A second conflict still adopts its parsed latest task before
-        // stopping, so the runtime never lags behind the server.
+        // A second conflict still adopts its parsed latest task and records
+        // the diagnostic before any route/destroyed early return, so a
+        // simultaneous route change never skips the required bookkeeping.
+        // adoptTask and record guard `destroyed` internally; there is no
+        // further retry and no status update from here.
         if (retryError instanceof RevisionConflictError) adoptTask(retryError.latestTask);
         record("console", `screenshot evidence failed: ${String(retryError)}`);
         return false;
