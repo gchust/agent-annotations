@@ -1,5 +1,6 @@
 export * from "./conflict.js";
 export * from "./format.js";
+export * from "./handoff.js";
 export * from "./hotkeys.js";
 export * from "./ids.js";
 export * from "./mutation.js";

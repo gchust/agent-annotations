@@ -1,7 +1,7 @@
 import {
   createAgentAnnotationsId,
+  formatAgentAnnotationsHandoff,
   formatAgentAnnotationsShortcut,
-  formatAgentAnnotationsTask,
   matchesAgentAnnotationsShortcut,
   MAX_TARGETS_PER_ANNOTATION,
   redactAgentAnnotationsMutationRequest,
@@ -10,6 +10,7 @@ import {
   resolveAgentAnnotationsPlacement,
   RevisionConflictError,
   toAgentAnnotationsDocumentRegion,
+  validateAgentAnnotationsHandoffConfig,
 } from "../core/index.js";
 import { ClientExtensionRegistry } from "../extension/index.js";
 import { createValidatedTaskTransport } from "./validated-transport.js";
@@ -261,6 +262,8 @@ export async function mountAgentAnnotations(
       `screenshotEvidence must be "auto", "manual", or "off" (received ${options.screenshotEvidence})`
     );
   }
+  // Strict, JSON-safe handoff configuration; it only shapes Copy output text.
+  const handoff = validateAgentAnnotationsHandoffConfig(options.handoff);
 
   let task: AgentAnnotationsTask;
   try {
@@ -470,12 +473,19 @@ export async function mountAgentAnnotations(
   let sourceRevisionRequest = 0;
   const refreshAppliedSourceRevision = (): void => {
     if (destroyed || !browserStatus) return;
+    // The previous baseline is no longer trustworthy while a refresh is in
+    // flight (it may fail or be superseded): clear it and heartbeat the
+    // cleared state immediately, then fetch.
+    appliedSourceRevision = null;
+    sendBrowserHeartbeat();
     const request = ++sourceRevisionRequest;
     const run = async (): Promise<void> => {
       try {
         const response = await fetch(`${browserStatus.endpoint}/revision`, {
           headers: { "x-agent-annotations-token": browserStatus.token },
         });
+        // A non-ok revision response is a failure: never parse or apply it.
+        if (!response.ok) return;
         const payload = await response.json() as { sourceRevision?: unknown };
         if (request === sourceRevisionRequest && typeof payload.sourceRevision === "string") {
           applyReportedSourceRevision(payload.sourceRevision);
@@ -849,15 +859,26 @@ export async function mountAgentAnnotations(
         redact: redactor.redact,
       }))
     ).task;
-    const exporter = exporterId
-      ? exporters.find(({ id }) => id === exporterId)
-      : undefined;
-    if (exporterId && !exporter) {
-      throw new TypeError(`Unknown exporter ID: ${exporterId}`);
+    if (exporterId) {
+      const exporter = exporters.find(({ id }) => id === exporterId);
+      if (!exporter) throw new TypeError(`Unknown exporter ID: ${exporterId}`);
+      return exporter.export({ task: redacted, annotations: filter });
     }
-    return exporter
-      ? exporter.export({ task: redacted, annotations: filter })
-      : formatAgentAnnotationsTask(redacted, { annotations: filter });
+    // The built-in default Copy is the Agent Handoff contract: instructions,
+    // the browser-applied source revision baseline (or explicit unavailable),
+    // and exact completion commands. A final generic text redaction over the
+    // complete output keeps config/instruction interpolation from leaking.
+    const output = formatAgentAnnotationsHandoff(redacted, {
+      command: handoff.command,
+      verificationCommands: handoff.verificationCommands,
+      includeCompleted: handoff.includeCompleted || filter === "all",
+      appliedSourceRevision,
+    });
+    // Final generic text redaction over the complete output. The task and the
+    // bounded handoff config already bound the output, so this second pass
+    // only replaces secret text and never truncates (a short secret can grow
+    // the text, so an output-sized cap could still cut the tail).
+    return redactAgentAnnotationsText(output, { maxLength: Number.POSITIVE_INFINITY });
   };
   const copyOutput = async (
     exporterId?: string,

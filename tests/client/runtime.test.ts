@@ -559,7 +559,7 @@ describe("client runtime", () => {
     expect(execute).toHaveBeenCalledTimes(2);
     expect(setup).toHaveBeenCalledOnce();
     expect(mounted.api.getSnapshot().exporters).toContainEqual({ id: "runtime-test:json", extensionId: "runtime-test" });
-    expect(await mounted.api.commands.exporters.format()).toContain("# Agent Annotations Task");
+    expect(await mounted.api.commands.exporters.format()).toContain("# Agent Annotations Handoff");
     expect(await mounted.api.commands.exporters.format("runtime-test:json")).toContain('"schema":"agent-annotations.task.v1"');
     mounted.api.commands.panels.open("runtime-test:runtime-panel");
     vi.runAllTimers();
@@ -3765,6 +3765,236 @@ describe("client runtime", () => {
       expect(mounted.api.getSnapshot().captureMode).toBe("idle");
     } finally {
       mounted.unmount();
+    }
+  });
+
+  it("default copy emits the agent handoff with completion commands and no revision change", async () => {
+    const task = taskFixture({
+      taskRevision: 4,
+      annotations: [annotationFixture({
+        comment: "Make the button purple",
+        evidence: [{ kind: "screenshot", ref: "evidence/ann-1.png" }],
+      })],
+    });
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(task),
+      browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
+    });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      await mounted.api.commands.annotations.copyOpen();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const fallback = shadow.querySelector<HTMLTextAreaElement>(".aa-copy-fallback textarea")!;
+      const output = fallback.value;
+      expect(output).toContain("# Agent Annotations Handoff");
+      expect(output).toContain("- source revision baseline: source revision unavailable");
+      expect(output).not.toContain("wait --browser-source-revision");
+      expect(output).toContain("agent-annotations status --check --json");
+      expect(output).toContain("agent-annotations validate-task --json");
+      expect(output).toContain(
+        "agent-annotations complete ann-1 --verified --summary 'Make the button purple'"
+      );
+      expect(output).toContain("- evidence: evidence/ann-1.png");
+      expect(output).not.toContain("data:image");
+      expect(mounted.api.getSnapshot().task.taskRevision).toBe(4);
+    } finally {
+      mounted.unmount();
+    }
+  });
+
+  it("default copy redacts secrets and honors the configured command", async () => {
+    const task = taskFixture({
+      annotations: [annotationFixture({ comment: "Bearer UNIQUE_SECRET_SENTINEL_copy" })],
+    });
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(task),
+      handoff: { command: "pnpm exec agent-annotations", verificationCommands: ["pnpm typecheck"] },
+    });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      await mounted.api.commands.annotations.copyOpen();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const fallback = shadow.querySelector<HTMLTextAreaElement>(".aa-copy-fallback textarea")!;
+      expect(fallback.value).not.toContain("UNIQUE_SECRET_SENTINEL_copy");
+      expect(fallback.value).toContain("pnpm exec agent-annotations complete ann-1 --verified");
+      expect(fallback.value).toContain("- Run: pnpm typecheck");
+    } finally {
+      mounted.unmount();
+    }
+  });
+
+  it("clears the applied baseline while a refresh is pending or fails", async () => {
+    vi.useFakeTimers();
+    let revisionResponse: Promise<Response> | null = null;
+    const fetchMock = vi.fn<typeof fetch>((input: RequestInfo | URL) => {
+      if (String(input).endsWith("/revision")) {
+        return revisionResponse ?? Promise.resolve(new Response("{}", { status: 500 }));
+      }
+      return Promise.resolve(new Response("{}", { status: 200 }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const initial = await new MemoryTaskTransport().read();
+      let publish!: (task: AgentAnnotationsTask) => void;
+      const transport: TaskTransport = {
+        read: async () => initial,
+        mutate: async () => initial,
+        subscribe(listener) {
+          publish = listener;
+          return () => undefined;
+        },
+      };
+      const mounted = await mountAgentAnnotations({
+        transport,
+        browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      const fallbackValue = () => {
+        const textarea = document.getElementById("agent-annotations-root")!
+          .shadowRoot!.querySelector<HTMLTextAreaElement>(".aa-copy-fallback textarea");
+        return textarea?.value ?? "";
+      };
+      // A baseline is reported through the trusted hook.
+      revisionResponse = Promise.resolve(
+        new Response(JSON.stringify({ sourceRevision: "ab".repeat(32) }), { status: 200 })
+      );
+      mounted.refreshAppliedSourceRevision();
+      await vi.advanceTimersByTimeAsync(0);
+      await mounted.api.commands.annotations.copyOpen();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fallbackValue()).toContain(`- source revision baseline: ${"ab".repeat(32)}`);
+      // An accepted task change starts a refresh whose request stays
+      // PENDING: the stale baseline is hidden immediately, while the fetch
+      // is still unresolved, and no wait command is emitted.
+      let resolvePending!: (value: Response) => void;
+      revisionResponse = new Promise((resolve) => { resolvePending = resolve; });
+      publish({ ...initial, taskRevision: 1 });
+      await vi.advanceTimersByTimeAsync(0);
+      await mounted.api.commands.annotations.copyOpen();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fallbackValue()).toContain("- source revision baseline: source revision unavailable");
+      expect(fallbackValue()).not.toContain("wait --browser-source-revision");
+      // The pending request resolves as a non-ok response that still carries
+      // a valid hex body: a failed response must never install a baseline.
+      resolvePending(new Response(
+        JSON.stringify({ sourceRevision: "ef".repeat(32) }),
+        { status: 500 }
+      ));
+      await vi.advanceTimersByTimeAsync(0);
+      await mounted.api.commands.annotations.copyOpen();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fallbackValue()).toContain("- source revision baseline: source revision unavailable");
+      expect(fallbackValue()).not.toContain("wait --browser-source-revision");
+      // A later successful refresh restores the new baseline.
+      revisionResponse = Promise.resolve(
+        new Response(JSON.stringify({ sourceRevision: "cd".repeat(32) }), { status: 200 })
+      );
+      mounted.refreshAppliedSourceRevision();
+      await vi.advanceTimersByTimeAsync(0);
+      await mounted.api.commands.annotations.copyOpen();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fallbackValue()).toContain(`- source revision baseline: ${"cd".repeat(32)}`);
+      expect(fallbackValue()).toContain("wait --browser-source-revision");
+      mounted.unmount();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("never truncates a long completion command during the final redaction", async () => {
+    const task = taskFixture({
+      annotations: [annotationFixture({
+        comment: `Fix and 'quote' ` + "x".repeat(2500),
+      })],
+    });
+    // The short secret lives in the handoff config, which bypasses task
+    // redaction: the final complete-output pass must still replace it.
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(task),
+      handoff: { verificationCommands: ["echo Bearer ab"] },
+    });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      await mounted.api.commands.annotations.copyOpen();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const fallback = shadow.querySelector<HTMLTextAreaElement>(".aa-copy-fallback textarea")!;
+      const output = fallback.value;
+      // The config-derived secret is replaced by the final pass, the long
+      // (task-bounded) comment keeps the completion line beyond 2000
+      // characters, and the line still closes with its POSIX quote instead
+      // of being truncated mid-command.
+      expect(output).not.toContain("Bearer ab");
+      expect(output).toContain("echo Bearer [REDACTED]");
+      const completionLine = output.split("\n").find((line) => line.startsWith("- completion:"))!;
+      expect(completionLine.length).toBeGreaterThan(2000);
+      expect(completionLine.endsWith("'")).toBe(true);
+    } finally {
+      mounted.unmount();
+    }
+  });
+
+  it("runs extension redactors before the default handoff copy", async () => {
+    const pageTarget = document.createElement("button");
+    document.body.append(pageTarget);
+    primitives.getElementAtPoint.mockReturnValue(pageTarget);
+    const transport = new MemoryTaskTransport();
+    const mounted = await mountAgentAnnotations({
+      transport,
+      extensions: [defineClientExtension({
+        id: "handoff-data",
+        apiVersion: 1,
+        targetEnrichers: [{ id: "enrich", enrich: () => ({ secret: "value" }) }],
+        redactors: [{ id: "scrub", redact: () => ({ safe: true }) }],
+      })],
+    });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      mounted.api.commands.capture.startPick();
+      document.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 10 }));
+      const composer = shadow.querySelector<HTMLElement>(".aa-composer")!;
+      const textarea = composer.querySelector<HTMLTextAreaElement>("textarea")!;
+      textarea.value = "Redacted handoff";
+      composer.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      await vi.waitFor(async () => expect((await transport.read()).annotations).toHaveLength(1));
+      await mounted.api.commands.annotations.copyOpen();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const fallback = shadow.querySelector<HTMLTextAreaElement>(".aa-copy-fallback textarea")!;
+      expect(fallback.value).toContain('extension handoff-data: {"safe":true}');
+      expect(fallback.value).not.toContain("secret");
+      expect(fallback.value).not.toContain('"value"');
+    } finally {
+      mounted.unmount();
+      pageTarget.remove();
+    }
+  });
+
+  it("clipboard copy and the manual fallback are byte-for-byte identical", async () => {
+    const task = taskFixture();
+    let written = "";
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: async (text: string) => { written = text; } },
+    });
+    const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport(task) });
+    try {
+      await mounted.api.commands.annotations.copyOpen();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(written).toContain("# Agent Annotations Handoff");
+      expect(mounted.api.getSnapshot().captureMode).toBe("idle");
+    } finally {
+      mounted.unmount();
+      delete (navigator as { clipboard?: unknown }).clipboard;
+    }
+    // Without clipboard support the same output lands in the fallback.
+    const mounted2 = await mountAgentAnnotations({ transport: new MemoryTaskTransport(task) });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      await mounted2.api.commands.annotations.copyOpen();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const fallback = shadow.querySelector<HTMLTextAreaElement>(".aa-copy-fallback textarea")!;
+      expect(fallback.value).toBe(written);
+    } finally {
+      mounted2.unmount();
     }
   });
 });

@@ -39,7 +39,7 @@ describe("serve-only Vite plugin", () => {
     expect(String(loaded)).toContain(`from ${JSON.stringify(pkg.name)}`);
     expect(String(loaded)).toContain(`from ${JSON.stringify(`${pkg.name}/vite/client`)}`);
     expect(String(loaded)).toContain("mountAgentAnnotations");
-    expect(String(loaded)).toContain("mountAgentAnnotations({ transport, extensions, screenshotEvidence: config.screenshotEvidence, browserStatus: { endpoint: config.endpoint, token: config.token } })");
+    expect(String(loaded)).toContain("mountAgentAnnotations({ transport, extensions, screenshotEvidence: config.screenshotEvidence, browserStatus: { endpoint: config.endpoint, token: config.token }, handoff: config.handoff })");
     expect(String(loaded)).toContain("mounted.refreshAppliedSourceRevision()");
     expect(String(loaded)).toContain("vite:afterUpdate");
     expect(String(loaded)).toContain("window[key]?.()");
@@ -114,6 +114,16 @@ describe("serve-only Vite plugin", () => {
       expect(loaded).toContain("screenshotEvidence: config.screenshotEvidence");
     }
     expect(() => agentAnnotations({ root: "/tmp/demo", screenshotEvidence: "always" as never }))
+      .toThrow(TypeError);
+    // The handoff option is validated at the plugin boundary and injected.
+    const withHandoff = agentAnnotations({
+      root: "/tmp/demo",
+      handoff: { command: "custom", verificationCommands: ["pnpm typecheck"] },
+    });
+    const loaded = String((withHandoff.load as Function).call({} as never, "\0virtual:agent-annotations/client", {} as never));
+    expect(loaded).toContain('"handoff":');
+    expect(loaded).toContain("handoff: config.handoff");
+    expect(() => agentAnnotations({ root: "/tmp/demo", handoff: { command: "bad\ncommand" } }))
       .toThrow(TypeError);
   });
 

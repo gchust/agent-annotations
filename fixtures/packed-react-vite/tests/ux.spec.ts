@@ -91,6 +91,19 @@ test("keyboard-only Pick, Multi, Copy, List, and Collapse flows with visual evid
   const clipboard = await page.evaluate(() => navigator.clipboard.readText());
   expect(clipboard).toContain("Keyboard pick");
   expect(clipboard).toContain("Keyboard multi");
+  expect(clipboard).toContain("# Agent Annotations Handoff");
+  expect(clipboard).toContain("agent-annotations status --check --json");
+  expect(clipboard).toContain("agent-annotations validate-task --json");
+  expect(clipboard).toContain("agent-annotations complete ");
+  expect(clipboard).toContain("--verified --summary");
+  // The real copied handoff carries the browser-applied revision baseline
+  // and the exact browser-source wait command.
+  const baseline = clipboard.match(/- source revision baseline: ([0-9a-f]{64})/)?.[1];
+  expect(baseline).toBeTruthy();
+  expect(clipboard).not.toContain("source revision unavailable");
+  expect(clipboard).toContain(
+    `agent-annotations wait --browser-source-revision ${baseline} --json`
+  );
   await expect.poll(() => annotations()).toBe(2);
   await expect(shadow(page, '[aria-label^="Pick"]')).toHaveAttribute("aria-pressed", "false");
   await expect(shadow(page, '[aria-label^="Multi"]')).toHaveAttribute("aria-pressed", "true");

@@ -114,6 +114,28 @@ browser-applied source revision moves off the baseline (a missing or stale
 browser never counts as applied), while `wait --source-revision` keeps
 waiting on the referenced-source revision computed from disk.
 
+The default `Copy` action emits a Code-Agent handoff instead of a data dump:
+instructions, the browser-applied source revision baseline (or exactly
+`source revision unavailable` without one — a SHA is never invented), and an exact
+`complete --verified --summary` command per annotation. The loop is:
+
+```text
+# 1. the agent edits real source files (never active-task.json)
+# 2. wait until the browser actually applied the change
+agent-annotations wait --browser-source-revision <sha256> --json
+# 3. the full runtime is synchronized and healthy
+agent-annotations status --check --json
+# 4. the task file itself is valid
+agent-annotations validate-task --json
+# 5. only after verification passes, complete the annotation
+agent-annotations complete <annotation-id> --verified --summary "<text>"
+```
+
+The handoff is configurable and strictly bounded (`handoff: { command,
+verificationCommands, includeCompleted }` on the Vite plugin and
+`mountAgentAnnotations()`); it only formats text and never executes
+anything. The default includes open annotations only.
+
 The workspace root and the runtime data directory are resolved separately.
 `--root`/`AGENT_ANNOTATIONS_ROOT` set the workspace root; `--dir`/
 `AGENT_ANNOTATIONS_DIR` set the runtime data directory (their existing

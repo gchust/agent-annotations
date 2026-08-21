@@ -252,6 +252,12 @@ export type AgentAnnotationsBrowserStatusConfig = {
   token: string;
 };
 
+export type AgentAnnotationsHandoffConfig = {
+  command?: string;
+  verificationCommands?: readonly string[];
+  includeCompleted?: boolean;
+};
+
 export interface TaskTransport {
   read(): Promise<AgentAnnotationsTask>;
   mutate(request: AgentAnnotationsMutationRequest): Promise<AgentAnnotationsTask>;
@@ -435,6 +441,7 @@ export type MountAgentAnnotationsOptions = {
   extensions?: readonly AgentAnnotationsClientExtension[];
   screenshotEvidence?: AgentAnnotationsScreenshotEvidenceMode;
   browserStatus?: AgentAnnotationsBrowserStatusConfig;
+  handoff?: AgentAnnotationsHandoffConfig;
 };
 
 export interface AgentAnnotationsClientExtension {

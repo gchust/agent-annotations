@@ -23,6 +23,14 @@
   through `HttpTaskTransport` and bounded/redacted server-side).
 - `createAgentAnnotationsTask`, `parseAgentAnnotationsTask`,
   `validateAgentAnnotationsTask`, and `isAgentAnnotationsTask` own schema v1.
+- `formatAgentAnnotationsHandoff(task, options)` is the default Copy output:
+  a pure Code-Agent execution contract (instructions, browser-applied source
+  revision baseline or exactly `source revision unavailable`, evidence refs, and exact
+  `complete --verified --summary` commands per annotation).
+  `validateAgentAnnotationsHandoffConfig(input)` strictly bounds the
+  JSON-safe `handoff` option (`command`, `verificationCommands`,
+  `includeCompleted`) and rejects unknown keys, control characters, and
+  oversized items; it only shapes text and never executes.
 - `applyAgentAnnotationsMutation` applies revision-checked task operations.
 - `formatAgentAnnotationsTask` emits Markdown or JSON.
 - `redactAgentAnnotationsTask` and `redactAgentAnnotationsText` remove generic secret
