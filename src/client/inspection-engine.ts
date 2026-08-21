@@ -28,6 +28,38 @@ export const REGION_TARGET_LIMIT = MAX_REGION_TARGETS;
 // Reserved prefix for HostIntegration.identity() fields persisted inside the
 // target inspection attributes; plain id/role/aria-label keys stay unprefixed.
 export const HOST_IDENTITY_PREFIX = "host:";
+// The persisted key (prefix included) must fit the schema's 100-character
+// attribute key limit; values mirror the 500-character attribute value limit.
+const HOST_IDENTITY_KEY_LIMIT = 100 - HOST_IDENTITY_PREFIX.length;
+const HOST_IDENTITY_VALUE_LIMIT = 500;
+
+// Single normalization path for persisted host identity evidence. Capture and
+// restore MUST use exactly the same rules, otherwise a legal identity (with
+// surrounding whitespace, repeated whitespace, or overlong content) would
+// mismatch immediately after saving. Entries that normalize to empty are
+// skipped deterministically; normalized-key collisions keep the first entry.
+const normalizeHostIdentityEntry = (
+  key: string,
+  value: string
+): { key: string; value: string } | null => {
+  const normalizedKey = text(key, HOST_IDENTITY_KEY_LIMIT);
+  const normalizedValue = text(value, HOST_IDENTITY_VALUE_LIMIT);
+  if (!normalizedKey || !normalizedValue) return null;
+  return { key: `${HOST_IDENTITY_PREFIX}${normalizedKey}`, value: normalizedValue };
+};
+
+const addHostIdentityEntries = (
+  entries: Record<string, string>,
+  identity: Record<string, string> | undefined
+): void => {
+  if (!identity) return;
+  for (const [key, value] of Object.entries(identity)) {
+    if (Object.keys(entries).length >= 50) break;
+    const normalized = normalizeHostIdentityEntry(key, value);
+    if (!normalized || normalized.key in entries) continue;
+    entries[normalized.key] = normalized.value;
+  }
+};
 
 const isCandidate = (element: Element): boolean =>
   element.isConnected &&
@@ -90,15 +122,13 @@ const attributesOf = (
   host?: HostIntegration
 ): Record<string, string> => {
   const entries: Record<string, string> = {};
-  if (element.id) entries.id = text(element.id, 500);
+  const normalizedId = text(element.id, 500);
+  if (normalizedId) entries.id = normalizedId;
   const role = roleOf(element);
   const accessibleName = nameOf(element);
   if (role) entries.role = role;
   if (accessibleName) entries["aria-label"] = accessibleName;
-  for (const [key, value] of Object.entries(host?.identity?.(element) ?? {})) {
-    if (Object.keys(entries).length >= 50) break;
-    if (key && value) entries[`${HOST_IDENTITY_PREFIX}${text(key, 100)}`] = text(value, 500);
-  }
+  addHostIdentityEntries(entries, host?.identity?.(element));
   return entries;
 };
 
@@ -230,7 +260,8 @@ export const resolvePersistedTarget = (
   const attributes = inspection.attributes ?? {};
   const persistedId = attributes.id;
   if (persistedId !== undefined) {
-    if (element.id !== persistedId) {
+    // The id is compared under the same normalization used at capture.
+    if (text(element.id, 500) !== persistedId) {
       return { status: "identity_mismatch", reason: "element id changed" };
     }
   }
@@ -239,9 +270,13 @@ export const resolvePersistedTarget = (
     key.startsWith(HOST_IDENTITY_PREFIX)
   );
   if (hostKeys.length > 0) {
-    const live = options.host?.identity?.(element) ?? {};
+    // Rebuild the live host identity through the exact capture normalization
+    // (including empty-entry skip and first-wins collision handling) before
+    // comparing every persisted host: field.
+    const live: Record<string, string> = {};
+    addHostIdentityEntries(live, options.host?.identity?.(element));
     for (const key of hostKeys) {
-      if (live[key.slice(HOST_IDENTITY_PREFIX.length)] !== attributes[key]) {
+      if (live[key] !== attributes[key]) {
         return { status: "identity_mismatch", reason: "host identity changed" };
       }
     }

@@ -32,7 +32,9 @@ import {
   sampleRegionTargets,
   setInspectionFrozen,
 } from "../../src/client/inspection-engine.js";
+import { parseAgentAnnotationsTask } from "../../src/core/index.js";
 import type { AgentAnnotationsTarget, HostIntegration } from "../../src/types/index.js";
+import { annotationFixture, taskFixture } from "../core/test-data.js";
 
 describe("React Grab inspection boundary", () => {
   it("normalizes one generic target without host vocabulary", async () => {
@@ -245,5 +247,82 @@ describe("persisted target identity", () => {
       status: "resolved",
       element: targetNode,
     });
+  });
+
+  it("normalizes long host identity keys to fit the schema attribute limit", async () => {
+    document.body.innerHTML = '<button id="save">Save</button>';
+    const target = await inspectTarget(document.querySelector("button")!, {
+      identity: () => ({ ["k".repeat(100)]: "v" }),
+    });
+    const persistedKey = Object.keys(target.inspection.attributes)
+      .find((key) => key.startsWith("host:"))!;
+    expect(persistedKey).toBe(`host:${"k".repeat(95)}`);
+    expect(persistedKey.length).toBeLessThanOrEqual(100);
+    // The captured target must pass strict schema validation.
+    const task = taskFixture({ annotations: [annotationFixture({ targets: [target] })] });
+    expect(() => parseAgentAnnotationsTask(task)).not.toThrow();
+  });
+
+  it("round-trips host identity values that need normalization", async () => {
+    document.body.innerHTML = '<button id="save" data-card="  card-7  ">Save</button>';
+    const host: HostIntegration = {
+      identity: (element) => ({ "data-card": element.getAttribute("data-card") ?? "" }),
+    };
+    const target = await inspectTarget(document.querySelector("button")!, host);
+    expect(target.inspection.attributes["host:data-card"]).toBe("card-7");
+    expect(resolvePersistedTarget(target, { appRoot: document, host })).toMatchObject({
+      status: "resolved",
+    });
+    // Overlong values truncate identically on capture and restore.
+    document.body.innerHTML =
+      `<button id="save" data-card="${"x".repeat(600)}">Save</button>`;
+    const longTarget = await inspectTarget(document.querySelector("button")!, host);
+    expect(longTarget.inspection.attributes["host:data-card"]).toHaveLength(500);
+    expect(resolvePersistedTarget(longTarget, { appRoot: document, host })).toMatchObject({
+      status: "resolved",
+    });
+  });
+
+  it("round-trips ids that need normalization", async () => {
+    document.body.innerHTML = '<main><button id="  card-7  ">Save</button></main>';
+    const target = await inspectTarget(document.querySelector("button")!);
+    expect(target.inspection.attributes.id).toBe("card-7");
+    expect(resolvePersistedTarget(
+      { ...target, selector: "main > button" },
+      { appRoot: document }
+    )).toMatchObject({ status: "resolved" });
+    // Overlong ids truncate identically on capture and restore.
+    document.body.innerHTML =
+      `<main><button id="${"y".repeat(600)}">Save</button></main>`;
+    const longTarget = await inspectTarget(document.querySelector("button")!);
+    expect(longTarget.inspection.attributes.id).toHaveLength(500);
+    expect(resolvePersistedTarget(
+      { ...longTarget, selector: "main > button" },
+      { appRoot: document }
+    )).toMatchObject({ status: "resolved" });
+  });
+
+  it("deterministically skips colliding normalized host identity keys", async () => {
+    document.body.innerHTML = '<button id="save">Save</button>';
+    const host: HostIntegration = {
+      identity: () => ({ "a b": "first", "a  b": "second" }),
+    };
+    const target = await inspectTarget(document.querySelector("button")!, host);
+    // First normalized entry wins; the colliding entry is skipped.
+    expect(target.inspection.attributes).toMatchObject({ "host:a b": "first" });
+    expect(Object.keys(target.inspection.attributes)
+      .filter((key) => key.startsWith("host:"))).toHaveLength(1);
+    expect(resolvePersistedTarget(target, { appRoot: document, host })).toMatchObject({
+      status: "resolved",
+    });
+  });
+
+  it("skips host identity entries that normalize to empty", async () => {
+    document.body.innerHTML = '<button id="save">Save</button>';
+    const target = await inspectTarget(document.querySelector("button")!, {
+      identity: () => ({ "  ": "v", key: "  " }),
+    });
+    expect(Object.keys(target.inspection.attributes)
+      .filter((key) => key.startsWith("host:"))).toHaveLength(0);
   });
 });
