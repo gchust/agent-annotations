@@ -45,6 +45,7 @@ import {
   inspectTarget,
   resolvePersistedTarget,
   resolveTargetResult,
+  type TargetResolution,
   sampleRegionTargets,
   setInspectionFrozen,
   targetBounds,
@@ -69,6 +70,7 @@ import {
   SaveIcon,
 } from "./icons.js";
 import { captureViewportPng, type CapturedScreenshot, type ScreenshotRect } from "./screenshot.js";
+import { localeMessages, MESSAGES } from "./messages.js";
 import { AGENT_ANNOTATIONS_STYLES } from "./styles.js";
 
 const HOST_ID = "agent-annotations-root";
@@ -479,6 +481,7 @@ class IconBoundary extends Component<IconBoundaryProps, { failed: boolean }> {
 
 type PanelErrorBoundaryProps = {
   onError: (message: string) => void;
+  fallbackText: string;
   children: import("react").ReactNode;
 };
 type PanelErrorBoundaryState = { failed: boolean };
@@ -496,7 +499,7 @@ class PanelErrorBoundary extends Component<PanelErrorBoundaryProps, PanelErrorBo
 
   render(): import("react").ReactNode {
     if (this.state.failed) {
-      return createElement("p", { className: "aa-panel-error" }, "Panel failed to render");
+      return createElement("p", { className: "aa-panel-error" }, this.props.fallbackText);
     }
     return this.props.children;
   }
@@ -613,6 +616,10 @@ export async function mountAgentAnnotations(
   const applyRouteKey = (next: string) => {
     if (destroyed || next === routeKey) return;
     routeKey = next;
+    // Old-route transient state never survives: the temporary highlight and
+    // the editor anchor rect belong to the previous route.
+    highlightedAnnotation = null;
+    editorAnchorRect = null;
     if (captureMode !== "idle" || composer || editingId) {
       // Never persist old-route capture state under the new route key.
       setInspectionFrozen(false);
@@ -641,7 +648,11 @@ export async function mountAgentAnnotations(
       refreshSystemThemeListener();
     }
     const nextLocale = host?.locale?.() ?? (document.documentElement.lang || "en-US");
-    const nextMessages = { ...registry.getMessages(), ...host?.messages };
+    const nextMessages = {
+      ...localeMessages(nextLocale),
+      ...registry.getMessages(),
+      ...host?.messages,
+    };
     if (nextLocale !== hostLocale || JSON.stringify(nextMessages) !== JSON.stringify(messages)) {
       hostLocale = nextLocale;
       messages = nextMessages;
@@ -827,17 +838,36 @@ export async function mountAgentAnnotations(
   applyTheme();
   refreshSystemThemeListener();
 
-  let messages = { ...registry.getMessages(), ...host?.messages };
+  // Host messages override registry messages override the builtin
+  // dictionary: the host is always the last layer.
+  let messages = {
+    ...localeMessages(hostLocale),
+    ...registry.getMessages(),
+    ...host?.messages,
+  };
   root.lang = hostLocale;
 
-  const localized = (value: string | Readonly<Record<string, string>>): string =>
-    typeof value === "string"
-      ? (messages[value] ?? value)
-      : value[hostLocale] ??
+  const localized = (
+    value: string | Readonly<Record<string, string>>,
+    params?: Record<string, string | number>
+  ): string => {
+    let text: string;
+    if (typeof value !== "string") {
+      // Extension/host locale records keep their exact contract.
+      text = value[hostLocale] ??
         value[hostLocale.split("-")[0]] ??
         value["en-US"] ??
         Object.values(value)[0] ??
         "";
+    } else {
+      const builtin = (MESSAGES as Record<string, Record<string, string> | undefined>)[value];
+      text = messages[value] ?? builtin?.[hostLocale] ?? builtin?.["en-US"] ?? value;
+    }
+    if (!params) return text;
+    return text.replace(/\{(\w+)\}/g, (match, name: string) =>
+      params[name] !== undefined ? String(params[name]) : match
+    );
+  };
   const platform = /Mac|iPhone|iPad/.test(navigator.platform) ? "mac" : "other";
   let toolbar = registry.getToolbarContributions();
   collapseAction = toolbar.find(
@@ -872,7 +902,11 @@ export async function mountAgentAnnotations(
     collapseContribution = toolbar.find((contribution) => contribution.id === collapseAction);
     shortcuts = buildShortcuts();
     exporters = registry.getExporters();
-    messages = { ...registry.getMessages(), ...host?.messages };
+    messages = {
+      ...localeMessages(hostLocale),
+      ...registry.getMessages(),
+      ...host?.messages,
+    };
     // Re-derive every host-derived state (theme/locale/messages/appRoot/route)
     // from the surviving host; a rolled-back failed host leaves the defaults.
     applyHostChange();
@@ -933,8 +967,8 @@ export async function mountAgentAnnotations(
     const chip = document.createElement("button");
     chip.type = "button";
     chip.className = "aa-multi-complete";
-    chip.setAttribute("aria-label", `Complete selection (${selected.length})`);
-    chip.textContent = `Finish (${selected.length})`;
+    chip.setAttribute("aria-label", localized("Complete selection", { count: selected.length }));
+    chip.textContent = localized("Finish", { count: selected.length });
     chip.addEventListener("click", () => {
       if (destroyed || captureMode !== "multi" || composer) return;
       composer = { kind: "multi", elements: [...selected] };
@@ -1113,11 +1147,11 @@ export async function mountAgentAnnotations(
       if (destroyed || screenshotMode === "off" || !transport.writeEvidence) return;
       const annotation = task.annotations.find((entry) => entry.annotationId === annotationId);
       if (!annotation) {
-        setStatus("Annotation not found");
+        setStatus(localized("Annotation not found"));
         return;
       }
       if (annotation.pageContext.routeKey !== routeKey) {
-        setStatus("Annotation is on another route");
+        setStatus(localized("Annotation is on another route"));
         return;
       }
       const capturedRouteKey = annotation.pageContext.routeKey;
@@ -1151,8 +1185,8 @@ export async function mountAgentAnnotations(
       if (!destroyed && routeKey === input.routeKey) {
         setStatus(
           saved
-            ? localized({ "en-US": "Screenshot captured", "zh-CN": "截图已保存" })
-            : localized({ "en-US": "Screenshot failed", "zh-CN": "截图失败" })
+            ? localized("Screenshot captured")
+            : localized("Screenshot failed")
         );
       }
     } catch (error) {
@@ -1202,7 +1236,7 @@ export async function mountAgentAnnotations(
       await navigator.clipboard.writeText(output);
       if (destroyed) return;
       copyFallback = "";
-      setStatus("Copied open annotations");
+      setStatus(localized("Copied open annotations"));
     } catch {
       if (destroyed) return;
       copyFallback = output;
@@ -1262,6 +1296,30 @@ export async function mountAgentAnnotations(
     render();
     emit();
   };
+  // Editor anchoring: a trigger list item rect (captured before the panel
+  // closes), else the marker, else the Dock; the editor never silently floats
+  // at the top-left. Focus returns to the list item (reopening the panel) or
+  // a Dock control when the editor closes.
+  let editorAnchorRect: AgentAnnotationsRect | null = null;
+  const closeEditor = () => {
+    editingId = null;
+    highlightedAnnotation = null;
+    editorAnchorRect = null;
+    render();
+    // The panel stays closed; focus returns to a Dock control that is
+    // actually visible in the current collapse state: the collapsed count
+    // when collapsed, the list action when expanded, the grip as fallback.
+    // No cross-instance filter state is introduced to re-reach an item.
+    const collapsedCount = root.querySelector<HTMLElement>(".aa-collapsed-count");
+    const listAction = root.querySelector<HTMLElement>(
+      '[data-action-id="agent-annotations.builtin:list"]'
+    );
+    const grip = root.querySelector<HTMLElement>(".aa-grip");
+    const visibleControl = collapsed
+      ? collapsedCount
+      : listAction ?? collapsedCount ?? grip;
+    visibleControl?.focus();
+  };
   const focusAnnotation = (id: string) => {
     if (destroyed) return;
     const annotation = task.annotations.find((entry) => entry.annotationId === id);
@@ -1269,13 +1327,25 @@ export async function mountAgentAnnotations(
     if (annotation.pageContext.routeKey !== routeKey) {
       if (host?.navigate) {
         host.navigate(annotation.pageContext.routeKey);
-        setStatus("Navigating to annotation route");
+        setStatus(localized("Navigating to annotation route"));
       } else {
-        setStatus("Annotation is on another route");
+        setStatus(localized("Annotation is on another route"));
       }
       return;
     }
+    // Capture the triggering list item rect BEFORE the panel closes so the
+    // editor anchors to it; otherwise fall back to the marker or the Dock.
+    editorAnchorRect = null;
+    if (openPanel) {
+      const panel = root.querySelector<HTMLElement>(".aa-panel");
+      const item = panel?.querySelector<HTMLElement>(`[data-annotation-id="${id}"]`);
+      if (item) {
+        const rect = item.getBoundingClientRect();
+        editorAnchorRect = { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+      }
+    }
     editingId = id;
+    highlightedAnnotation = id;
     openPanel = null;
     render();
     scheduleFrame(() => overlayMount.querySelector<HTMLElement>(".aa-editor textarea")?.focus());
@@ -1301,11 +1371,18 @@ export async function mountAgentAnnotations(
         remove: (id) => mutateCommand([{ op: "remove", annotationId: id }]),
         removeCompleted: () => mutateCommand([{ op: "removeCompleted" }]),
         captureEvidence,
+        targetSummary: (annotationId) => {
+          const annotation = task.annotations.find((entry) => entry.annotationId === annotationId);
+          return annotation
+            ? annotationTargetSummary(annotation)
+            : { resolved: 0, total: 0, reason: null };
+        },
       },
       markers: {
         show: () => setMarkersVisible(true),
         hide: () => setMarkersVisible(false),
         focus: focusAnnotation,
+        highlight: setMarkerHighlight,
       },
       panels: {
         open: (id) => {
@@ -1408,6 +1485,8 @@ export async function mountAgentAnnotations(
     if (action) node.addEventListener("click", action);
     node.addEventListener("mouseenter", () => showTooltip(node));
     node.addEventListener("mouseleave", hideTooltip);
+    node.addEventListener("focus", () => showTooltip(node));
+    node.addEventListener("blur", hideTooltip);
     return node;
   };
 
@@ -1449,7 +1528,8 @@ export async function mountAgentAnnotations(
       const tooltip = document.createElement("div");
       tooltip.className = "aa-tooltip";
       tooltip.role = "tooltip";
-      tooltip.textContent = trigger.getAttribute("aria-label") ?? "";
+      tooltip.textContent =
+        trigger.getAttribute("data-tooltip") ?? trigger.getAttribute("aria-label") ?? "";
       overlayMount.append(tooltip);
       positionTooltip(trigger);
     }, 300);
@@ -1465,6 +1545,80 @@ export async function mountAgentAnnotations(
     overlayMount.append(node);
   };
 
+  // The marker's primary anchor is the FIRST RESOLVABLE target (contract):
+  // an earlier unresolved target never hides a marker whose later target
+  // still resolves in the app root.
+  const firstResolvedTarget = (annotation: AgentAnnotation): Element | null => {
+    for (const target of annotation.targets ?? []) {
+      const resolution = resolvePersistedTarget(target, { appRoot, host });
+      if (resolution.status === "resolved" && isInAppRoot(resolution.element)) {
+        return resolution.element;
+      }
+    }
+    return null;
+  };
+
+  // Per-annotation resolution summary: resolved/total plus the first
+  // unresolved reason key (a stable message key, never raw resolution text).
+  const annotationTargetSummary = (
+    annotation: AgentAnnotation
+  ): {
+    resolved: number;
+    total: number;
+    reason: "unresolved" | "identity mismatch" | "identity unverifiable" | "iframe unsupported" | null;
+  } => {
+    const targets = annotation.targets ?? [];
+    let resolved = 0;
+    let firstUnresolved: TargetResolution | null = null;
+    for (const target of targets) {
+      const resolution = resolvePersistedTarget(target, { appRoot, host });
+      if (resolution.status === "resolved" && isInAppRoot(resolution.element)) {
+        resolved += 1;
+      } else if (!firstUnresolved) {
+        firstUnresolved = resolution;
+      }
+    }
+    let reason: "unresolved" | "identity mismatch" | "identity unverifiable" | "iframe unsupported" | null = null;
+    if (firstUnresolved && resolved < targets.length) {
+      reason = firstUnresolved.status === "identity_mismatch"
+        ? "identity mismatch"
+        : firstUnresolved.status === "identity_unverifiable"
+          ? "identity unverifiable"
+          : firstUnresolved.status === "unsupported"
+            ? "iframe unsupported"
+            : "unresolved";
+    }
+    return { resolved, total: targets.length, reason };
+  };
+
+  // Temporary multi-target highlight: DOM-only updates, so high-frequency
+  // marker hover/focus never rebuilds the React root or the Chrome.
+  let highlightedAnnotation: string | null = null;
+  const renderMarkerHighlights = () => {
+    for (const node of overlayMount.querySelectorAll(".aa-marker-highlight")) node.remove();
+    const id = highlightedAnnotation ?? editingId;
+    if (!id) return;
+    const annotation = task.annotations.find((entry) => entry.annotationId === id);
+    if (!annotation) return;
+    for (const target of annotation.targets ?? []) {
+      const resolution = resolvePersistedTarget(target, { appRoot, host });
+      if (resolution.status !== "resolved" || !isInAppRoot(resolution.element)) continue;
+      const rect = targetBounds(resolution.element);
+      const node = document.createElement("div");
+      node.className = "aa-marker-highlight";
+      node.dataset.annotationId = annotation.annotationId;
+      Object.assign(node.style, {
+        left: `${rect.x}px`, top: `${rect.y}px`, width: `${rect.width}px`, height: `${rect.height}px`,
+      });
+      overlayMount.append(node);
+    }
+  };
+  function setMarkerHighlight(id: string | null): void {
+    if (highlightedAnnotation === id) return;
+    highlightedAnnotation = id;
+    renderMarkerHighlights();
+  }
+
   const renderMarkers = () => {
     const resolved: Element[] = [];
     if (!markersVisible) return resolved;
@@ -1479,13 +1633,7 @@ export async function mountAgentAnnotations(
           height: annotation.region.height,
         }, true);
       }
-      const target = annotation.targets?.[0]
-        ? resolvePersistedTarget(annotation.targets[0], { appRoot, host })
-        : null;
-      const targetInRoot =
-        target?.status === "resolved" && isInAppRoot(target.element)
-          ? target.element
-          : null;
+      const targetInRoot = firstResolvedTarget(annotation);
       if (targetInRoot) resolved.push(targetInRoot);
       const rect = targetInRoot ? targetBounds(targetInRoot) : null;
       const anchor = rect
@@ -1498,11 +1646,37 @@ export async function mountAgentAnnotations(
       marker.className = "aa-marker";
       marker.dataset.status = annotation.status;
       marker.dataset.annotationId = annotation.annotationId;
-      marker.setAttribute("aria-label", `Annotation ${index + 1}: edit`);
+      const summary = annotationTargetSummary(annotation);
+      const ariaLabel = `${localized("Annotation")} ${index + 1}: ${localized("edit")}`;
+      marker.setAttribute("aria-label", ariaLabel);
+      if (summary.total > 0) {
+        marker.dataset.resolved = String(summary.resolved);
+        marker.dataset.total = String(summary.total);
+        const targets = localized("targets", { resolved: summary.resolved, total: summary.total });
+        marker.dataset.tooltip = summary.resolved < summary.total
+          ? `${ariaLabel} · ${targets} · ${localized(summary.reason ?? "unresolved")}`
+          : `${ariaLabel} · ${targets}`;
+      }
       marker.textContent = String(index + 1);
       marker.hidden = !anchor;
       if (anchor) Object.assign(marker.style, { left: `${anchor.x}px`, top: `${anchor.y}px` });
       marker.addEventListener("click", () => focusAnnotation(annotation.annotationId));
+      marker.addEventListener("mouseenter", () => {
+        setMarkerHighlight(annotation.annotationId);
+        showTooltip(marker);
+      });
+      marker.addEventListener("mouseleave", () => {
+        setMarkerHighlight(null);
+        hideTooltip();
+      });
+      marker.addEventListener("focus", () => {
+        setMarkerHighlight(annotation.annotationId);
+        showTooltip(marker);
+      });
+      marker.addEventListener("blur", () => {
+        setMarkerHighlight(null);
+        hideTooltip();
+      });
       overlayMount.append(marker);
     });
     return resolved;
@@ -1512,21 +1686,21 @@ export async function mountAgentAnnotations(
     if (!composer) return;
     const surface = document.createElement("form");
     surface.className = "aa-composer";
-    surface.setAttribute("aria-label", "Annotation composer");
+    surface.setAttribute("aria-label", localized("Annotation composer"));
     const title = document.createElement("strong");
     title.textContent = composer.kind === "region"
-      ? `Area (${composer.sampled} sampled targets)`
-      : `${composer.kind === "multi" ? "Multi" : "Pick"} annotation`;
+      ? `${localized("Area")} (${composer.sampled} ${localized("sampled targets")})`
+      : localized(composer.kind === "multi" ? "Multi annotation" : "Pick annotation");
     const textarea = document.createElement("textarea");
     textarea.className = "aa-textarea";
-    textarea.setAttribute("aria-label", "Annotation comment");
-    textarea.placeholder = "Describe the requested change";
+    textarea.setAttribute("aria-label", localized("Annotation comment"));
+    textarea.placeholder = localized("Describe the requested change");
     textarea.value = previousDraft;
     const actions = document.createElement("div");
     actions.className = "aa-actions";
-    const cancel = iconButton("Cancel", CloseIcon, cancelCapture);
+    const cancel = iconButton(localized("Cancel"), CloseIcon, cancelCapture);
     cancel.className = "aa-button aa-icon-button";
-    const save = submitButton("Save annotation", SaveIcon);
+    const save = submitButton(localized("Save annotation"), SaveIcon);
     actions.append(cancel, save);
     surface.append(title, textarea, actions);
     surface.addEventListener("submit", async (event) => {
@@ -1585,11 +1759,11 @@ export async function mountAgentAnnotations(
         clearTransientSelection();
         render();
         emit();
-        setStatus("Annotation saved");
+        setStatus(localized("Annotation saved"));
         if (evidenceInput) scheduleScreenshotEvidence(evidenceInput);
       } catch (error) {
         save.disabled = false;
-        setStatus(error instanceof Error ? error.message : "Save failed");
+        setStatus(error instanceof Error ? error.message : localized("Save failed"));
       }
     });
     overlayMount.append(surface);
@@ -1623,16 +1797,35 @@ export async function mountAgentAnnotations(
 
   const positionEditor = () => {
     const surface = overlayMount.querySelector<HTMLElement>(".aa-editor");
+    if (!surface || !editingId) return;
+    // Priority: the captured list-item rect, then the annotation marker,
+    // then the Dock. The editor never silently floats at the top-left.
+    if (editorAnchorRect) {
+      positionSurface(surface, editorAnchorRect);
+      return;
+    }
     const marker = Array.from(overlayMount.querySelectorAll<HTMLElement>(".aa-marker"))
       .find((node) => node.dataset.annotationId === editingId);
-    if (!surface || !marker || marker.hidden) return;
-    const markerRect = marker.getBoundingClientRect();
-    positionSurface(surface, {
-      x: markerRect.x,
-      y: markerRect.y,
-      width: markerRect.width,
-      height: markerRect.height,
-    });
+    if (marker && !marker.hidden) {
+      const markerRect = marker.getBoundingClientRect();
+      positionSurface(surface, {
+        x: markerRect.x,
+        y: markerRect.y,
+        width: markerRect.width,
+        height: markerRect.height,
+      });
+      return;
+    }
+    const dock = root.querySelector<HTMLElement>(".aa-dock");
+    if (dock) {
+      const dockRect = dock.getBoundingClientRect();
+      positionSurface(surface, {
+        x: dockRect.x,
+        y: dockRect.top - 8,
+        width: dockRect.width,
+        height: 8,
+      });
+    }
   };
 
   const renderEditor = (previousDraft: string | null) => {
@@ -1641,18 +1834,19 @@ export async function mountAgentAnnotations(
     const surface = document.createElement("form");
     surface.className = "aa-editor";
     surface.setAttribute("role", "dialog");
-    surface.setAttribute("aria-label", "Annotation editor");
+    surface.setAttribute("aria-label", localized("Annotation editor"));
     surface.dataset.annotationId = annotation.annotationId;
     const textarea = document.createElement("textarea");
     textarea.className = "aa-textarea";
-    textarea.setAttribute("aria-label", "Annotation comment");
+    textarea.setAttribute("aria-label", localized("Annotation comment"));
     textarea.value = previousDraft ?? annotation.comment;
+    const summary = annotationTargetSummary(annotation);
     const actions = document.createElement("div");
     actions.className = "aa-actions";
-    const save = submitButton("Save comment", SaveIcon);
+    const save = submitButton(localized("Save comment"), SaveIcon);
     if (screenshotMode !== "off" && transport.writeEvidence) {
       const capture = iconButton(
-        localized({ "en-US": "Capture screenshot", "zh-CN": "截图" }),
+        localized("Capture screenshot"),
         CaptureIcon,
         () => { captureEvidence(annotation.annotationId).catch(() => undefined); }
       );
@@ -1662,23 +1856,30 @@ export async function mountAgentAnnotations(
       actions.append(save);
     }
     const statusButton = iconButton(
-      annotation.status === "open" ? "Complete" : "Reopen",
+      annotation.status === "open" ? localized("Complete") : localized("Reopen"),
       annotation.status === "open" ? CompleteIcon : ReopenIcon,
       async () => {
       await mutate([{ op: annotation.status === "open" ? "complete" : "reopen", annotationId: annotation.annotationId }]);
       }
     );
     statusButton.className = "aa-button aa-icon-button";
-    const remove = iconButton("Delete", DeleteIcon, async () => {
+    const remove = iconButton(localized("Delete"), DeleteIcon, async () => {
       await mutate([{ op: "remove", annotationId: annotation.annotationId }]);
       if (destroyed) return;
-      editingId = null;
-      render();
+      closeEditor();
     });
     remove.className = "aa-button aa-icon-button aa-danger";
-    const close = iconButton("Close", CloseIcon, () => { editingId = null; render(); });
+    const close = iconButton(localized("Close"), CloseIcon, closeEditor);
     close.className = "aa-button aa-icon-button";
     actions.append(statusButton, remove, close);
+    if (summary.total > 0) {
+      const targets = document.createElement("div");
+      targets.className = "aa-muted aa-targets";
+      targets.textContent = summary.resolved < summary.total
+        ? `${localized("targets", { resolved: summary.resolved, total: summary.total })} · ${localized(summary.reason ?? "unresolved")}`
+        : localized("targets", { resolved: summary.resolved, total: summary.total });
+      surface.append(targets);
+    }
     surface.append(textarea, actions);
     surface.addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -1686,13 +1887,12 @@ export async function mountAgentAnnotations(
       try {
         await mutate([{ op: "update", annotationId: annotation.annotationId, comment: textarea.value }]);
         if (destroyed) return;
-        editingId = null;
-        render();
-        setStatus("Comment saved");
+        closeEditor();
+        setStatus(localized("Comment saved"));
       } catch (error) {
         if (destroyed) return;
         save.disabled = false;
-        setStatus(error instanceof Error ? error.message : "Save failed");
+        setStatus(error instanceof Error ? error.message : localized("Save failed"));
       }
     });
     overlayMount.append(surface);
@@ -1849,11 +2049,13 @@ export async function mountAgentAnnotations(
     const listContribution = toolbar.find((entry) => entry.id === "agent-annotations.builtin:list");
     const collapseContributionId = toolbar.find((entry) => entry.id === "agent-annotations.builtin:toggle")?.id;
     const listShortcut = shortcuts.find((entry) => entry.id === "agent-annotations.builtin:list");
-    const listLabel = listPanel ? localized(listPanel.title) : "Annotation list";
+    const listLabel = listPanel ? localized(listPanel.title) : localized("Annotation list");
     const zeroLabel = listShortcut ? `${listLabel} (${listShortcut.formatted})` : listLabel;
     const hasList = listContribution !== undefined;
-    const countLabel = openCount === 0 ? zeroLabel : `${openCount} open annotations`;
-    const expandLabel = localized({ "en-US": "Expand toolbar", "zh-CN": "展开工具栏" });
+    const countLabel = openCount === 0
+      ? zeroLabel
+      : localized("openAnnotations", { count: openCount });
+    const expandLabel = localized("Expand toolbar");
     return createElement("button", {
       ref,
       type: "button",
@@ -1950,7 +2152,7 @@ export async function mountAgentAnnotations(
           ref: gripRef,
           type: "button",
           className: "aa-grip",
-          "aria-label": "Drag toolbar",
+          "aria-label": localized("Drag toolbar"),
           onPointerDown: (event: import("react").PointerEvent<HTMLButtonElement>) => {
             const dock = dockRef.current!;
             const rect = dock.getBoundingClientRect();
@@ -2016,6 +2218,7 @@ export async function mountAgentAnnotations(
                   panelContribution.id,
                   message
                 ),
+                fallbackText: localized("Panel failed to render"),
                 children: createElement(panelContribution.render, {
                   studio: api,
                   close: () => api.commands.panels.close(panelContribution.id),
@@ -2089,6 +2292,7 @@ export async function mountAgentAnnotations(
     areaNode = null;
 
     const markerTargets = renderMarkers();
+    renderMarkerHighlights();
     for (const element of selected) addOutline(element.getBoundingClientRect());
     // Hover and area outlines always go through the shared tracked nodes.
     refreshInteractiveOverlays();
@@ -2099,12 +2303,12 @@ export async function mountAgentAnnotations(
       const fallback = document.createElement("div");
       fallback.className = "aa-copy-fallback";
       fallback.setAttribute("role", "dialog");
-      fallback.setAttribute("aria-label", "Manual copy fallback");
+      fallback.setAttribute("aria-label", localized("Manual copy fallback"));
       const textarea = document.createElement("textarea");
       textarea.className = "aa-textarea";
       textarea.readOnly = true;
       textarea.value = copyFallback;
-      const close = iconButton("Close", CloseIcon, () => { copyFallback = ""; render(); });
+      const close = iconButton(localized("Close"), CloseIcon, () => { copyFallback = ""; render(); });
       close.className = "aa-button aa-icon-button";
       fallback.append(textarea, close);
       overlayMount.append(fallback);
@@ -2216,6 +2420,14 @@ export async function mountAgentAnnotations(
   };
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.key === "Escape") hideTooltip();
+    // Escape closes an open editor first (clearing the highlight and
+    // returning focus to a visible Dock control) before panel/capture
+    // handling; the editor surface never lingers and blocks the page.
+    if (event.key === "Escape" && editingId) {
+      event.preventDefault();
+      closeEditor();
+      return;
+    }
     if (isHostEvent(event)) {
       if (event.key === "Escape" && openPanel) {
         event.preventDefault();
@@ -2542,13 +2754,7 @@ export async function mountAgentAnnotations(
         const marker = Array.from(overlayMount.querySelectorAll<HTMLElement>(".aa-marker"))
           .find((node) => node.dataset.annotationId === annotation.annotationId);
         if (!marker) continue;
-        const target = annotation.targets?.[0]
-          ? resolvePersistedTarget(annotation.targets[0], { appRoot, host })
-          : null;
-        const targetInRoot =
-          target?.status === "resolved" && isInAppRoot(target.element)
-            ? target.element
-            : null;
+        const targetInRoot = firstResolvedTarget(annotation);
         if (targetInRoot) resolved.push(targetInRoot);
         const rect = targetInRoot ? targetBounds(targetInRoot) : null;
         const anchor = rect
@@ -2641,6 +2847,7 @@ export async function mountAgentAnnotations(
     clampDockPosition();
     positionPanel();
     positionMultiComplete();
+    renderMarkerHighlights();
     if (markerObserver || editingId || composer) scheduleMarkerRefresh();
   };
   window.addEventListener("resize", onViewport);
@@ -2705,6 +2912,9 @@ export async function mountAgentAnnotations(
   const unmount = () => {
     if (destroyed) return;
     destroyed = true;
+    highlightedAnnotation = null;
+    editorAnchorRect = null;
+    hideTooltip();
     studioRoot?.unmount();
     studioRoot = null;
     delete hostElement.dataset.studioRenders;

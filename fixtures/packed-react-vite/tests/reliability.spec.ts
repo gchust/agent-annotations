@@ -9,8 +9,15 @@ const shadow = (page: import("@playwright/test").Page, selector: string) =>
   page.locator(`#agent-annotations-root >> ${selector}`);
 const save = async (page: import("@playwright/test").Page, target: import("@playwright/test").Locator, comment: string) => {
   const expected = JSON.parse(readFileSync(taskPath, "utf8")).annotations.length + 1;
+  // Runtime readiness: the dock must be mounted before the shortcut is
+  // dispatched, otherwise the keydown arrives before the listener exists.
+  await expect(shadow(page, ".aa-dock")).toBeVisible();
   await page.keyboard.press("Control+Alt+P");
+  // The capture hotkey must have armed Pick before the click reaches the
+  // target; a click while unarmed would only focus the element.
+  await expect(shadow(page, '[aria-label^="Pick"]')).toHaveAttribute("aria-pressed", "true");
   await target.click();
+  await expect(shadow(page, '[aria-label="Annotation comment"]')).toBeVisible();
   await shadow(page, '[aria-label="Annotation comment"]').fill(comment);
   await shadow(page, 'button[aria-label="Save annotation"]').click();
   await expect.poll(() => JSON.parse(readFileSync(taskPath, "utf8")).annotations.length).toBe(expected);
@@ -231,11 +238,14 @@ test("dynamic marker refresh stays rAF-bounded and observers stop with hidden ma
   await save(page, page.locator("#dynamic-target"), "Dynamic marker");
   const marker = shadow(page, ".aa-marker").last();
   await expect(marker).toBeVisible();
-  const before = await marker.boundingBox();
+  // Atomic measurement: read x directly on the element in one evaluate call,
+  // so a marker DOM rebuild between locator reads can never split the pair.
+  const markerX = () => marker.evaluate((node) => node.getBoundingClientRect().x);
+  const before = await markerX();
   await page.waitForTimeout(10_000);
-  const after = await marker.boundingBox();
-  expect(after).not.toBeNull();
-  expect(before?.x).toBe(after?.x);
+  await expect(marker).toBeVisible();
+  const after = await markerX();
+  expect(after).toBe(before);
   const refreshes = Number(await page.locator("#agent-annotations-root").getAttribute("data-marker-refreshes"));
   console.log(`dynamic-dom markerRefreshes10s=${refreshes}`);
   expect(refreshes).toBeLessThan(60);

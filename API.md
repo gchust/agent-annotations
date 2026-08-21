@@ -18,6 +18,14 @@
   the current source revision through the runtime-owned, generation-guarded
   refresh path and reports it as applied. It is not part of `StudioPublicApi`,
   so extensions cannot spoof the applied revision.
+- `StudioPublicApi.commands.annotations.targetSummary(annotationId)` returns the
+  annotation's resolution summary `{ resolved, total, reason }` where `reason`
+  is one of `"unresolved"`, `"identity mismatch"`, `"identity unverifiable"`,
+  `"iframe unsupported"`, or `null` when every target resolves.
+  `StudioPublicApi.commands.markers.highlight(annotationId | null)` temporarily
+  highlights every resolved target of an annotation without opening the editor
+  (the built-in annotation list uses both for its per-item resolution rows and
+  focus preview; `null` clears the highlight).
 - `TaskTransport` requires `read`/`mutate` and may add `writeEvidence`,
   `subscribe`, and `appendDiagnostics` (browser diagnostics are persisted
   through `HttpTaskTransport` and bounded/redacted server-side).

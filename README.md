@@ -188,6 +188,38 @@ those files; `wait` treats the given sha256 as a baseline and returns
 moves off it, or `{ changed: false, sourceRevision }` when it stays until the
 bounded (30 second) timeout.
 
+## Localization
+
+All built-in user-visible text (toolbar, tooltips, composer, editor, list,
+statuses, reasons, confirmations) ships in the `en-US` and `zh-CN` message
+dictionary (`src/client/messages.ts`). The runtime resolves the dictionary
+against the host locale (`host.locale()`, else `<html lang>`):
+
+```ts
+agentAnnotations({
+  extensions: [defineClientExtension({
+    id: "host",
+    apiVersion: 1,
+    host: { locale: () => "zh-CN" },
+  })],
+});
+```
+
+The public snapshot's `messages` are merged as
+builtin dictionary → registry messages → host `messages`, so a host can
+override any built-in key:
+
+```ts
+host: { messages: { "Pick": "Select" } }
+```
+
+A locale switch re-renders in place: the Studio never remounts and an open
+composer/editor draft survives. Multi-target annotations show `resolved/total`
+with a stable reason key (`unresolved`, `identity mismatch`,
+`identity unverifiable`, `iframe unsupported`) in the marker tooltip, the
+editor, and the list; the list also shows route, kind, and evidence count with
+the default Open filter preserved.
+
 ## Runtime diagnostics (console and network)
 
 While mounted, the runtime records `console.error` output and failed network

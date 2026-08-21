@@ -430,11 +430,22 @@ export interface StudioPublicApi {
       remove(id: string): Promise<void>;
       removeCompleted(): Promise<void>;
       captureEvidence(annotationId: string): Promise<void>;
+      // Resolution summary for the list: resolved/total plus a stable message
+      // key for the first unresolved reason (one of the four documented
+      // reason keys, or null when every target resolves).
+      targetSummary(annotationId: string): {
+        resolved: number;
+        total: number;
+        reason: "unresolved" | "identity mismatch" | "identity unverifiable" | "iframe unsupported" | null;
+      };
     };
     markers: {
       show(): void;
       hide(): void;
       focus(annotationId: string): void;
+      // Temporarily highlight every resolved target of an annotation without
+      // opening the editor; null clears the highlight.
+      highlight(annotationId: string | null): void;
     };
     panels: {
       open(id: string): void;

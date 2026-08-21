@@ -36,8 +36,17 @@ const shortcut = (
 ) => ({ key, code, primary, alt, shift });
 const toggleCollapsed = ({ collapsed }: { collapsed: boolean }) => collapsed;
 const showCollapse = ({ collapsed }: { collapsed: boolean }) => !collapsed;
-const translate = (studio: StudioPublicApi, value: string): string =>
-  studio.getSnapshot().messages[value] ?? value;
+const translate = (
+  studio: StudioPublicApi,
+  value: string,
+  params?: Record<string, string | number>
+): string => {
+  const text = studio.getSnapshot().messages[value] ?? value;
+  if (!params) return text;
+  return text.replace(/\{(\w+)\}/g, (match, name: string) =>
+    params[name] !== undefined ? String(params[name]) : match
+  );
+};
 
 const HelpPanel: PanelContribution["render"] = ({ studio, close }) =>
   createElement(
@@ -70,8 +79,10 @@ const HelpPanel: PanelContribution["render"] = ({ studio, close }) =>
 
 const AnnotationList: PanelContribution["render"] = ({ studio, close }) => {
   const [filter, setFilter] = useState<"open" | "all">("open");
-  const completedCount = studio.getSnapshot().task.annotations
+  const snapshot = studio.getSnapshot();
+  const completedCount = snapshot.task.annotations
     .filter((annotation) => annotation.status === "completed").length;
+  const summary = (annotationId: string) => studio.commands.annotations.targetSummary(annotationId);
   return createElement(
     "div",
     null,
@@ -113,32 +124,79 @@ const AnnotationList: PanelContribution["render"] = ({ studio, close }) => {
     createElement(
       "ol",
       { className: "aa-list" },
-      ...studio.getSnapshot().task.annotations.flatMap((annotation, index) =>
-        filter === "open" && annotation.status !== "open"
-          ? []
-          : [
+      ...snapshot.task.annotations.flatMap((annotation, index) => {
+        if (filter === "open" && annotation.status !== "open") return [];
+        const resolved = summary(annotation.annotationId);
+        const meta: string[] = [];
+        if (annotation.pageContext.routeKey) {
+          meta.push(`${translate(studio, "Route")} ${annotation.pageContext.routeKey}`);
+        }
+        meta.push(translate(studio, annotation.kind));
+        if (resolved.total > 0) {
+          meta.push(translate(studio, "targets", {
+            resolved: resolved.resolved,
+            total: resolved.total,
+          }));
+        }
+        if ((annotation.evidence?.length ?? 0) > 0) {
+          meta.push(translate(studio, "evidence", { count: annotation.evidence!.length }));
+        }
+        const reason = resolved.resolved < resolved.total && resolved.reason
+          ? translate(studio, resolved.reason)
+          : null;
+        return [
+          createElement(
+            "li",
+            {
+              className: "aa-list-item",
+              key: annotation.annotationId,
+              "data-annotation-id": annotation.annotationId,
+            },
+            createElement(
+              "button",
+              {
+                type: "button",
+                className: "aa-button aa-list-open",
+                "aria-label": `${translate(studio, "Edit annotation")} ${index + 1}`,
+                onClick: () => studio.commands.markers.focus(annotation.annotationId),
+                onFocus: () => studio.commands.markers.highlight(annotation.annotationId),
+                onBlur: () => studio.commands.markers.highlight(null),
+              },
               createElement(
-                "li",
-                { className: "aa-list-item", key: annotation.annotationId },
+                "span",
+                { className: "aa-list-main" },
                 createElement(
-                  "button",
-                  {
-                    type: "button",
-                    className: "aa-button",
-                    "aria-label": `Edit annotation ${index + 1}`,
-                    onClick: () =>
-                      studio.commands.markers.focus(annotation.annotationId),
-                  },
-                  `${index + 1}. ${annotation.comment}`
+                  "span",
+                  { className: "aa-list-title" },
+                  createElement("b", null, `${index + 1}.`),
+                  " ",
+                  annotation.comment
                 ),
                 createElement(
                   "span",
                   { className: "aa-muted" },
-                  translate(studio, annotation.status)
+                  meta.join(" · ")
                 )
-              ),
-            ]
-      )
+              )
+            ),
+            createElement(
+              "span",
+              {
+                className: "aa-status-chip",
+                "data-status": annotation.status,
+              },
+              translate(studio, annotation.status)
+            ),
+            reason
+              ? createElement(
+                  "span",
+                  { className: "aa-muted aa-unresolved" },
+                  translate(studio, reason)
+                )
+              : null
+          ),
+        ];
+      })
     ),
     createElement(
       "div",
@@ -149,16 +207,16 @@ const AnnotationList: PanelContribution["render"] = ({ studio, close }) => {
           type: "button",
           className: "aa-button aa-danger",
           disabled: completedCount === 0,
-          "aria-label": `Remove completed (${completedCount})`,
+          "aria-label": translate(studio, "Remove completed", { count: completedCount }),
           onClick: () => {
             const wording = completedCount === 1
-              ? "Remove 1 completed annotation?"
-              : `Remove ${completedCount} completed annotations?`;
+              ? translate(studio, "Confirm remove completed one")
+              : translate(studio, "Confirm remove completed", { count: completedCount });
             if (!window.confirm(wording)) return;
             studio.commands.annotations.removeCompleted();
           },
         },
-        `Remove completed (${completedCount})`
+        translate(studio, "Remove completed", { count: completedCount })
       )
     )
   );

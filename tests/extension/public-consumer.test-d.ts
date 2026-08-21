@@ -12,6 +12,12 @@ const useStudio = (studio: StudioPublicApi): void => {
   studio.commands.capture.startPick();
   void studio.commands.annotations.copyOpen();
   studio.commands.markers.focus("annotation-id");
+  const summary = studio.commands.annotations.targetSummary("annotation-id");
+  if (summary.reason === "identity mismatch") void summary.resolved;
+  const reason: "unresolved" | "identity mismatch" | "identity unverifiable" | "iframe unsupported" | null = summary.reason;
+  void reason;
+  studio.commands.markers.highlight("annotation-id");
+  studio.commands.markers.highlight(null);
   studio.commands.panels.open("public-consumer:consumer-panel");
   studio.commands.toolbar.toggleCollapsed();
   void studio.commands.exporters.format("public-consumer:exporter-id");

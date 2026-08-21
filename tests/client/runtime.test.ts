@@ -123,6 +123,377 @@ describe("client runtime", () => {
     vi.unstubAllGlobals();
   });
 
+  it("anchors a multi marker to the first resolvable target and reports partial resolution", async () => {
+    vi.useFakeTimers();
+    history.pushState({}, "", "/settings");
+    const resolved = document.createElement("button");
+    resolved.id = "second-target";
+    document.body.append(resolved);
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(taskFixture({
+        annotations: [annotationFixture({
+          kind: "multi",
+          targets: [
+            // First target is unresolved (selector matches nothing); the
+            // marker must still anchor to the second, resolvable target.
+            targetFixture({ selector: "#gone-first" }),
+            targetFixture({
+              selector: "#second-target",
+              inspection: { ...targetFixture().inspection, attributes: { id: "second-target" } },
+            }),
+          ],
+        })],
+      })),
+    });
+    const host = document.getElementById("agent-annotations-root")!;
+    const shadow = host.shadowRoot!;
+    try {
+      const marker = shadow.querySelector<HTMLElement>('[data-annotation-id="ann-1"]')!;
+      expect(marker.hidden).toBe(false);
+      // The marker anchors to the resolved second target, not the top-left.
+      expect(marker.style.left).not.toBe("");
+      expect(marker.dataset.resolved).toBe("1");
+      expect(marker.dataset.total).toBe("2");
+      // Hovering shows 1/2 targets plus the unresolved reason.
+      marker.dispatchEvent(new MouseEvent("mouseenter"));
+      await vi.advanceTimersByTimeAsync(300);
+      expect(shadow.querySelector('[role="tooltip"]')?.textContent)
+        .toContain("1/2 targets");
+      expect(shadow.querySelector('[role="tooltip"]')?.textContent)
+        .toContain("unresolved");
+      // Only the resolved target is highlighted, never the missing one.
+      expect(shadow.querySelectorAll(".aa-marker-highlight").length).toBe(1);
+      marker.dispatchEvent(new MouseEvent("mouseleave"));
+      expect(shadow.querySelectorAll(".aa-marker-highlight").length).toBe(0);
+    } finally {
+      mounted.unmount();
+      resolved.remove();
+    }
+  });
+
+  it("highlights every resolved target on marker hover/focus and cleans up on leave", async () => {
+    vi.useFakeTimers();
+    history.pushState({}, "", "/settings");
+    const first = document.createElement("button");
+    first.id = "multi-a";
+    const second = document.createElement("button");
+    second.id = "multi-b";
+    document.body.append(first, second);
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(taskFixture({
+        annotations: [annotationFixture({
+          kind: "multi",
+          targets: [
+            targetFixture({ selector: "#multi-a", inspection: { ...targetFixture().inspection, attributes: { id: "multi-a" } } }),
+            targetFixture({ selector: "#multi-b", inspection: { ...targetFixture().inspection, attributes: { id: "multi-b" } } }),
+          ],
+        })],
+      })),
+    });
+    const host = document.getElementById("agent-annotations-root")!;
+    const shadow = host.shadowRoot!;
+    const marker = shadow.querySelector<HTMLElement>('[data-annotation-id="ann-1"]')!;
+    try {
+      // Hover highlights ALL resolved targets (two outlines), not only the
+      // anchor target.
+      marker.dispatchEvent(new MouseEvent("mouseenter"));
+      const highlights = () => shadow.querySelectorAll<HTMLElement>(".aa-marker-highlight");
+      expect(highlights().length).toBe(2);
+      expect([...highlights()].every((node) =>
+        node.dataset.annotationId === "ann-1")).toBe(true);
+      // The tooltip carries the resolved/total text.
+      await vi.advanceTimersByTimeAsync(300);
+      expect(shadow.querySelector('[role="tooltip"]')?.textContent).toContain("2/2 targets");
+      marker.dispatchEvent(new MouseEvent("mouseleave"));
+      expect(highlights().length).toBe(0);
+      // Keyboard focus highlights the same targets and cleans up on blur.
+      marker.dispatchEvent(new FocusEvent("focus"));
+      expect(highlights().length).toBe(2);
+      marker.dispatchEvent(new FocusEvent("blur"));
+      expect(highlights().length).toBe(0);
+    } finally {
+      mounted.unmount();
+      first.remove();
+      second.remove();
+    }
+  });
+
+  it("renders the multi kind localized in the list under zh-CN", async () => {
+    vi.useFakeTimers();
+    history.pushState({}, "", "/settings");
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(taskFixture({
+        annotations: [annotationFixture({
+          kind: "multi",
+          targets: [
+            targetFixture({ selector: "#multi-zh-a", inspection: { ...targetFixture().inspection, attributes: { id: "multi-zh-a" } } }),
+            targetFixture({ selector: "#multi-zh-b", inspection: { ...targetFixture().inspection, attributes: { id: "multi-zh-b" } } }),
+          ],
+        })],
+      })),
+      extensions: [defineClientExtension({
+        id: "zh-list-host",
+        apiVersion: 1,
+        host: { locale: () => "zh-CN" },
+      })],
+    });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      mounted.api.commands.panels.open("agent-annotations.builtin:list");
+      const item = shadow.querySelector<HTMLElement>(".aa-list-item")!;
+      expect(item.textContent).toContain("多选");
+      expect(item.textContent).not.toContain("multi");
+    } finally {
+      mounted.unmount();
+    }
+  });
+
+  it("shows resolved/total and the unresolved reason in the editor and list", async () => {
+    vi.useFakeTimers();
+    history.pushState({}, "", "/settings");
+    const target = document.createElement("button");
+    target.id = "kept-target";
+    document.body.append(target);
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(taskFixture({
+        annotations: [annotationFixture({
+          kind: "multi",
+          targets: [
+            targetFixture({ selector: "#kept-target", inspection: { ...targetFixture().inspection, attributes: { id: "kept-target" } } }),
+            targetFixture({ selector: "#gone-target" }),
+            targetFixture({ selector: "#also-gone" }),
+          ],
+        })],
+      })),
+    });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      // Editor shows 1/3 targets with the unresolved reason.
+      mounted.api.commands.markers.focus("ann-1");
+      const targets = shadow.querySelector<HTMLElement>(".aa-targets")!;
+      expect(targets.textContent).toContain("1/3 targets");
+      expect(targets.textContent).toContain("unresolved");
+      mounted.api.commands.panels.open("agent-annotations.builtin:list");
+      const item = shadow.querySelector<HTMLElement>('.aa-list-item[data-annotation-id="ann-1"]')!;
+      expect(item.textContent).toContain("1/3 targets");
+      expect(item.textContent).toContain("unresolved");
+      expect(item.textContent).toContain("multi");
+    } finally {
+      mounted.unmount();
+      target.remove();
+    }
+  });
+
+  // The task keeps an open annotation so its status stays active; the
+  // completed one is opened from the All filter.
+  const completedTask = taskFixture({
+    annotations: [
+      annotationFixture({
+        annotationId: "ann-completed",
+        status: "completed",
+        completedAt: "2026-08-12T12:00:01.000Z",
+      }),
+      annotationFixture({ annotationId: "ann-open" }),
+    ],
+  });
+  it("anchors the completed editor to its list item and returns focus on close", async () => {
+    vi.useFakeTimers();
+    history.pushState({}, "", "/settings");
+    const itemRect = new DOMRect(20, 30, 300, 44);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this.classList.contains("aa-list-item")) return itemRect;
+      if (this.classList.contains("aa-editor")) return new DOMRect(0, 0, 310, 174);
+      return new DOMRect();
+    });
+    vi.spyOn(window, "innerWidth", "get").mockReturnValue(1000);
+    vi.spyOn(window, "innerHeight", "get").mockReturnValue(800);
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(completedTask),
+      initialState: { collapsed: false },
+    });
+    const host = document.getElementById("agent-annotations-root")!;
+    const shadow = host.shadowRoot!;
+    try {
+      mounted.api.commands.panels.open("agent-annotations.builtin:list");
+      // Switch to All to reveal the completed annotation.
+      const all = [...shadow.querySelectorAll<HTMLButtonElement>("button")]
+        .find((node) => node.textContent === "All")!;
+      all.click();
+      await vi.advanceTimersByTimeAsync(20);
+
+      const item = shadow.querySelector<HTMLElement>('[data-annotation-id="ann-completed"]')!;
+      expect(item).not.toBeNull();
+      item.querySelector<HTMLButtonElement>("button")!.click();
+      await vi.advanceTimersByTimeAsync(20);
+      // The completed editor is anchored to the list item, never the top-left.
+      const editor = shadow.querySelector<HTMLElement>(".aa-editor")!;
+      expect(editor).not.toBeNull();
+      expect({ left: editor.style.left, top: editor.style.top }).toEqual({
+        left: "20px",
+        top: "82px",
+      });
+      expect(shadow.querySelector(".aa-panel")).toBeNull();
+      // Reopen/Delete/Save/Screenshot are all still available.
+      expect([...editor.querySelectorAll("button")].map((button) => button.getAttribute("aria-label")))
+        .toEqual(["Save comment", "Capture screenshot", "Reopen", "Delete", "Close"]);
+      // Close keeps the panel closed and returns focus to the Dock list
+      // control that triggered the list (no cross-instance filter state).
+      [...editor.querySelectorAll("button")]
+        .find((button) => button.getAttribute("aria-label") === "Close")!.click();
+      await vi.advanceTimersByTimeAsync(20);
+      expect(shadow.querySelector(".aa-panel")).toBeNull();
+      expect(shadow.activeElement?.getAttribute("aria-label")).toBe("Annotations (Ctrl+Alt+L)");
+    } finally {
+      mounted.unmount();
+    }
+  });
+
+  it("closes the editor with Escape, clears the highlight, and refocuses a visible dock control", async () => {
+    vi.useFakeTimers();
+    history.pushState({}, "", "/settings");
+    const target = document.createElement("button");
+    target.id = "esc-target";
+    document.body.append(target);
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(taskFixture({
+        annotations: [annotationFixture({
+          targets: [targetFixture({
+            selector: "#esc-target",
+            inspection: { ...targetFixture().inspection, attributes: { id: "esc-target" } },
+          })],
+        })],
+      })),
+    });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      mounted.api.commands.markers.focus("ann-1");
+      await vi.advanceTimersByTimeAsync(20);
+      expect(shadow.querySelector(".aa-editor")).not.toBeNull();
+      expect(shadow.querySelector(".aa-marker-highlight")).not.toBeNull();
+      // Escape closes the editor, clears the highlight, and refocuses the
+      // visible collapsed-count control (default collapsed dock).
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      await vi.advanceTimersByTimeAsync(20);
+      expect(shadow.querySelector(".aa-editor")).toBeNull();
+      expect(shadow.querySelector(".aa-marker-highlight")).toBeNull();
+      expect(shadow.activeElement?.getAttribute("aria-label")).toBe("1 open annotations");
+      // Expanded dock: Escape returns focus to the list action instead.
+      mounted.api.commands.toolbar.toggleCollapsed();
+      mounted.api.commands.markers.focus("ann-1");
+      await vi.advanceTimersByTimeAsync(20);
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      await vi.advanceTimersByTimeAsync(20);
+      expect(shadow.querySelector(".aa-editor")).toBeNull();
+      expect(shadow.activeElement?.getAttribute("aria-label")).toBe("Annotations (Ctrl+Alt+L)");
+    } finally {
+      mounted.unmount();
+      target.remove();
+    }
+  });
+
+  it("returns editor focus to the collapsed count while the dock stays collapsed", async () => {
+    vi.useFakeTimers();
+    history.pushState({}, "", "/settings");
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(completedTask),
+    });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      mounted.api.commands.panels.open("agent-annotations.builtin:list");
+      const all = [...shadow.querySelectorAll<HTMLButtonElement>("button")]
+        .find((node) => node.textContent === "All")!;
+      all.click();
+      await vi.advanceTimersByTimeAsync(20);
+      shadow.querySelector<HTMLElement>('[data-annotation-id="ann-completed"] button')!
+        .click();
+      await vi.advanceTimersByTimeAsync(20);
+      const editor = shadow.querySelector<HTMLElement>(".aa-editor")!;
+      expect(editor).not.toBeNull();
+      [...editor.querySelectorAll("button")]
+        .find((button) => button.getAttribute("aria-label") === "Close")!.click();
+      await vi.advanceTimersByTimeAsync(20);
+      // The dock is still collapsed; focus returns to the visible collapsed
+      // count control instead of the CSS-hidden list action.
+      expect(shadow.querySelector(".aa-dock")?.getAttribute("data-collapsed")).toBe("true");
+      expect(shadow.activeElement?.getAttribute("aria-label")).toBe("1 open annotations");
+    } finally {
+      mounted.unmount();
+    }
+  });
+
+  it("anchors a fully unresolved editor to the Dock instead of the top-left", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(window, "innerWidth", "get").mockReturnValue(1000);
+    vi.spyOn(window, "innerHeight", "get").mockReturnValue(800);
+    const dockRect = new DOMRect(300, 700, 420, 46);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this.classList.contains("aa-dock")) return dockRect;
+      if (this.classList.contains("aa-editor")) return new DOMRect(0, 0, 310, 174);
+      return new DOMRect();
+    });
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(taskFixture({
+        annotations: [annotationFixture({
+          targets: [{ ...targetFixture(), selector: "#never-matching" }],
+        })],
+      })),
+    });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      mounted.api.commands.markers.focus("ann-1");
+      const editor = shadow.querySelector<HTMLElement>(".aa-editor")!;
+      expect(editor).not.toBeNull();
+      // Never the silent top-left default.
+      expect(editor.style.left).not.toBe("8px");
+      expect(editor.style.top).not.toBe("8px");
+      expect(editor.style.top).toBe("510px");
+      expect(shadow.querySelector<HTMLElement>(".aa-targets")!.textContent)
+        .toContain("0/1 targets");
+    } finally {
+      mounted.unmount();
+    }
+  });
+
+  it("preserves the editor draft across a host locale switch", async () => {
+    vi.useFakeTimers();
+    history.pushState({}, "", "/settings");
+    let currentLocale = "en-US";
+    let notify!: () => void;
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(taskFixture()),
+      extensions: [defineClientExtension({
+        id: "locale-host",
+        apiVersion: 1,
+        host: {
+          locale: () => currentLocale,
+          subscribe: (listener) => {
+            notify = listener;
+            return () => undefined;
+          },
+        },
+      })],
+    });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      mounted.api.commands.markers.focus("ann-1");
+
+      const textarea = shadow.querySelector<HTMLTextAreaElement>(".aa-editor textarea")!;
+      textarea.value = "Draft in progress";
+      // Locale switch re-renders in place: the draft survives and the chrome
+      // switches to zh-CN without a remount.
+      currentLocale = "zh-CN";
+      notify();
+      await vi.advanceTimersByTimeAsync(0);
+      const rebuilt = shadow.querySelector<HTMLTextAreaElement>(".aa-editor textarea")!;
+      expect(rebuilt).not.toBeNull();
+      expect(rebuilt.value).toBe("Draft in progress");
+      expect(rebuilt.getAttribute("aria-label")).toBe("批注");
+      expect(shadow.querySelector('[aria-label="标注 (Ctrl+Alt+L)"]')).not.toBeNull();
+    } finally {
+      mounted.unmount();
+    }
+  });
+
   it("recovers an unresolved nested iframe marker after the outer document is populated", async () => {
     vi.useFakeTimers();
     history.pushState({}, "", "/settings");
