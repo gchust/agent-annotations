@@ -8,6 +8,12 @@ import MagicString from "magic-string";
 import type { Plugin } from "vite";
 
 import { FileTaskStore } from "../server/store.js";
+import {
+  parseAgentAnnotationsBrowserState,
+  readAgentAnnotationsBrowserState,
+  removeAgentAnnotationsBrowserState,
+  writeAgentAnnotationsBrowserState,
+} from "../server/browser-state.js";
 import { appendDiagnostics } from "../server/diagnostics.js";
 import { createSourcePathService } from "../server/source-path.js";
 import { PACKAGE_NAME } from "../metadata.js";
@@ -97,6 +103,18 @@ const body = async (request: IncomingMessage, limit = MAX_BODY_BYTES): Promise<u
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 };
 
+const rawBody = async (request: IncomingMessage, limit = MAX_BODY_BYTES): Promise<string> => {
+  const chunks: Buffer[] = [];
+  let bytes = 0;
+  for await (const chunk of request) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    bytes += buffer.length;
+    if (bytes > limit) throw new Error("payload_too_large");
+    chunks.push(buffer);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+};
+
 export default function agentAnnotations(
   options: AgentAnnotationsPluginOptions = {}
 ): Plugin {
@@ -127,6 +145,9 @@ export default function agentAnnotations(
   let closeInstalled = false;
   let viteBase = "/";
   let resolvedEndpoint = endpoint;
+  // Runtime identity of the last browser state this server session accepted;
+  // shutdown removes only state owned by this session's runtime.
+  let browserRuntimeId: string | null = null;
 
   if (allowRemote) {
     console.warn(
@@ -180,11 +201,13 @@ export default function agentAnnotations(
         "const key = Symbol.for('agent-annotations.mount');",
         "window[key]?.();",
         "const transport = new HttpTaskTransport(config);",
-        "const mounted = await mountAgentAnnotations({ transport, extensions, screenshotEvidence: config.screenshotEvidence });",
+        `const mounted = await mountAgentAnnotations({ transport, extensions, screenshotEvidence: config.screenshotEvidence, browserStatus: { endpoint: config.endpoint, token: config.token } });`,
         "window[key] = () => { mounted.unmount(); delete window[key]; };",
+        "mounted.refreshAppliedSourceRevision();",
         "if (import.meta.hot) {",
         "  import.meta.hot.accept();",
         "  import.meta.hot.dispose(() => window[key]?.());",
+        "  import.meta.hot.on('vite:afterUpdate', () => { mounted.refreshAppliedSourceRevision(); });",
         "}",
       ].filter(Boolean).join("\n");
     },
@@ -231,16 +254,29 @@ export default function agentAnnotations(
       if (httpServer && !closeInstalled) {
         closeInstalled = true;
         const signals = ["SIGINT", "SIGTERM"] as const;
-        const onExit = () => store.closeSync(token);
+        const onExit = () => {
+          cleanupBrowserState();
+          store.closeSync(token);
+        };
         const onSignal = (signal: NodeJS.Signals) => {
+          cleanupBrowserState();
           store.closeSync(token);
           process.kill(process.pid, signal);
+        };
+        const cleanupBrowserState = (): void => {
+          // Remove only the browser state written by this session's runtime;
+          // a replacement runtime's state is preserved.
+          const state = readAgentAnnotationsBrowserState(runtimeRoot);
+          if (state && browserRuntimeId !== null && state.runtimeId === browserRuntimeId) {
+            removeAgentAnnotationsBrowserState(runtimeRoot);
+          }
         };
         process.once("exit", onExit);
         for (const signal of signals) process.once(signal, onSignal);
         httpServer.once("close", () => {
           process.off("exit", onExit);
           for (const signal of signals) process.off(signal, onSignal);
+          cleanupBrowserState();
           void store.close(token);
         });
       }
@@ -279,6 +315,34 @@ export default function agentAnnotations(
             return json(response, 200, { entries: appendDiagnostics(runtimeRoot, input.entries) });
           }
           if (url.pathname === `${resolvedEndpoint}/heartbeat` && request.method === "POST") {
+            // Only an actually empty body or the exact empty JSON object is the
+            // legacy transport liveness heartbeat. Invalid JSON and non-empty
+            // unknown shapes are rejected; a claimed browser-state payload
+            // (with a schema field) is parsed strictly.
+            const raw = await rawBody(request, 16 * 1024);
+            const trimmed = raw.trim();
+            let parsed: unknown = null;
+            if (trimmed !== "") {
+              try {
+                parsed = JSON.parse(trimmed);
+              } catch {
+                return json(response, 400, { error: "invalid_json" });
+              }
+              if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+                return json(response, 400, { error: "invalid_heartbeat_payload" });
+              }
+              const claimed = parsed as Record<string, unknown>;
+              if (claimed.schema !== undefined) {
+                const state = parseAgentAnnotationsBrowserState(claimed);
+                writeAgentAnnotationsBrowserState(runtimeRoot, {
+                  ...state,
+                  lastHeartbeatAt: new Date().toISOString(),
+                });
+                browserRuntimeId = state.runtimeId;
+              } else if (Object.keys(claimed).length > 0) {
+                return json(response, 400, { error: "invalid_heartbeat_payload" });
+              }
+            }
             return json(response, 200, { ok: true, receivedAt: new Date().toISOString() });
           }
           if (url.pathname === `${resolvedEndpoint}/source` && request.method === "POST") {

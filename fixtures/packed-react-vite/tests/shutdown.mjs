@@ -25,6 +25,8 @@ const port = await new Promise((resolve, reject) => {
 });
 
 rmSync(sessionPath, { force: true });
+const browserStatePath = path.join(runtimeRoot, "browser-state.json");
+rmSync(browserStatePath, { force: true });
 const child = spawn(process.execPath, [vite, "--host", "127.0.0.1", "--port", String(port), "--strictPort"], {
   stdio: ["ignore", "pipe", "pipe"],
 });
@@ -32,13 +34,36 @@ try {
   await waitFor(() => existsSync(sessionPath), "Vite did not create session.json");
   const session = JSON.parse(readFileSync(sessionPath, "utf8"));
   if (session.pid !== child.pid) throw new Error("session.json does not belong to the direct Vite process");
+  // Write an authenticated browser state through the real heartbeat endpoint
+  // so shutdown must clean up state owned by this session's runtime.
+  const response = await fetch(`http://127.0.0.1:${port}/__agent-annotations/heartbeat`, {
+    method: "POST",
+    headers: {
+      "x-agent-annotations-token": session.token,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      schema: "agent-annotations.browser-state.v1",
+      runtimeId: "shutdown-runtime",
+      clientVersion: "0.0.0",
+      routeKey: "/",
+      taskId: "task-shutdown",
+      taskRevision: 0,
+      appliedSourceRevision: null,
+      mountedAt: new Date().toISOString(),
+      lastHeartbeatAt: new Date().toISOString(),
+    }),
+  });
+  if (response.status !== 200) throw new Error(`heartbeat failed: ${response.status}`);
+  await waitFor(() => existsSync(browserStatePath), "heartbeat did not persist browser-state.json");
   child.kill("SIGTERM");
   await new Promise((resolve, reject) => {
     child.once("exit", resolve);
     child.once("error", reject);
   });
   await waitFor(() => !existsSync(sessionPath), "SIGTERM did not remove session.json");
-  console.log("SIGTERM removed session.json");
+  await waitFor(() => !existsSync(browserStatePath), "SIGTERM did not remove owned browser-state.json");
+  console.log("SIGTERM removed session.json and owned browser-state.json");
 } finally {
   if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
 }

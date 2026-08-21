@@ -3,13 +3,21 @@
 ## `@gchust/agent-annotations`
 
 - `mountAgentAnnotations(options)` mounts the React runtime and returns
-  `{ api, unmount }`. `options.transport` implements `TaskTransport`; optional
-  `options.extensions` uses public client extensions. `options.screenshotEvidence`
+  `{ api, unmount, refreshAppliedSourceRevision }`. `options.transport`
+  implements `TaskTransport`; optional `options.extensions` uses public client
+  extensions. `options.screenshotEvidence`
   accepts `"auto" | "manual" | "off"` (default `"auto"`): `auto` captures
   best-effort screenshot evidence in the background after every save (the save
   never waits for it), `manual` exposes `studio.commands.annotations.captureEvidence(id)`
   and the editor's `Capture screenshot` action, and `off` disables capture
-  entirely. Invalid values throw a `TypeError`.
+  entirely. Invalid values throw a `TypeError`. `options.browserStatus`
+  (`{ endpoint, token }`) enables the authenticated browser runtime status
+  heartbeat (`.agent-annotations/browser-state.json`).
+  `refreshAppliedSourceRevision()` is a trusted mount-level hook (used by the
+  generated Vite client after mount and after `vite:afterUpdate`): it re-fetches
+  the current source revision through the runtime-owned, generation-guarded
+  refresh path and reports it as applied. It is not part of `StudioPublicApi`,
+  so extensions cannot spoof the applied revision.
 - `TaskTransport` requires `read`/`mutate` and may add `writeEvidence`,
   `subscribe`, and `appendDiagnostics` (browser diagnostics are persisted
   through `HttpTaskTransport` and bounded/redacted server-side).
@@ -117,7 +125,7 @@ that directory and never follow traversal or symlink paths.
 ## CLI
 
 The `agent-annotations` bin exposes `list`, `complete`, `reopen`, `print`,
-`validate-task`, `revision`, `wait`, `diagnostics`, and `evidence`.
+`validate-task`, `status`, `revision`, `wait`, `diagnostics`, and `evidence`.
 `validate-task` strictly validates the persisted task file with
 `parseAgentAnnotationsTask()` and reports task id, revision, schema, and valid
 state; it does not claim anything about browser or dev-server state. Commands
@@ -125,6 +133,19 @@ honor a single output contract: `--json` writes exactly one parseable JSON
 value to stdout, the default writes stable human-readable text, and errors go
 to stderr with exit code 1 (runtime) or 2 (usage). The removed `verify` command
 has no alias.
+
+`status [--json] [--check]` reads the browser runtime state persisted by the
+authenticated dev client (`.agent-annotations/browser-state.json`, strict v1
+schema, mode 0600, no token or sensitive text) and reports task validity,
+session presence, browser connection (fresh heartbeat within 15 seconds), task
+and source synchronization, ids/revisions, route, last heartbeat, and
+diagnostic count. `--check` exits 1 unless `taskValid`, `browserConnected`,
+`taskSynchronized`, and `sourceSynchronized` are all true; without `--check`
+the command is informational and exits 0. `wait --browser-source-revision
+<sha256>` waits for the browser-reported applied source revision to leave the
+baseline (a stale or missing browser never counts as applied);
+`wait --source-revision` keeps watching the disk-computed referenced-source
+revision.
 
 Path resolution is shared by every command and distinguishes the workspace
 root from the runtime data directory: `--root`/`AGENT_ANNOTATIONS_ROOT` set the

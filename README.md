@@ -88,8 +88,10 @@ agent-annotations complete <annotation-id> --verified --summary <text>
 agent-annotations reopen <annotation-id>
 agent-annotations print [--json|--markdown]
 agent-annotations validate-task [--json]
+agent-annotations status [--json] [--check]
 agent-annotations revision [--json]
 agent-annotations wait --source-revision <sha256> [--timeout-ms <n>] [--json]
+agent-annotations wait --browser-source-revision <sha256> [--timeout-ms <n>] [--json]
 agent-annotations diagnostics [--json|--clear]
 agent-annotations evidence [--json]
 ```
@@ -99,6 +101,18 @@ parser and reports the task id, revision, schema, and valid state; it never
 claims anything about the browser or the running dev server. `--json` prints
 exactly one parseable JSON value on stdout; without it the CLI prints stable
 human-readable text; errors go to stderr with stable exit codes.
+
+`status [--json] [--check]` reports the development-loop state: task validity,
+session presence, browser connection (fresh heartbeats within 15 seconds),
+task synchronization, source synchronization (the browser-reported applied
+source revision vs the referenced-source revision), plus ids, revisions,
+route, last heartbeat, and diagnostic count. Without `--check` it is purely
+informational and exits 0 even with no browser; `--check` exits 1 unless
+task, browser, task synchronization, and source synchronization are all
+healthy. `wait --browser-source-revision <sha256>` waits until the
+browser-applied source revision moves off the baseline (a missing or stale
+browser never counts as applied), while `wait --source-revision` keeps
+waiting on the referenced-source revision computed from disk.
 
 The workspace root and the runtime data directory are resolved separately.
 `--root`/`AGENT_ANNOTATIONS_ROOT` set the workspace root; `--dir`/

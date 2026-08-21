@@ -1006,37 +1006,56 @@ describe("client runtime", () => {
     document.body.append(pageTarget);
     primitives.getElementAtPoint.mockReturnValue(pageTarget);
     screenshot.captureViewportPng.mockResolvedValue({ png: "fake-png", width: 100, height: 100, durationMs: 1, bestEffort: true });
-    const memory = new MemoryTaskTransport();
-    const diagnostics: string[] = [];
-    const appendDiagnostics = vi.fn(async (entries: AgentAnnotationsDiagnosticsEntry[]) => {
-      diagnostics.push(entries[0]!.message);
+    const fetchMock = vi.fn<typeof fetch>(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith("/revision")) {
+        return new Response(JSON.stringify({ sourceRevision: "ab".repeat(32) }), { status: 200 });
+      }
+      return new Response("{}", { status: 200 });
     });
-    let attempts = 0;
-    const transport: TaskTransport = {
-      read: () => memory.read(),
-      mutate: (request) => memory.mutate(request),
-      writeEvidence: async (input) => {
-        attempts += 1;
-        const latest = await memory.read();
-        const advanced = taskFixture({ ...latest, taskRevision: latest.taskRevision + attempts });
-        throw new RevisionConflictError(advanced, input.expectedRevision, advanced.taskRevision);
-      },
-      appendDiagnostics,
-    };
-    const mounted = await mountAgentAnnotations({ transport });
-    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
-    mounted.api.commands.capture.startPick();
-    document.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 10 }));
-    const composer = shadow.querySelector<HTMLElement>(".aa-composer")!;
-    const textarea = composer.querySelector<HTMLTextAreaElement>("textarea")!;
-    textarea.value = "Second conflict";
-    composer.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-    await vi.waitFor(() => expect(appendDiagnostics).toHaveBeenCalled());
-    // Exactly one retry; the second conflict's latest task is adopted.
-    expect(attempts).toBe(2);
-    expect(mounted.api.getSnapshot().task.taskRevision).toBe(3);
-    expect(diagnostics[0]).toContain("screenshot evidence failed");
-    mounted.unmount();
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const memory = new MemoryTaskTransport();
+      const diagnostics: string[] = [];
+      const appendDiagnostics = vi.fn(async (entries: AgentAnnotationsDiagnosticsEntry[]) => {
+        diagnostics.push(entries[0]!.message);
+      });
+      let attempts = 0;
+      const transport: TaskTransport = {
+        read: () => memory.read(),
+        mutate: (request) => memory.mutate(request),
+        writeEvidence: async (input) => {
+          attempts += 1;
+          const latest = await memory.read();
+          const advanced = taskFixture({ ...latest, taskRevision: latest.taskRevision + attempts });
+          throw new RevisionConflictError(advanced, input.expectedRevision, advanced.taskRevision);
+        },
+        appendDiagnostics,
+      };
+      const mounted = await mountAgentAnnotations({
+        transport,
+        browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
+      });
+      const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+      mounted.api.commands.capture.startPick();
+      document.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 10 }));
+      const composer = shadow.querySelector<HTMLElement>(".aa-composer")!;
+      const textarea = composer.querySelector<HTMLTextAreaElement>("textarea")!;
+      textarea.value = "Second conflict";
+      composer.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      await vi.waitFor(() => expect(appendDiagnostics).toHaveBeenCalled());
+      // Exactly one retry; the second conflict's latest task is adopted.
+      expect(attempts).toBe(2);
+      expect(mounted.api.getSnapshot().task.taskRevision).toBe(3);
+      expect(diagnostics[0]).toContain("screenshot evidence failed");
+      // Every accepted task adoption refreshes the applied source revision:
+      // the mutate success, the first conflict adoption, and the second
+      // conflict adoption each trigger exactly one /revision fetch.
+      const revisionFetches = fetchMock.mock.calls.filter((call) => String(call[0]).endsWith("/revision"));
+      expect(revisionFetches).toHaveLength(3);
+      mounted.unmount();
+    } finally {
+      vi.unstubAllGlobals();
+    }
     pageTarget.remove();
   });
 
@@ -1181,6 +1200,158 @@ describe("client runtime", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(shadow.querySelector('[role="status"]')?.textContent ?? "").not.toContain("Screenshot");
     mounted.unmount();
+  });
+
+  it("reports the current source revision when an accepted task changes the referenced sources", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn<typeof fetch>(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith("/revision")) {
+        return new Response(JSON.stringify({ sourceRevision: "ab".repeat(32) }), { status: 200 });
+      }
+      return new Response("{}", { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const initial = await new MemoryTaskTransport().read();
+      let publish!: (task: AgentAnnotationsTask) => void;
+      const transport: TaskTransport = {
+        read: async () => initial,
+        mutate: async () => initial,
+        subscribe(listener) {
+          publish = listener;
+          return () => undefined;
+        },
+      };
+      const mounted = await mountAgentAnnotations({
+        transport,
+        browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      // An accepted task revision introduces a referenced source file: the
+      // runtime re-fetches the current revision and heartbeats it immediately.
+      publish({ ...taskFixture(), taskId: initial.taskId, taskRevision: 1 });
+      await vi.advanceTimersByTimeAsync(0);
+      const revisionFetches = fetchMock.mock.calls.filter((call) => String(call[0]).endsWith("/revision"));
+      expect(revisionFetches).toHaveLength(1);
+      const heartbeats = fetchMock.mock.calls.filter((call) => String(call[0]).endsWith("/heartbeat"));
+      const latest = JSON.parse(heartbeats.at(-1)![1]!.body as string);
+      expect(latest.appliedSourceRevision).toBe("ab".repeat(32));
+      expect(latest.taskRevision).toBe(1);
+      mounted.unmount();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("reports browser status heartbeats and applies source revisions through the mount hook", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn<typeof fetch>(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith("/revision")) {
+        return new Response(JSON.stringify({ sourceRevision: "ab".repeat(32) }), { status: 200 });
+      }
+      return new Response("{}", { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const mounted = await mountAgentAnnotations({
+        transport: new MemoryTaskTransport(),
+        browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/__agent-annotations/heartbeat",
+        expect.objectContaining({
+          method: "POST",
+          headers: expect.objectContaining({ "x-agent-annotations-token": "status-token" }),
+        })
+      );
+      const body = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string);
+      expect(body).toMatchObject({
+        schema: "agent-annotations.browser-state.v1",
+        clientVersion: "0.1.0-alpha.0",
+        taskId: expect.any(String),
+        taskRevision: 0,
+        appliedSourceRevision: null,
+      });
+      expect(JSON.stringify(body)).not.toContain("status-token");
+      // The applied revision is reported only through the trusted mount hook.
+      mounted.refreshAppliedSourceRevision();
+      await vi.advanceTimersByTimeAsync(0);
+      const heartbeats = fetchMock.mock.calls.filter((call) => String(call[0]).endsWith("/heartbeat"));
+      expect(JSON.parse(heartbeats.at(-1)![1]!.body as string).appliedSourceRevision)
+        .toBe("ab".repeat(32));
+      // Unmount stops the heartbeats.
+      mounted.unmount();
+      const calls = fetchMock.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(fetchMock.mock.calls.length).toBe(calls);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("supersedes stale source revision responses so they cannot regress the applied revision", async () => {
+    vi.useFakeTimers();
+    let first = true;
+    let resolveFirst!: (value: Response) => void;
+    const fetchMock = vi.fn<typeof fetch>((input: RequestInfo | URL) => {
+      if (String(input).endsWith("/revision")) {
+        if (first) {
+          first = false;
+          return new Promise((resolve) => { resolveFirst = resolve; });
+        }
+        return Promise.resolve(
+          new Response(JSON.stringify({ sourceRevision: "cd".repeat(32) }), { status: 200 })
+        );
+      }
+      return Promise.resolve(new Response("{}", { status: 200 }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const mounted = await mountAgentAnnotations({
+        transport: new MemoryTaskTransport(),
+        browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      // The first refresh is pending; the second supersedes it.
+      mounted.refreshAppliedSourceRevision();
+      mounted.refreshAppliedSourceRevision();
+      await vi.advanceTimersByTimeAsync(0);
+      const heartbeats = () => fetchMock.mock.calls.filter((call) => String(call[0]).endsWith("/heartbeat"));
+      expect(JSON.parse(heartbeats().at(-1)![1]!.body as string).appliedSourceRevision)
+        .toBe("cd".repeat(32));
+      // The superseded response arrives late: it must never overwrite.
+      resolveFirst(new Response(JSON.stringify({ sourceRevision: "ab".repeat(32) }), { status: 200 }));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(JSON.parse(heartbeats().at(-1)![1]!.body as string).appliedSourceRevision)
+        .toBe("cd".repeat(32));
+      mounted.unmount();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("emits no browser status heartbeat when mounting fails during setup", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      await expect(mountAgentAnnotations({
+        transport: new MemoryTaskTransport(),
+        browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
+        extensions: [defineClientExtension({
+          id: "failing-setup",
+          apiVersion: 1,
+          setup: () => {
+            throw new Error("setup exploded");
+          },
+        })],
+      })).rejects.toThrow("setup exploded");
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("defers the background capture through the tracked timer so unmount cancels it", async () => {

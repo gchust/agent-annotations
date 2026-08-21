@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -39,7 +39,9 @@ describe("serve-only Vite plugin", () => {
     expect(String(loaded)).toContain(`from ${JSON.stringify(pkg.name)}`);
     expect(String(loaded)).toContain(`from ${JSON.stringify(`${pkg.name}/vite/client`)}`);
     expect(String(loaded)).toContain("mountAgentAnnotations");
-    expect(String(loaded)).toContain("mountAgentAnnotations({ transport, extensions, screenshotEvidence: config.screenshotEvidence })");
+    expect(String(loaded)).toContain("mountAgentAnnotations({ transport, extensions, screenshotEvidence: config.screenshotEvidence, browserStatus: { endpoint: config.endpoint, token: config.token } })");
+    expect(String(loaded)).toContain("mounted.refreshAppliedSourceRevision()");
+    expect(String(loaded)).toContain("vite:afterUpdate");
     expect(String(loaded)).toContain("window[key]?.()");
     expect(String(loaded)).toContain("import.meta.hot.accept()");
     expect(String(loaded)).toContain("import.meta.hot.dispose");
@@ -244,6 +246,112 @@ describe("serve-only Vite plugin", () => {
     } finally {
       await server.close();
     }
+  });
+
+  it("persists authenticated browser state heartbeats and cleans only its own state on close", async () => {
+    const { root } = fixture();
+    const statePath = path.join(root, ".agent-annotations", "browser-state.json");
+    const state = {
+      schema: "agent-annotations.browser-state.v1",
+      runtimeId: "runtime-1",
+      clientVersion: "0.1.0-alpha.0",
+      routeKey: "/",
+      taskId: "task-1",
+      taskRevision: 0,
+      appliedSourceRevision: null,
+      mountedAt: "2026-08-12T12:00:00.000Z",
+      lastHeartbeatAt: "2026-08-12T12:00:05.000Z",
+    };
+    const session = async (server: import("vite").ViteDevServer) => {
+      const address = server.httpServer!.address();
+      if (!address || typeof address === "string") throw new Error("no address");
+      const base = `http://127.0.0.1:${address.port}`;
+      const token = JSON.parse(
+        readFileSync(path.join(root, ".agent-annotations", "session.json"), "utf8")
+      ).token;
+      const heartbeat = (body: unknown) => fetch(`${base}/__agent-annotations/heartbeat`, {
+        method: "POST",
+        headers: { "x-agent-annotations-token": token, "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      return { base, token, heartbeat };
+    };
+
+    const first = await createServer({
+      root,
+      logLevel: "silent",
+      server: { host: "127.0.0.1", port: 0 },
+      plugins: [agentAnnotations({ root })],
+    });
+    await first.listen();
+    const firstSession = await session(first);
+    try {
+      expect((await firstSession.heartbeat(state)).status).toBe(200);
+      const persisted = JSON.parse(readFileSync(statePath, "utf8"));
+      expect(persisted).toMatchObject({ schema: state.schema, runtimeId: "runtime-1", routeKey: "/" });
+      expect(persisted.lastHeartbeatAt).not.toBe(state.lastHeartbeatAt);
+      expect(JSON.stringify(persisted)).not.toContain(firstSession.token);
+      // The legacy bare transport heartbeat (no body) stays accepted.
+      const bare = await fetch(`${firstSession.base}/__agent-annotations/heartbeat`, {
+        method: "POST",
+        headers: { "x-agent-annotations-token": firstSession.token },
+      });
+      expect(bare.status).toBe(200);
+      expect(JSON.parse(readFileSync(statePath, "utf8")).runtimeId).toBe("runtime-1");
+      // A bare transport liveness heartbeat never overwrites the state.
+      await firstSession.heartbeat({});
+      expect(JSON.parse(readFileSync(statePath, "utf8")).runtimeId).toBe("runtime-1");
+      // Malformed claimed browser-state payloads are strictly rejected.
+      const wrongSchema = await firstSession.heartbeat({ ...state, schema: "other.v1" });
+      expect(wrongSchema.status).toBe(400);
+      const unknownField = await firstSession.heartbeat({ ...state, token: "secret" });
+      expect(unknownField.status).toBe(400);
+      const queryRoute = await firstSession.heartbeat({ ...state, routeKey: "/?token=abc" });
+      expect(queryRoute.status).toBe(400);
+      expect(JSON.parse(readFileSync(statePath, "utf8")).runtimeId).toBe("runtime-1");
+      // Invalid JSON and non-empty unknown shapes are not liveness heartbeats.
+      const invalidJson = await fetch(`${firstSession.base}/__agent-annotations/heartbeat`, {
+        method: "POST",
+        headers: { "x-agent-annotations-token": firstSession.token, "content-type": "application/json" },
+        body: "{oops",
+      });
+      expect(invalidJson.status).toBe(400);
+      const unknownShape = await firstSession.heartbeat({ foo: 1 });
+      expect(unknownShape.status).toBe(400);
+      // Hash routes are preserved; only raw query portions are rejected.
+      const hashRoute = await firstSession.heartbeat({ ...state, routeKey: "/#/settings" });
+      expect(hashRoute.status).toBe(200);
+      expect(JSON.parse(readFileSync(statePath, "utf8")).routeKey).toBe("/#/settings");
+      // An unauthenticated heartbeat is denied.
+      const denied = await fetch(`${firstSession.base}/__agent-annotations/heartbeat`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(state),
+      });
+      expect(denied.status).toBe(404);
+    } finally {
+      await first.close();
+    }
+    // Closing the server removed only its own runtime's state.
+    expect(existsSync(statePath)).toBe(false);
+
+    // A replacement runtime's state is preserved on close.
+    const second = await createServer({
+      root,
+      logLevel: "silent",
+      server: { host: "127.0.0.1", port: 0 },
+      plugins: [agentAnnotations({ root })],
+    });
+    await second.listen();
+    const secondSession = await session(second);
+    try {
+      await secondSession.heartbeat({ ...state, runtimeId: "runtime-2" });
+      writeFileSync(statePath, JSON.stringify({ ...state, runtimeId: "runtime-3" }));
+    } finally {
+      await second.close();
+    }
+    expect(JSON.parse(readFileSync(statePath, "utf8")).runtimeId).toBe("runtime-3");
+    rmSync(statePath, { force: true });
   });
 
   it("warns only for explicit remote opt-in", () => {

@@ -14,9 +14,11 @@ for (const text of [
   `${bin} reopen <annotation-id>`,
   `${bin} print [--json|--markdown]`,
   `${bin} validate-task [--json]`,
+  `${bin} status [--json] [--check]`,
   `${bin} --root <path> --dir <path> <command> [options]`,
   `${bin} revision [--json]`,
   `${bin} wait --source-revision <sha256> [--timeout-ms <n>] [--json]`,
+  `${bin} wait --browser-source-revision <sha256> [--timeout-ms <n>] [--json]`,
   `${bin} diagnostics [--json|--clear]`,
   `${bin} evidence [--json]`,
 ]) {

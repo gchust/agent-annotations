@@ -413,6 +413,144 @@ describe("public CLI processes", () => {
     });
   });
 
+  const writeBrowserState = (target: string, state: Record<string, unknown>) => {
+    writeFileSync(path.join(target, "browser-state.json"), JSON.stringify({
+      schema: "agent-annotations.browser-state.v1",
+      runtimeId: "runtime-1",
+      clientVersion: "0.1.0-alpha.0",
+      routeKey: "/settings",
+      taskId: "task-1",
+      taskRevision: 0,
+      appliedSourceRevision: null,
+      mountedAt: "2026-08-12T12:00:00.000Z",
+      lastHeartbeatAt: new Date().toISOString(),
+      ...state,
+    }));
+  };
+
+  it("reports explicit false browser fields and exits 0 without --check", () => {
+    const root = fixture();
+    const result = JSON.parse(run(root, ["status", "--json"]));
+    expect(result).toMatchObject({
+      taskValid: true,
+      sessionPresent: false,
+      browserConnected: false,
+      taskSynchronized: false,
+      sourceSynchronized: false,
+      diagnosticCount: 0,
+    });
+    expect(result.taskId).toBe("task-cli");
+    expect(run(root, ["status"])).toContain("browserConnected: false");
+    expect(runExpectingFailure(root, ["status", "--bogus"]).status).toBe(2);
+  });
+
+  it("exits 1 on status --check without a browser or with a stale heartbeat", () => {
+    const root = fixture();
+    const missing = runExpectingFailure(root, ["status", "--check", "--json"]);
+    expect(missing.status).toBe(1);
+    expect(missing.stderr).toContain("status check failed");
+    expect(JSON.parse(missing.stdout)).toMatchObject({
+      taskValid: true,
+      browserConnected: false,
+      taskSynchronized: false,
+      sourceSynchronized: false,
+    });
+    writeBrowserState(root, {
+      taskId: "task-cli",
+      taskRevision: 0,
+      lastHeartbeatAt: "2026-08-12T12:00:00.000Z",
+    });
+    const stale = runExpectingFailure(root, ["status", "--check", "--json"]);
+    expect(stale.status).toBe(1);
+    expect(JSON.parse(stale.stdout).browserConnected).toBe(false);
+  });
+
+  it("passes status --check only when the browser state is fresh and synchronized", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "agent-annotations-cli-status-"));
+    roots.push(root);
+    mkdirSync(path.join(root, "tasks"), { recursive: true });
+    mkdirSync(path.join(root, "src"), { recursive: true });
+    writeFileSync(path.join(root, "src", "settings.tsx"), "export const A = 1;\n");
+    const task = createAgentAnnotationsTask({
+      taskId: "task-status",
+      createdAt: "2026-08-12T12:00:00.000Z",
+      annotations: [annotationFixture({
+        targets: [targetFixture({
+          inspection: {
+            ...targetFixture().inspection,
+            source: { filePath: "src/settings.tsx", lineNumber: 1, columnNumber: 20, componentName: "A" },
+            sourceStack: [],
+          },
+        })],
+      })],
+    });
+    writeFileSync(path.join(root, "tasks/active-task.json"), JSON.stringify(task));
+    const sourceRevision = createSourcePathService(root).revision(task);
+    writeBrowserState(root, {
+      taskId: task.taskId,
+      taskRevision: task.taskRevision,
+      appliedSourceRevision: sourceRevision,
+      routeKey: "/",
+    });
+    const healthy = run(root, ["status", "--check", "--json"]);
+    expect(JSON.parse(healthy)).toMatchObject({
+      taskValid: true,
+      browserConnected: true,
+      taskSynchronized: true,
+      sourceSynchronized: true,
+      appliedSourceRevision: sourceRevision,
+    });
+    // Disk changed but the browser has not applied it yet.
+    writeFileSync(path.join(root, "src", "settings.tsx"), "export const A = 2;\n");
+    const ahead = runExpectingFailure(root, ["status", "--check", "--json"]);
+    expect(ahead.status).toBe(1);
+    expect(JSON.parse(ahead.stdout)).toMatchObject({
+      taskSynchronized: true,
+      sourceSynchronized: false,
+    });
+    // A different task identity fails taskSynchronized.
+    writeFileSync(path.join(root, "src", "settings.tsx"), "export const A = 1;\n");
+    writeBrowserState(root, {
+      taskId: "other-task",
+      taskRevision: 0,
+      appliedSourceRevision: sourceRevision,
+    });
+    const mismatched = runExpectingFailure(root, ["status", "--check", "--json"]);
+    expect(JSON.parse(mismatched.stdout).taskSynchronized).toBe(false);
+  });
+
+  it("waits for the browser-applied source revision and times out without a browser", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "agent-annotations-cli-browser-wait-"));
+    roots.push(root);
+    mkdirSync(path.join(root, "tasks"), { recursive: true });
+    const task = createAgentAnnotationsTask({ taskId: "task-bw", createdAt: "2026-08-12T12:00:00.000Z" });
+    writeFileSync(path.join(root, "tasks/active-task.json"), JSON.stringify(task));
+    const baseline = "0".repeat(64);
+    // No browser state: the wait must not treat the disk as applied.
+    expect(JSON.parse(run(root, ["wait", "--browser-source-revision", baseline, "--timeout-ms", "0", "--json"])))
+      .toEqual({ changed: false, sourceRevision: null });
+    // A fresh browser with the baseline applied times out unchanged.
+    writeBrowserState(root, { taskId: "task-bw", taskRevision: 0, appliedSourceRevision: baseline });
+    expect(JSON.parse(run(root, ["wait", "--browser-source-revision", baseline, "--timeout-ms", "0", "--json"])))
+      .toEqual({ changed: false, sourceRevision: baseline });
+    // The browser applies a new revision: the wait flips to changed.
+    const applied = "a".repeat(64);
+    writeBrowserState(root, { taskId: "task-bw", taskRevision: 0, appliedSourceRevision: applied });
+    expect(JSON.parse(run(root, ["wait", "--browser-source-revision", baseline, "--timeout-ms", "0", "--json"])))
+      .toEqual({ changed: true, sourceRevision: applied });
+    expect(run(root, ["wait", "--browser-source-revision", baseline, "--timeout-ms", "0"]))
+      .toBe(`changed: true, sourceRevision: ${applied}\n`);
+    // Stale browser state never flips.
+    writeBrowserState(root, {
+      taskId: "task-bw",
+      taskRevision: 0,
+      appliedSourceRevision: applied,
+      lastHeartbeatAt: "2026-08-12T12:00:00.000Z",
+    });
+    expect(JSON.parse(run(root, ["wait", "--browser-source-revision", baseline, "--timeout-ms", "0", "--json"])))
+      .toEqual({ changed: false, sourceRevision: null });
+  });
+
   it("rejects a session whose runtime root escapes the workspace root unless --dir is explicit", () => {
     const { parent, workspace, src, runtime, writeSession } = sessionFixture();
     const outside = path.join(parent, "escaped-runtime");

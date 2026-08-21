@@ -14,6 +14,7 @@ import {
 import { ClientExtensionRegistry } from "../extension/index.js";
 import { createValidatedTaskTransport } from "./validated-transport.js";
 import { isTaskIdentityNewer, taskIdentity } from "../core/transport.js";
+import { PACKAGE_VERSION } from "../metadata.js";
 import type {
   AgentAnnotation,
   AgentAnnotationsCaptureMode,
@@ -413,6 +414,78 @@ export async function mountAgentAnnotations(
     window.clearTimeout(timer);
     timers.delete(timer);
   };
+
+  // Browser runtime status: reported through the authenticated /heartbeat
+  // path every 5 seconds and immediately after mount. The state is bounded,
+  // redacted (route key), and never carries the token or sensitive text.
+  const browserStatus = options.browserStatus ?? null;
+  const runtimeId = createAgentAnnotationsId();
+  const clientVersion = PACKAGE_VERSION;
+  const mountedAt = now();
+  let appliedSourceRevision: string | null = null;
+  const sendBrowserHeartbeat = (): void => {
+    if (destroyed || !browserStatus) return;
+    const state = {
+      // Protocol literal mirrored with the server parser (browser bundle must
+      // stay free of server/node modules).
+      schema: "agent-annotations.browser-state.v1",
+      runtimeId,
+      clientVersion,
+      // Privacy: never persist a raw URL query or fragment; the server parser
+      // rejects route keys that still carry one.
+      routeKey: redactAgentAnnotationsText(routeKey.split(/[?#]/, 1)[0] ?? routeKey).slice(0, 500),
+      taskId: task.taskId,
+      taskRevision: task.taskRevision,
+      appliedSourceRevision,
+      mountedAt,
+      lastHeartbeatAt: now(),
+    };
+    fetch(`${browserStatus.endpoint}/heartbeat`, {
+      method: "POST",
+      headers: {
+        "x-agent-annotations-token": browserStatus.token,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(state),
+    }).catch(() => {
+      // The dev server may be restarting; the next heartbeat reconnects.
+    });
+  };
+  const scheduleBrowserHeartbeat = (): void => {
+    if (destroyed || !browserStatus) return;
+    sendBrowserHeartbeat();
+    scheduleTimer(scheduleBrowserHeartbeat, 5_000);
+  };
+  const applyReportedSourceRevision = (revision: string | null): void => {
+    if (destroyed) return;
+    if (revision !== null && !/^[0-9a-f]{64}$/i.test(revision)) return;
+    appliedSourceRevision = revision?.toLowerCase() ?? null;
+    // The report is immediately reflected in the browser state.
+    sendBrowserHeartbeat();
+  };
+  // Runtime-owned, generation-guarded refresh: every refresh supersedes the
+  // previous request, so a stale response can never regress the applied
+  // revision. The generated Vite client calls this after mount and after
+  // vite:afterUpdate; the runtime calls it on every accepted task change.
+  let sourceRevisionRequest = 0;
+  const refreshAppliedSourceRevision = (): void => {
+    if (destroyed || !browserStatus) return;
+    const request = ++sourceRevisionRequest;
+    const run = async (): Promise<void> => {
+      try {
+        const response = await fetch(`${browserStatus.endpoint}/revision`, {
+          headers: { "x-agent-annotations-token": browserStatus.token },
+        });
+        const payload = await response.json() as { sourceRevision?: unknown };
+        if (request === sourceRevisionRequest && typeof payload.sourceRevision === "string") {
+          applyReportedSourceRevision(payload.sourceRevision);
+        }
+      } catch {
+        // Best-effort; the next refresh reconnects.
+      }
+    };
+    run().catch(() => undefined);
+  };
   const scheduleFrame = (callback: () => void): number => {
     const frame = window.requestAnimationFrame(() => {
       frames.delete(frame);
@@ -433,6 +506,7 @@ export async function mountAgentAnnotations(
       // revision 0; the same task id only advances on a larger revision.
       if (destroyed || !isTaskIdentityNewer(taskIdentity(next), taskIdentity(task))) return;
       task = next;
+      refreshAppliedSourceRevision();
       scheduleFrame(() => {
         render();
         emit();
@@ -585,6 +659,7 @@ export async function mountAgentAnnotations(
       // accepts it; an older result can never regress the current task.
       if (isTaskIdentityNewer(taskIdentity(next), taskIdentity(task))) {
         task = next;
+        refreshAppliedSourceRevision();
         render();
         emit();
       }
@@ -596,6 +671,7 @@ export async function mountAgentAnnotations(
       if (destroyed || !(error instanceof RevisionConflictError)) throw error;
       // Adopt the latest task, then retry the rejected mutation exactly once.
       task = error.latestTask;
+      refreshAppliedSourceRevision();
       render();
       emit();
       try {
@@ -604,6 +680,7 @@ export async function mountAgentAnnotations(
         // A second conflict also adopts the latest task, then stops.
         if (destroyed || !(retryError instanceof RevisionConflictError)) throw retryError;
         task = retryError.latestTask;
+        refreshAppliedSourceRevision();
         render();
         emit();
         throw retryError;
@@ -625,6 +702,7 @@ export async function mountAgentAnnotations(
     if (destroyed) return;
     if (isTaskIdentityNewer(taskIdentity(candidate), taskIdentity(task))) {
       task = candidate;
+      refreshAppliedSourceRevision();
       render();
       emit();
     }
@@ -2092,5 +2170,8 @@ export async function mountAgentAnnotations(
     disposeInspectionEngine();
     hostElement.remove();
   };
-  return { api, unmount };
+  // The browser status loop starts only after every setup step succeeded, so
+  // a failed mount can never persist a browserConnected state.
+  scheduleBrowserHeartbeat();
+  return { api, unmount, refreshAppliedSourceRevision };
 }

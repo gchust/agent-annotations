@@ -247,6 +247,11 @@ export type AgentAnnotationsPlatform = "mac" | "other";
 
 export type AgentAnnotationsScreenshotEvidenceMode = "auto" | "manual" | "off";
 
+export type AgentAnnotationsBrowserStatusConfig = {
+  endpoint: string;
+  token: string;
+};
+
 export interface TaskTransport {
   read(): Promise<AgentAnnotationsTask>;
   mutate(request: AgentAnnotationsMutationRequest): Promise<AgentAnnotationsTask>;
@@ -429,6 +434,7 @@ export type MountAgentAnnotationsOptions = {
   transport: TaskTransport;
   extensions?: readonly AgentAnnotationsClientExtension[];
   screenshotEvidence?: AgentAnnotationsScreenshotEvidenceMode;
+  browserStatus?: AgentAnnotationsBrowserStatusConfig;
 };
 
 export interface AgentAnnotationsClientExtension {
@@ -447,4 +453,9 @@ export interface AgentAnnotationsClientExtension {
 export type MountedAgentAnnotations = {
   api: StudioPublicApi;
   unmount(): void;
+  // Trusted mount-level hook (the generated Vite client, not extensions):
+  // re-fetches and reports the current source revision through the
+  // runtime-owned, generation-guarded refresh path. Extensions only receive
+  // the StudioPublicApi and cannot spoof the applied revision.
+  refreshAppliedSourceRevision(): void;
 };
