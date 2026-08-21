@@ -287,12 +287,21 @@ export type AgentAnnotationsDiagnosticPhase =
   | "dispose";
 
 export type AgentAnnotationsDiagnosticsEntry = {
-  source: "console" | "window" | "promise" | "extension";
+  source: "console" | "window" | "promise" | "network" | "extension";
   message: string;
   timestamp: string;
   extensionId?: string;
   contributionId?: string;
   phase?: AgentAnnotationsDiagnosticPhase;
+  method?: string;
+  url?: string;
+  status?: number;
+  transport?: "fetch" | "xhr";
+};
+
+export type AgentAnnotationsDiagnosticsConfig = {
+  console?: boolean;
+  network?: boolean;
 };
 
 export type AgentAnnotationsLocaleMessages = Record<string, string>;
@@ -489,6 +498,7 @@ export type MountAgentAnnotationsOptions = {
   handoff?: AgentAnnotationsHandoffConfig;
   builtins?: false | AgentAnnotationsBuiltinsConfig;
   initialState?: AgentAnnotationsInitialState;
+  diagnostics?: AgentAnnotationsDiagnosticsConfig;
 };
 
 export interface AgentAnnotationsClientExtension {

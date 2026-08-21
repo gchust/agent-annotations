@@ -21,6 +21,17 @@
 - `TaskTransport` requires `read`/`mutate` and may add `writeEvidence`,
   `subscribe`, and `appendDiagnostics` (browser diagnostics are persisted
   through `HttpTaskTransport` and bounded/redacted server-side).
+- Mount options accept `diagnostics?: { console?: boolean; network?: boolean }`
+  (both default to `true`): `console` gates `console.error` capture and
+  `network` gates the fetch/XHR failure patch. Network diagnostics persist
+  `method`, `status`, `transport`, and the sanitized origin+path URL only
+  (query, fragment, bodies, headers, and auth are never captured); the
+  package's own endpoint is suppressed and the failure reason is a fixed
+  label, never arbitrary error text. The patch is one shared process-wide
+  wrapper, ref-counted across mounts: installed on the first subscriber and
+  restored identity-safely on the last unsubscribe, so simultaneous or
+  repeated mounts never stack wrappers and a foreign wrapper installed over
+  ours can never cause double-emissions.
 - `createAgentAnnotationsTask`, `parseAgentAnnotationsTask`,
   `validateAgentAnnotationsTask`, and `isAgentAnnotationsTask` own schema v1.
 - `formatAgentAnnotationsHandoff(task, options)` is the default Copy output:

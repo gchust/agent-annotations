@@ -174,9 +174,9 @@ describe("public CLI processes", () => {
     expect(persisted).toContain("[REDACTED]");
   });
 
-  it("prints and clears persisted diagnostics without touching the task", () => {
+  it("prints and clears persisted diagnostics without touching the task", async () => {
     const root = fixture();
-    appendDiagnostics(root, [{
+    await appendDiagnostics(root, [{
       source: "console",
       message: "cli-diagnostic",
       timestamp: "2026-08-12T12:00:00.000Z",
@@ -190,6 +190,30 @@ describe("public CLI processes", () => {
     run(root, ["diagnostics", "--clear"]);
     expect(JSON.parse(run(root, ["diagnostics", "--json"]))).toEqual([]);
     expect(JSON.parse(run(root, ["validate-task", "--json"]))).toMatchObject({ ok: true, taskRevision: 0 });
+  });
+
+  it("renders structured network fields in the human diagnostics output", async () => {
+    const root = fixture();
+    await appendDiagnostics(root, [{
+      source: "network",
+      message: "caller-controlled text that must not be relied on",
+      timestamp: "2026-08-12T12:00:00.000Z",
+      method: "GET",
+      url: "https://example.test/a",
+      status: 404,
+      transport: "fetch",
+    }]);
+    const output = run(root, ["diagnostics"]);
+    // The server-validated structured fields are rendered explicitly, not
+    // derived from the caller-controlled message.
+    expect(output).toContain("[network] 2026-08-12T12:00:00.000Z fetch GET https://example.test/a 404");
+    expect(JSON.parse(run(root, ["diagnostics", "--json"]))[0]).toMatchObject({
+      source: "network",
+      transport: "fetch",
+      method: "GET",
+      url: "https://example.test/a",
+      status: 404,
+    });
   });
 
   it("lists task-referenced evidence with annotation metadata", () => {

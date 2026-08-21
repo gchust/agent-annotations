@@ -8,6 +8,7 @@ import MagicString from "magic-string";
 import type { Plugin } from "vite";
 import type {
   AgentAnnotationsBuiltinsConfig,
+  AgentAnnotationsDiagnosticsConfig,
   AgentAnnotationsHandoffConfig,
   AgentAnnotationsInitialState,
 } from "../types/index.js";
@@ -24,6 +25,7 @@ import { createSourcePathService } from "../server/source-path.js";
 import { validateAgentAnnotationsHandoffConfig } from "../core/handoff.js";
 import {
   validateAgentAnnotationsBuiltinsConfig,
+  validateAgentAnnotationsDiagnosticsConfig,
   validateAgentAnnotationsInitialState,
 } from "../core/configuration.js";
 import { PACKAGE_NAME } from "../metadata.js";
@@ -55,6 +57,7 @@ export type AgentAnnotationsPluginOptions = {
   handoff?: AgentAnnotationsHandoffConfig;
   builtins?: false | AgentAnnotationsBuiltinsConfig;
   initialState?: AgentAnnotationsInitialState;
+  diagnostics?: AgentAnnotationsDiagnosticsConfig;
 };
 
 export const agentAnnotationsViteEntry = true;
@@ -148,6 +151,7 @@ export default function agentAnnotations(
     ? false
     : validateAgentAnnotationsBuiltinsConfig(options.builtins);
   const initialState = validateAgentAnnotationsInitialState(options.initialState);
+  const diagnostics = validateAgentAnnotationsDiagnosticsConfig(options.diagnostics);
   let root = path.resolve(options.root ?? process.cwd());
   let realRoot = existsSync(root) ? realpathSync(root) : root;
   let runtimeRoot = path.resolve(root, options.dir ?? ".agent-annotations");
@@ -217,12 +221,12 @@ export default function agentAnnotations(
         `import { mountAgentAnnotations } from ${JSON.stringify(PACKAGE_NAME)};`,
         `import { HttpTaskTransport } from ${JSON.stringify(`${PACKAGE_NAME}/vite/client`)};`,
         imports,
-        `const config = ${JSON.stringify({ endpoint: resolvedEndpoint, token, screenshotEvidence, handoff, builtins, initialState })};`,
+        `const config = ${JSON.stringify({ endpoint: resolvedEndpoint, token, screenshotEvidence, handoff, builtins, initialState, diagnostics })};`,
         `const extensions = [${values}];`,
         "const key = Symbol.for('agent-annotations.mount');",
         "window[key]?.();",
         "const transport = new HttpTaskTransport(config);",
-        `const mounted = await mountAgentAnnotations({ transport, extensions, screenshotEvidence: config.screenshotEvidence, browserStatus: { endpoint: config.endpoint, token: config.token }, handoff: config.handoff, builtins: config.builtins, initialState: config.initialState });`,
+        `const mounted = await mountAgentAnnotations({ transport, extensions, screenshotEvidence: config.screenshotEvidence, browserStatus: { endpoint: config.endpoint, token: config.token }, handoff: config.handoff, builtins: config.builtins, initialState: config.initialState, diagnostics: config.diagnostics });`,
         "window[key] = () => { mounted.unmount(); delete window[key]; };",
         "mounted.refreshAppliedSourceRevision();",
         "if (import.meta.hot) {",
@@ -333,7 +337,7 @@ export default function agentAnnotations(
           }
           if (url.pathname === `${resolvedEndpoint}/diagnostics` && request.method === "POST") {
             const input = await body(request, MAX_DIAGNOSTICS_BODY_BYTES) as { entries?: unknown };
-            return json(response, 200, { entries: appendDiagnostics(runtimeRoot, input.entries) });
+            return json(response, 200, { entries: await appendDiagnostics(runtimeRoot, input.entries) });
           }
           if (url.pathname === `${resolvedEndpoint}/heartbeat` && request.method === "POST") {
             // Only an actually empty body or the exact empty JSON object is the

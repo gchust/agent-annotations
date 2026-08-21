@@ -177,7 +177,9 @@ the nearest ancestor workspace (a directory containing `package.json` or
 `revision` and `wait` anchored to the session's workspace root.
 
 `diagnostics` prints the bounded redacted browser diagnostics persisted under
-`.agent-annotations` (with `--clear` emptying only diagnostics); `evidence`
+`.agent-annotations` (with `--clear` emptying only diagnostics), including
+privacy-safe network failures (transport, method, status, and the sanitized
+origin+path URL — never queries, bodies, headers, or auth); `evidence`
 lists task-referenced screenshot files with their annotation ids and never
 touches files outside the runtime evidence directory. `revision` reports the
 exact task revision, the sha256 of the referenced canonical source files, and
@@ -185,6 +187,28 @@ those files; `wait` treats the given sha256 as a baseline and returns
 `{ changed: true, sourceRevision }` as soon as the referenced-source revision
 moves off it, or `{ changed: false, sourceRevision }` when it stays until the
 bounded (30 second) timeout.
+
+## Runtime diagnostics (console and network)
+
+While mounted, the runtime records `console.error` output and failed network
+requests (fetch rejections and 4xx/5xx responses, XHR errors/aborts/timeouts
+and 4xx/5xx responses) into the bounded, redacted diagnostics persisted under
+`.agent-annotations`. Both are enabled by default and can be gated explicitly:
+
+```ts
+agentAnnotations({ diagnostics: { network: false } }); // console only
+agentAnnotations({ diagnostics: { console: false } }); // network only
+```
+
+Network entries are privacy-safe: the URL is reduced to `origin + pathname`
+(query strings and fragments are dropped, and any secrets in them never reach
+the diagnostics), no request/response bodies, headers, or cookies are ever
+captured, the failure reason is a fixed package-owned label (arbitrary error
+text is never embedded, since it could itself contain a sensitive full URL or
+query), and the package's own endpoint is suppressed. The fetch/XHR patch is
+installed only while the runtime is mounted, preserves the original
+return/throw/event behavior, and is removed identity-safely on unmount and on
+repeated hot-reload mounts (it never stacks).
 
 ## Extension failure isolation
 

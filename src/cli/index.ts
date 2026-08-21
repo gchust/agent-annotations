@@ -227,7 +227,7 @@ const main = async (): Promise<void> => {
       appliedSourceRevision: browser?.appliedSourceRevision ?? null,
       routeKey: browser?.routeKey ?? null,
       lastHeartbeatAt: browser?.lastHeartbeatAt ?? null,
-      diagnosticCount: readDiagnostics(runtimeRoot).length,
+      diagnosticCount: (await readDiagnostics(runtimeRoot)).length,
     };
     if (json) {
       process.stdout.write(`${JSON.stringify(report)}\n`);
@@ -334,16 +334,21 @@ const main = async (): Promise<void> => {
     const unknown = args.filter((arg) => arg !== "--json" && arg !== "--clear");
     if (unknown.length) return fail(`unknown option: ${unknown[0]}`, 2);
     if (clear) {
-      clearDiagnostics(runtimeRoot);
+      await clearDiagnostics(runtimeRoot);
       if (json) process.stdout.write("[]\n");
       return;
     }
-    const entries = readDiagnostics(runtimeRoot);
+    const entries = await readDiagnostics(runtimeRoot);
     if (json) {
       process.stdout.write(`${JSON.stringify(entries)}\n`);
     } else {
       for (const entry of entries) {
-        process.stdout.write(`[${entry.source}] ${entry.timestamp} ${entry.message}\n`);
+        // Network entries render their server-validated structured fields
+        // explicitly instead of relying on the caller-controlled message.
+        const structured = entry.source === "network"
+          ? ` ${entry.transport ?? ""} ${entry.method ?? ""} ${entry.url ?? ""}${entry.status !== undefined ? ` ${entry.status}` : ""}`
+          : "";
+        process.stdout.write(`[${entry.source}] ${entry.timestamp}${structured} ${entry.message}\n`);
       }
     }
     return;

@@ -1,6 +1,7 @@
 import type {
   AgentAnnotationsBuiltinActionId,
   AgentAnnotationsBuiltinsConfig,
+  AgentAnnotationsDiagnosticsConfig,
   AgentAnnotationsInitialState,
 } from "../types/index.js";
 
@@ -103,6 +104,34 @@ export const validateAgentAnnotationsBuiltinsConfig = (
       normalized[key] = exact;
     }
     config.shortcuts = normalized as AgentAnnotationsBuiltinsConfig["shortcuts"];
+  }
+  return config;
+};
+
+export const validateAgentAnnotationsDiagnosticsConfig = (
+  input: unknown
+): AgentAnnotationsDiagnosticsConfig => {
+  if (input === undefined || input === null) return {};
+  if (!isPlainObject(input)) {
+    throw new TypeError("diagnostics must be a plain object");
+  }
+  for (const key of Object.keys(input)) {
+    if (key !== "console" && key !== "network") {
+      throw new TypeError(`unknown diagnostics option: ${key}`);
+    }
+  }
+  const config: AgentAnnotationsDiagnosticsConfig = {};
+  if (input.console !== undefined) {
+    if (typeof input.console !== "boolean") {
+      throw new TypeError("diagnostics console must be a boolean");
+    }
+    config.console = input.console;
+  }
+  if (input.network !== undefined) {
+    if (typeof input.network !== "boolean") {
+      throw new TypeError("diagnostics network must be a boolean");
+    }
+    config.network = input.network;
   }
   return config;
 };

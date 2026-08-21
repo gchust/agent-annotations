@@ -39,7 +39,7 @@ describe("serve-only Vite plugin", () => {
     expect(String(loaded)).toContain(`from ${JSON.stringify(pkg.name)}`);
     expect(String(loaded)).toContain(`from ${JSON.stringify(`${pkg.name}/vite/client`)}`);
     expect(String(loaded)).toContain("mountAgentAnnotations");
-    expect(String(loaded)).toContain("mountAgentAnnotations({ transport, extensions, screenshotEvidence: config.screenshotEvidence, browserStatus: { endpoint: config.endpoint, token: config.token }, handoff: config.handoff, builtins: config.builtins, initialState: config.initialState })");
+    expect(String(loaded)).toContain("mountAgentAnnotations({ transport, extensions, screenshotEvidence: config.screenshotEvidence, browserStatus: { endpoint: config.endpoint, token: config.token }, handoff: config.handoff, builtins: config.builtins, initialState: config.initialState, diagnostics: config.diagnostics })");
     expect(String(loaded)).toContain("mounted.refreshAppliedSourceRevision()");
     expect(String(loaded)).toContain("vite:afterUpdate");
     expect(String(loaded)).toContain("window[key]?.()");

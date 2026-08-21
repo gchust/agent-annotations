@@ -1,20 +1,15 @@
 import { randomUUID } from "node:crypto";
 import {
   chmodSync,
-  closeSync,
-  linkSync,
   mkdirSync,
-  openSync,
   readFileSync,
   renameSync,
   rmSync,
-  statSync,
-  unlinkSync,
-  utimesSync,
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
 
+import { acquireFileLock, LOCK_ACQUIRE_TIMEOUT_MS } from "./file-lock.js";
 import {
   AGENT_ANNOTATIONS_ID_PATTERN,
   applyAgentAnnotationsMutation,
@@ -53,175 +48,6 @@ export const atomicWriteJson = (file: string, value: unknown, mode = 0o600): voi
     chmodSync(file, mode);
   } finally {
     rmSync(temporary, { force: true });
-  }
-};
-
-const MALFORMED_LOCK_GRACE_MS = 5_000;
-const LOCK_ACQUIRE_TIMEOUT_MS = 2_000;
-const LOCK_POLL_MS = 10;
-
-type LockMetadata = { pid: number; createdAt: string; owner: string };
-
-const isPidAlive = (pid: number): boolean => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "EPERM";
-  }
-};
-
-const lockAgeMs = (file: string): number => {
-  try {
-    return Date.now() - statSync(file).mtimeMs;
-  } catch {
-    return Number.POSITIVE_INFINITY;
-  }
-};
-
-const lockContentIsRecoverable = (content: string, file: string): boolean => {
-  let metadata: unknown;
-  try {
-    metadata = JSON.parse(content);
-  } catch {
-    // Unparseable lock: conservatively recover only after a grace period.
-    return lockAgeMs(file) >= MALFORMED_LOCK_GRACE_MS;
-  }
-  const { pid, createdAt, owner } = (metadata ?? {}) as {
-    pid?: unknown;
-    createdAt?: unknown;
-    owner?: unknown;
-  };
-  const validPid = typeof pid === "number" && Number.isInteger(pid) && pid > 0;
-  const validCreatedAt = typeof createdAt === "string" && !Number.isNaN(Date.parse(createdAt));
-  const validOwner = typeof owner === "string" && owner.length > 0;
-  if (!validPid || !validCreatedAt || !validOwner) {
-    // Malformed metadata: conservatively recover only after a grace period.
-    return lockAgeMs(file) >= MALFORMED_LOCK_GRACE_MS;
-  }
-  if (isPidAlive(pid)) return false; // A demonstrably live PID is never broken.
-  // Dead PID: recover only when the lock is stale beyond the grace period.
-  return Date.now() - Date.parse(createdAt as string) >= MALFORMED_LOCK_GRACE_MS;
-};
-
-const inspectLock = (file: string): { content: string; recoverable: boolean } | null => {
-  let content: string;
-  try {
-    content = readFileSync(file, "utf8");
-  } catch {
-    return null; // Gone or unreadable: retry the acquisition without touching anything.
-  }
-  return { content, recoverable: lockContentIsRecoverable(content, file) };
-};
-
-const CLAIM_FILE = ".write.lock.claim";
-
-const claimStaleLock = async (
-  file: string,
-  inspected: string
-): Promise<"claimed" | "wait" | "retry"> => {
-  const claimPath = path.join(path.dirname(file), CLAIM_FILE);
-  // The claim is a hard link to the current inode at the lock path: it never moves or
-  // removes the lock, so a live lock can never be displaced by a recovery.
-  try {
-    linkSync(file, claimPath);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return "retry"; // The lock vanished: another process recovered it.
-    }
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-    // Another process already holds the claim: it must target the same stale lock and
-    // be fresh; a stale claim is only a hard link, so taking it over never touches
-    // the lock at the path.
-    try {
-      const claimStat = statSync(claimPath);
-      const lockStat = statSync(file);
-      if (claimStat.ino === lockStat.ino) {
-        if (Date.now() - claimStat.mtimeMs >= MALFORMED_LOCK_GRACE_MS) {
-          unlinkSync(claimPath);
-          return "retry";
-        }
-        return "wait";
-      }
-      // The claim targets a different inode: it is orphaned (its lock was replaced,
-      // or its claimer crashed between unlinking the lock and cleaning the claim).
-      // Removing the hard link never touches the lock at the path, so this is safe.
-      unlinkSync(claimPath);
-      return "retry";
-    } catch {
-      return "retry"; // The claim or the lock vanished.
-    }
-  }
-  // I own the claim: mark it fresh, then verify it links the exact inspected stale
-  // lock before touching the lock path.
-  try {
-    utimesSync(claimPath, new Date(), new Date());
-    const claimStat = statSync(claimPath);
-    const lockStat = statSync(file);
-    if (claimStat.ino !== lockStat.ino || readFileSync(claimPath, "utf8") !== inspected) {
-      rmSync(claimPath, { force: true });
-      return "retry";
-    }
-    // Verified: the path still holds exactly the inspected stale lock. Waiting
-    // processes observe the fresh claim and never replace the path meanwhile.
-    unlinkSync(file);
-    rmSync(claimPath, { force: true });
-    return "claimed";
-  } catch (error) {
-    rmSync(claimPath, { force: true });
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    return "retry";
-  }
-};
-
-const acquireLock = async (file: string, timeoutMs: number): Promise<() => void> => {
-  mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-  const owner = randomUUID();
-  const deadline = Date.now() + timeoutMs;
-  while (true) {
-    try {
-      const descriptor = openSync(file, "wx", 0o600);
-      try {
-        const metadata: LockMetadata = {
-          pid: process.pid,
-          createdAt: new Date().toISOString(),
-          owner,
-        };
-        writeFileSync(descriptor, JSON.stringify(metadata));
-      } catch (error) {
-        closeSync(descriptor);
-        rmSync(file, { force: true });
-        throw error;
-      }
-      return () => {
-        try {
-          closeSync(descriptor);
-        } catch {
-          // The descriptor is already closed.
-        }
-        try {
-          const current = JSON.parse(readFileSync(file, "utf8")) as { owner?: unknown };
-          if (current.owner === owner) rmSync(file, { force: true });
-        } catch {
-          // Unreadable or already removed locks need no further action.
-        }
-      };
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      const inspected = inspectLock(file);
-      if (inspected && inspected.recoverable) {
-        const claimed = await claimStaleLock(file, inspected.content);
-        if (claimed === "claimed") continue;
-        // "retry" made progress but must stay bounded; "wait" also waits below.
-        if (claimed === "retry" && Date.now() < deadline) continue;
-      }
-      if (Date.now() >= deadline) {
-        const busy = new Error("write_busy") as Error & { code: string };
-        busy.code = "write_busy";
-        throw busy;
-      }
-      await new Promise((resolve) => setTimeout(resolve, LOCK_POLL_MS));
-    }
   }
 };
 
@@ -267,7 +93,7 @@ export class FileTaskStore {
   }
 
   async create(): Promise<AgentAnnotationsTask> {
-    const unlock = await acquireLock(this.#lockPath(), this.lockTimeoutMs);
+    const unlock = await acquireFileLock(this.#lockPath(), this.lockTimeoutMs);
     try {
       const existing = this.read();
       if (existing) return existing;
@@ -284,7 +110,7 @@ export class FileTaskStore {
     mapAnnotation: (annotation: AgentAnnotation) => AgentAnnotation = (annotation) => annotation
   ): Promise<AgentAnnotationsTask> {
     const write = async (): Promise<AgentAnnotationsTask> => {
-      const unlock = await acquireLock(this.#lockPath(), this.lockTimeoutMs);
+      const unlock = await acquireFileLock(this.#lockPath(), this.lockTimeoutMs);
       try {
         const task = this.read();
         if (!task) {

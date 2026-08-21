@@ -571,6 +571,575 @@ describe("client runtime", () => {
     expect(dispose).toHaveBeenCalledOnce();
   });
 
+  it("captures safe network failures for fetch while mounted and suppresses own endpoints", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn<typeof fetch>(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/heartbeat") || url.includes("/revision")) {
+        return new Response("{}", { status: 200 });
+      }
+      if (url.includes("fail-500")) return new Response("{}", { status: 500 });
+      if (url.includes("fail-404")) return new Response("{}", { status: 404 });
+      throw new TypeError("network down");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    let mounted: Awaited<ReturnType<typeof mountAgentAnnotations>> | null = null;
+    try {
+      mounted = await mountAgentAnnotations({
+        transport: new MemoryTaskTransport(),
+        browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      const network = (): AgentAnnotationsDiagnosticsEntry[] =>
+        mounted!.api.getSnapshot().diagnostics.filter((entry) => entry.source === "network");
+      // Rejection, 500, and 404 are recorded with query-free sanitized URLs.
+      await expect(fetch("https://app.test/boom?token=SECRET", { method: "POST" }))
+        .rejects.toThrow("network down");
+      expect((await fetch("https://app.test/fail-500?token=SECRET")).status).toBe(500);
+      expect((await fetch("https://app.test/fail-404")).status).toBe(404);
+      await vi.advanceTimersByTimeAsync(0);
+      const entries = network();
+      expect(entries.length).toBe(3);
+      expect(entries[0]).toMatchObject({
+        source: "network",
+        method: "POST",
+        url: "https://app.test/boom",
+        transport: "fetch",
+      });
+      expect(entries[0]!.url).not.toContain("SECRET");
+      expect(entries[1]!.status).toBe(500);
+      expect(entries[2]!.status).toBe(404);
+      expect(JSON.stringify(entries)).not.toContain("?");
+      expect(JSON.stringify(entries)).not.toContain("SECRET");
+      // This package's own endpoint is never recorded.
+      expect(JSON.stringify(entries)).not.toContain("__agent-annotations");
+      mounted.unmount();
+      // Unmount restores the original fetch identity.
+      expect(window.fetch).toBe(fetchMock);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("captures safe XHR failures (error/abort/timeout/500) through real events on separate requests", async () => {
+    const originalSend = XMLHttpRequest.prototype.send;
+    // Never let jsdom open a real socket: stub send before the runtime patch
+    // captures it as its "original".
+    XMLHttpRequest.prototype.send = function (this: XMLHttpRequest, ..._args: unknown[]) {
+      return undefined;
+    } as typeof XMLHttpRequest.prototype.send;
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(),
+      browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
+    });
+    const dispatch = (xhr: XMLHttpRequest, type: string) => {
+      (xhr as XMLHttpRequest & { dispatchEvent(e: Event): boolean }).dispatchEvent(new Event(type));
+    };
+    try {
+      // Each failure kind is exercised with its own XHR/request and the real
+      // dispatched event; listeners are never captured or re-attached.
+      const fiveHundred = new XMLHttpRequest();
+      fiveHundred.open("GET", "https://app.test/xhr-500?token=SECRET");
+      fiveHundred.send();
+      Object.defineProperty(fiveHundred, "status", { value: 500 });
+      dispatch(fiveHundred, "loadend");
+
+      const errored = new XMLHttpRequest();
+      errored.open("GET", "https://app.test/xhr-error");
+      errored.send();
+      dispatch(errored, "error");
+
+      const aborted = new XMLHttpRequest();
+      aborted.open("POST", "https://app.test/xhr-abort");
+      aborted.send();
+      dispatch(aborted, "abort");
+
+      const timedOut = new XMLHttpRequest();
+      timedOut.open("PUT", "https://app.test/xhr-timeout");
+      timedOut.send();
+      dispatch(timedOut, "timeout");
+
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const entries = mounted.api.getSnapshot().diagnostics.filter((entry) => entry.source === "network");
+      expect(entries.some((entry) => entry.transport === "xhr" && entry.status === 500
+        && entry.url === "https://app.test/xhr-500" && entry.method === "GET")).toBe(true);
+      expect(entries.some((entry) => entry.transport === "xhr"
+        && entry.url === "https://app.test/xhr-error" && entry.message.includes("network error"))).toBe(true);
+      expect(entries.some((entry) => entry.transport === "xhr"
+        && entry.url === "https://app.test/xhr-abort" && entry.method === "POST"
+        && entry.message.includes("aborted"))).toBe(true);
+      expect(entries.some((entry) => entry.transport === "xhr"
+        && entry.url === "https://app.test/xhr-timeout" && entry.method === "PUT"
+        && entry.message.includes("timeout"))).toBe(true);
+      expect(JSON.stringify(entries)).not.toContain("SECRET");
+      expect(JSON.stringify(entries)).not.toContain("?");
+      // The listeners are gone after each terminal event: no second report.
+      dispatch(errored, "error");
+      dispatch(aborted, "abort");
+      dispatch(timedOut, "timeout");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(mounted.api.getSnapshot().diagnostics.filter((entry) => entry.source === "network").length)
+        .toBe(entries.length);
+    } finally {
+      mounted.unmount();
+      XMLHttpRequest.prototype.send = originalSend;
+    }
+  });
+
+
+
+  it("keeps XHR captures off the instance and strips listeners so reused XHRs never double-report", async () => {
+    const originalSend = XMLHttpRequest.prototype.send;
+    // Never let jsdom open a real socket: stub send before the runtime patch
+    // captures it as its "original".
+    XMLHttpRequest.prototype.send = function (this: XMLHttpRequest, ..._args: unknown[]) {
+      return undefined;
+    } as typeof XMLHttpRequest.prototype.send;
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(),
+      browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
+    });
+    const dispatch = (xhr: XMLHttpRequest, type: string) => {
+      (xhr as XMLHttpRequest & { dispatchEvent(e: Event): boolean }).dispatchEvent(new Event(type));
+    };
+    const entries = () => mounted.api.getSnapshot().diagnostics
+      .filter((entry) => entry.source === "network");
+    try {
+      const xhr = new XMLHttpRequest();
+      const keysBefore = Object.keys(xhr);
+      xhr.open("GET", "https://app.test/one?token=SECRET");
+      // No observable capture property is ever added to the application XHR.
+      expect(Object.keys(xhr)).toEqual(keysBefore);
+      expect("__aaNetwork" in xhr).toBe(false);
+      xhr.send();
+      Object.defineProperty(xhr, "status", { value: 500 });
+      dispatch(xhr, "loadend");
+      expect(entries().filter((entry) => entry.url === "https://app.test/one").length).toBe(1);
+      expect(JSON.stringify(entries())).not.toContain("SECRET");
+      // The terminal listeners were removed: another event without a new send
+      // reports nothing.
+      dispatch(xhr, "loadend");
+      expect(entries().filter((entry) => entry.url === "https://app.test/one").length).toBe(1);
+      // Reusing the same instance for a second request reports exactly once:
+      // no old-request listeners remain to double-report.
+      xhr.open("GET", "https://app.test/two");
+      xhr.send();
+      Object.defineProperty(xhr, "status", { value: 500 });
+      dispatch(xhr, "loadend");
+      expect(entries().filter((entry) => entry.url === "https://app.test/two").length).toBe(1);
+      // Late events from the finished request are inert (all stripped).
+      dispatch(xhr, "error");
+      dispatch(xhr, "abort");
+      dispatch(xhr, "timeout");
+      expect(entries().length).toBe(2);
+    } finally {
+      mounted.unmount();
+      XMLHttpRequest.prototype.send = originalSend;
+    }
+  });
+
+  it("cleans listeners after a successful loadend so a reused XHR never double-reports", async () => {
+    const originalSend = XMLHttpRequest.prototype.send;
+    XMLHttpRequest.prototype.send = function (this: XMLHttpRequest, ..._args: unknown[]) {
+      return undefined;
+    } as typeof XMLHttpRequest.prototype.send;
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(),
+      browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
+    });
+    const dispatch = (xhr: XMLHttpRequest, type: string) => {
+      (xhr as XMLHttpRequest & { dispatchEvent(e: Event): boolean }).dispatchEvent(new Event(type));
+    };
+    const entries = () => mounted.api.getSnapshot().diagnostics
+      .filter((entry) => entry.source === "network");
+    try {
+      const xhr = new XMLHttpRequest();
+      xhr.open("GET", "https://app.test/success");
+      xhr.send();
+      // A successful loadend (status < 400) reports nothing but must still
+      // remove this request's listeners.
+      Object.defineProperty(xhr, "status", { value: 200, configurable: true });
+      dispatch(xhr, "loadend");
+      expect(entries()).toEqual([]);
+      // The old listeners are gone: another loadend without a new send
+      // reports nothing even if the status now looks failed.
+      Object.defineProperty(xhr, "status", { value: 500, configurable: true });
+      dispatch(xhr, "loadend");
+      expect(entries()).toEqual([]);
+      // Reusing the same instance for a failing second request reports
+      // exactly once: no stale listeners from the successful first request.
+      xhr.open("GET", "https://app.test/second");
+      xhr.send();
+      Object.defineProperty(xhr, "status", { value: 500 });
+      dispatch(xhr, "loadend");
+      expect(entries().filter((entry) => entry.url === "https://app.test/second").length).toBe(1);
+      dispatch(xhr, "loadend");
+      expect(entries().filter((entry) => entry.url === "https://app.test/second").length).toBe(1);
+    } finally {
+      mounted.unmount();
+      XMLHttpRequest.prototype.send = originalSend;
+    }
+  });
+
+  it("passes non-standard open arguments to native XHR open untouched", async () => {
+    const originalOpen = XMLHttpRequest.prototype.open;
+    const originalSend = XMLHttpRequest.prototype.send;
+    // Native stub converts the URL exactly once, like a real implementation.
+    const nativeOpen = vi.fn(function (this: XMLHttpRequest, method: string, url: string | URL) {
+      if (typeof url !== "string") String(url);
+      return undefined;
+    });
+    XMLHttpRequest.prototype.open = nativeOpen as unknown as typeof XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.send = function (this: XMLHttpRequest, ..._args: unknown[]) {
+      return undefined;
+    } as typeof XMLHttpRequest.prototype.send;
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(),
+      browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
+    });
+    try {
+      const toStringSpy = vi.fn(() => "https://app.test/private");
+      const oddUrl = { toString: toStringSpy } as unknown as string;
+      const xhr = new XMLHttpRequest();
+      xhr.open("GET", oddUrl);
+      // The native open received the exact same object; the wrapper never
+      // converted it itself.
+      expect(nativeOpen).toHaveBeenCalledTimes(1);
+      expect(nativeOpen.mock.calls[0]![0]).toBe("GET");
+      expect(nativeOpen.mock.calls[0]![1]).toBe(oddUrl);
+      // toString was called exactly once, by the native stub only.
+      expect(toStringSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      mounted.unmount();
+      XMLHttpRequest.prototype.open = originalOpen;
+      XMLHttpRequest.prototype.send = originalSend;
+    }
+  });
+
+  it("clears captures when native open throws so a reused XHR never diagnoses the failed open", async () => {
+    const originalOpen = XMLHttpRequest.prototype.open;
+    const originalSend = XMLHttpRequest.prototype.send;
+    let shouldThrow = false;
+    const nativeOpen = vi.fn(function (this: XMLHttpRequest, ..._args: unknown[]) {
+      if (shouldThrow) throw new TypeError("native open failed");
+      return undefined;
+    });
+    XMLHttpRequest.prototype.open = nativeOpen as unknown as typeof XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.send = function (this: XMLHttpRequest, ..._args: unknown[]) {
+      return undefined;
+    } as typeof XMLHttpRequest.prototype.send;
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(),
+      browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
+    });
+    const xhr = new XMLHttpRequest();
+    try {
+      // A successful first open sets a capture.
+      xhr.open("GET", "https://app.test/first");
+      // A throwing second open must clear the WeakMap (old and new capture).
+      shouldThrow = true;
+      expect(() => xhr.open("GET", "https://app.test/bad")).toThrow("native open failed");
+      // Reusing the same XHR after the failed open: a send and a 500 loadend
+      // must not produce a diagnostic for the request it never opened.
+      shouldThrow = false;
+      xhr.send();
+      Object.defineProperty(xhr, "status", { value: 500 });
+      (xhr as XMLHttpRequest & { dispatchEvent(e: Event): boolean }).dispatchEvent(new Event("loadend"));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(mounted.api.getSnapshot().diagnostics.filter((entry) => entry.source === "network"))
+        .toEqual([]);
+    } finally {
+      mounted.unmount();
+      XMLHttpRequest.prototype.open = originalOpen;
+      XMLHttpRequest.prototype.send = originalSend;
+    }
+  });
+
+  it("skips overlong URLs and invalid or overlong methods before the snapshot", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("{}", { status: 500 }));
+    vi.stubGlobal("fetch", fetchMock);
+    let mounted: Awaited<ReturnType<typeof mountAgentAnnotations>> | null = null;
+    try {
+      mounted = await mountAgentAnnotations({
+        transport: new MemoryTaskTransport(),
+        browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
+      });
+      // Overlong origin+path (> 2000) never enters the snapshot.
+      await fetch(`https://app.test/${"x".repeat(2000)}`);
+      // Overlong and non-A-Z methods never enter the snapshot.
+      await fetch("https://app.test/method-ok", { method: "x".repeat(100) });
+      await fetch("https://app.test/method-ok", { method: "GE T" });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mounted.api.getSnapshot().diagnostics.filter((entry) => entry.source === "network"))
+        .toEqual([]);
+    } finally {
+      mounted?.unmount();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("passes unknown fetch inputs to native fetch untouched and skips non-http(s) diagnostics", async () => {
+    vi.useFakeTimers();
+    const toStringSpy = vi.fn(() => "https://app.test/unknown?token=SECRET");
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("{}", { status: 500 }));
+    vi.stubGlobal("fetch", fetchMock);
+    let mounted: Awaited<ReturnType<typeof mountAgentAnnotations>> | null = null;
+    try {
+      mounted = await mountAgentAnnotations({
+        transport: new MemoryTaskTransport(),
+        browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
+      });
+      const unknown = { toString: toStringSpy } as unknown as RequestInfo;
+      await fetch(unknown);
+      await vi.advanceTimersByTimeAsync(0);
+      // Native behavior preserved: the object reached fetch untouched and the
+      // wrapper never converted it (no double conversion), so no diagnostics.
+      expect(fetchMock).toHaveBeenCalledWith(unknown, undefined);
+      expect(toStringSpy).not.toHaveBeenCalled();
+      // A non-http(s) URL is rejected by the client sanitizer like the server.
+      await fetch("mailto:test@example.com");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mounted.api.getSnapshot().diagnostics.filter((entry) => entry.source === "network"))
+        .toEqual([]);
+    } finally {
+      mounted?.unmount();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("suppresses own-endpoint failures including relative URLs and never recurses", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn<typeof fetch>(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      // A failing own-endpoint POST: the diagnostics append itself rejects.
+      if (url.includes("__agent-annotations/diagnostics")) {
+        throw new TypeError("diagnostics endpoint down");
+      }
+      if (url.includes("__agent-annotations")) {
+        return new Response("{}", { status: 200 });
+      }
+      if (url.includes("fail-500")) return new Response("{}", { status: 500 });
+      throw new TypeError("network down");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    let mounted: Awaited<ReturnType<typeof mountAgentAnnotations>> | null = null;
+    try {
+      mounted = await mountAgentAnnotations({
+        transport: new MemoryTaskTransport(),
+        browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      // Failing own-endpoint requests (relative and absolute) are suppressed
+      // and must not produce a single network diagnostic or recurse.
+      await expect(fetch("/__agent-annotations/diagnostics")).rejects.toThrow("diagnostics endpoint down");
+      const absoluteOwn = `${window.location.origin}/__agent-annotations/diagnostics`;
+      await expect(fetch(absoluteOwn)).rejects.toThrow("diagnostics endpoint down");
+      // Own-endpoint successes are also never recorded.
+      expect((await fetch("/__agent-annotations/heartbeat")).ok).toBe(true);
+      await vi.advanceTimersByTimeAsync(0);
+      const entries = mounted.api.getSnapshot().diagnostics.filter((entry) => entry.source === "network");
+      expect(entries).toEqual([]);
+      expect(fetchMock).toHaveBeenCalled();
+    } finally {
+      mounted?.unmount();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("restores owned surfaces independently when a foreign wrapper replaces fetch", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn<typeof fetch>(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string"
+        ? input
+        : input instanceof Request
+          ? input.url
+          : String(input);
+      if (url.includes("__agent-annotations")) {
+        return new Response("{}", { status: 200 });
+      }
+      if (url.includes("fail-500")) return new Response("{}", { status: 500 });
+      throw new TypeError("network down");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const originalFetch = window.fetch;
+    const originalOpen = XMLHttpRequest.prototype.open;
+    const originalSend = XMLHttpRequest.prototype.send;
+    let mounted: Awaited<ReturnType<typeof mountAgentAnnotations>> | null = null;
+    try {
+      mounted = await mountAgentAnnotations({
+        transport: new MemoryTaskTransport(),
+        browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
+      });
+      const ours = window.fetch;
+      expect(ours).not.toBe(originalFetch);
+      expect(XMLHttpRequest.prototype.open).not.toBe(originalOpen);
+      expect(XMLHttpRequest.prototype.send).not.toBe(originalSend);
+      // Another library replaces our fetch wrapper with its own, capturing ours.
+      const foreign = function (this: unknown, input: RequestInfo | URL, init?: RequestInit) {
+        return ours.call(this, input, init);
+      } as typeof window.fetch;
+      window.fetch = foreign;
+      // Unmount: the foreign-overridden fetch surface stays owned and stable
+      // (never restored through the foreign wrapper, never wrapped again),
+      // while the still-ours XHR surfaces are restored to their originals.
+      mounted.unmount();
+      mounted = null;
+      expect(window.fetch).toBe(foreign);
+      expect(XMLHttpRequest.prototype.open).toBe(originalOpen);
+      expect(XMLHttpRequest.prototype.send).toBe(originalSend);
+      // Remount: the fetch surface is not wrapped again; the XHR surfaces are
+      // reinstalled exactly once.
+      mounted = await mountAgentAnnotations({
+        transport: new MemoryTaskTransport(),
+        browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
+      });
+      expect(window.fetch).toBe(foreign);
+      expect(XMLHttpRequest.prototype.open).not.toBe(originalOpen);
+      expect(XMLHttpRequest.prototype.send).not.toBe(originalSend);
+      // A failure through the chain (foreign -> our still-live wrapper ->
+      // real fetch) is delivered exactly once to the live mount.
+      expect((await fetch("https://app.test/fail-500")).status).toBe(500);
+      await vi.advanceTimersByTimeAsync(0);
+      const entries = mounted.api.getSnapshot().diagnostics.filter((entry) => entry.source === "network");
+      expect(entries).toHaveLength(1);
+      expect(entries[0]!.url).toBe("https://app.test/fail-500");
+      // Removing the foreign wrapper reveals ours again; the final unmount
+      // restores every surface identity-safely.
+      window.fetch = ours;
+      mounted.unmount();
+      mounted = null;
+      expect(window.fetch).toBe(originalFetch);
+      expect(XMLHttpRequest.prototype.open).toBe(originalOpen);
+      expect(XMLHttpRequest.prototype.send).toBe(originalSend);
+    } finally {
+      mounted?.unmount();
+      if (window.fetch !== originalFetch) window.fetch = originalFetch;
+      XMLHttpRequest.prototype.open = originalOpen;
+      XMLHttpRequest.prototype.send = originalSend;
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("rejects a second simultaneous mount so runtime-level wrappers can never stack", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn<typeof fetch>(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string"
+        ? input
+        : input instanceof Request
+          ? input.url
+          : String(input);
+      if (url.includes("__agent-annotations")) return new Response("{}", { status: 200 });
+      throw new TypeError("network down");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const originalFetch = window.fetch;
+    try {
+      const first = await mountAgentAnnotations({
+        transport: new MemoryTaskTransport(),
+        browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
+      });
+      const patchedOnce = window.fetch;
+      await expect(mountAgentAnnotations({
+        transport: new MemoryTaskTransport(),
+        browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
+      })).rejects.toThrow("already mounted");
+      expect(window.fetch).toBe(patchedOnce);
+      first.unmount();
+      expect(window.fetch).toBe(originalFetch);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("derives fetch method from Request.method and keeps XHR callbacks inert after unsubscribe", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn<typeof fetch>(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string"
+        ? input
+        : input instanceof Request
+          ? input.url
+          : String(input);
+      if (url.includes("__agent-annotations")) {
+        return new Response("{}", { status: 200 });
+      }
+      if (url.includes("request-500")) return new Response("{}", { status: 500 });
+      throw new TypeError("network down");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const originalSend = XMLHttpRequest.prototype.send;
+    // Never let jsdom open a real socket: stub send before the runtime patch
+    // captures it as its "original".
+    XMLHttpRequest.prototype.send = function (this: XMLHttpRequest, ..._args: unknown[]) {
+      return undefined;
+    } as typeof XMLHttpRequest.prototype.send;
+    try {
+      const mounted = await mountAgentAnnotations({
+        transport: new MemoryTaskTransport(),
+        browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
+      });
+      // Method derived from Request.method when init.method is absent.
+      await fetch(new Request("https://app.test/request-500?token=SECRET", { method: "DELETE" }));
+      await vi.advanceTimersByTimeAsync(0);
+      let entries = mounted.api.getSnapshot().diagnostics.filter((entry) => entry.source === "network");
+      expect(entries).toHaveLength(1);
+      expect(entries[0]).toMatchObject({ method: "DELETE", transport: "fetch", url: "https://app.test/request-500" });
+      expect(JSON.stringify(entries)).not.toContain("SECRET");
+      // An XHR sent while mounted fires its listeners through real events.
+      const xhr = new XMLHttpRequest();
+      xhr.open("GET", "https://app.test/xhr");
+      xhr.send();
+      Object.defineProperty(xhr, "status", { value: 500 });
+      (xhr as XMLHttpRequest & { dispatchEvent(e: Event): boolean }).dispatchEvent(new Event("loadend"));
+      await vi.advanceTimersByTimeAsync(0);
+      const xhrEntries = mounted.api.getSnapshot().diagnostics.filter((entry) => entry.source === "network");
+      expect(xhrEntries.some((entry) => entry.transport === "xhr" && entry.status === 500)).toBe(true);
+      const beforeUnmount = mounted.api.getSnapshot().diagnostics.filter((entry) => entry.source === "network").length;
+      // After unmount, the same XHR's later events are inert: no new records.
+      mounted.unmount();
+      (xhr as XMLHttpRequest & { dispatchEvent(e: Event): boolean }).dispatchEvent(new Event("error"));
+      (xhr as XMLHttpRequest & { dispatchEvent(e: Event): boolean }).dispatchEvent(new Event("abort"));
+      (xhr as XMLHttpRequest & { dispatchEvent(e: Event): boolean }).dispatchEvent(new Event("timeout"));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mounted.api.getSnapshot().diagnostics.filter((entry) => entry.source === "network").length)
+        .toBe(beforeUnmount);
+    } finally {
+      XMLHttpRequest.prototype.send = originalSend;
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("never stacks network patches across mounts and honors diagnostics config gates", async () => {
+    vi.useFakeTimers();
+    const originalFetch = window.fetch;
+    const first = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(),
+      browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
+    });
+    const patched = window.fetch;
+    expect(patched).not.toBe(originalFetch);
+    first.unmount();
+    expect(window.fetch).toBe(originalFetch);
+    // A second mount patches again without stacking.
+    const second = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(),
+      browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
+    });
+    expect(window.fetch).not.toBe(originalFetch);
+    second.unmount();
+    expect(window.fetch).toBe(originalFetch);
+    // diagnostics.network=false leaves fetch untouched; console=false gates console capture.
+    const gated = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(),
+      browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
+      diagnostics: { network: false, console: false },
+    });
+    expect(window.fetch).toBe(originalFetch);
+    const originalConsoleError = console.error;
+    expect(console.error).toBe(originalConsoleError);
+    gated.unmount();
+  });
+
   it("starts collapsed by default with the count chrome and explicit initialState support", async () => {
     const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport() });
     const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
@@ -843,6 +1412,8 @@ describe("client runtime", () => {
       mounted.unmount();
     }
   });
+
+
 
   it("records structured export, enrich, and redact failures without breaking the flows", async () => {
     const pageTarget = document.createElement("button");
@@ -1196,6 +1767,7 @@ describe("client runtime", () => {
     mounted.unmount();
     expect(disposedFirst).toHaveBeenCalledOnce();
   });
+
 
   it("keeps panels exclusive and returns focus to the opening action", async () => {
     vi.useFakeTimers();
@@ -1885,8 +2457,9 @@ describe("client runtime", () => {
       return new Response("{}", { status: 200 });
     });
     vi.stubGlobal("fetch", fetchMock);
+    let mounted: Awaited<ReturnType<typeof mountAgentAnnotations>> | null = null;
     try {
-      const mounted = await mountAgentAnnotations({
+      mounted = await mountAgentAnnotations({
         transport: new MemoryTaskTransport(),
         browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
       });
@@ -1943,8 +2516,9 @@ describe("client runtime", () => {
       return Promise.resolve(new Response("{}", { status: 200 }));
     });
     vi.stubGlobal("fetch", fetchMock);
+    let mounted: Awaited<ReturnType<typeof mountAgentAnnotations>> | null = null;
     try {
-      const mounted = await mountAgentAnnotations({
+      mounted = await mountAgentAnnotations({
         transport: new MemoryTaskTransport(),
         browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
       });
@@ -2406,6 +2980,8 @@ describe("client runtime", () => {
       mounted.unmount();
     }
   });
+
+
 
   it("isolates a throwing panel with an error boundary while the dock stays usable", async () => {
     const mounted = await mountAgentAnnotations({
