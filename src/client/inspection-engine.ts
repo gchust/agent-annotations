@@ -25,6 +25,9 @@ const MAX_REGION_CANDIDATES = 200;
 export const REGION_SAMPLE_LIMIT = 69;
 export const REGION_CANDIDATE_LIMIT = MAX_REGION_CANDIDATES;
 export const REGION_TARGET_LIMIT = MAX_REGION_TARGETS;
+// Reserved prefix for HostIntegration.identity() fields persisted inside the
+// target inspection attributes; plain id/role/aria-label keys stay unprefixed.
+export const HOST_IDENTITY_PREFIX = "host:";
 
 const isCandidate = (element: Element): boolean =>
   element.isConnected &&
@@ -94,7 +97,7 @@ const attributesOf = (
   if (accessibleName) entries["aria-label"] = accessibleName;
   for (const [key, value] of Object.entries(host?.identity?.(element) ?? {})) {
     if (Object.keys(entries).length >= 50) break;
-    if (key && value) entries[text(key, 100)] = text(value, 500);
+    if (key && value) entries[`${HOST_IDENTITY_PREFIX}${text(key, 100)}`] = text(value, 500);
   }
   return entries;
 };
@@ -137,7 +140,16 @@ export async function inspectTarget(
 
 export type TargetResolution =
   | { status: "resolved"; element: Element }
-  | { status: "missing" | "ambiguous" | "invalid" | "unsupported"; reason: string };
+  | {
+      status:
+        | "missing"
+        | "ambiguous"
+        | "invalid"
+        | "unsupported"
+        | "identity_mismatch"
+        | "identity_unverifiable";
+      reason: string;
+    };
 
 export const resolveTargetResult = (
   selector: string,
@@ -192,6 +204,70 @@ export const resolveTargetResult = (
 export const resolveTarget = (selector: string): Element | null => {
   const result = resolveTargetResult(selector);
   return result.status === "resolved" ? result.element : null;
+};
+
+// Resolves a persisted target only when both the unique React Grab selector
+// AND the persisted identity evidence match the live element:
+//   selector (must be unique) → tagName → persisted id → persisted host:
+//   identity fields → weak role + accessibleName (only when no strong
+//   identity exists). No fuzzy matching, no nth-child migration, no neighbor
+//   or component-name fallback: any mismatch is explicit, and an old task
+//   without any provable identity is identity_unverifiable instead of being
+//   silently treated as resolved.
+export const resolvePersistedTarget = (
+  target: AgentAnnotationsTarget,
+  options: { appRoot: Document | ShadowRoot | Element; host?: HostIntegration }
+): TargetResolution => {
+  const selectorResult = resolveTargetResult(target.selector, options.appRoot);
+  if (selectorResult.status !== "resolved") return selectorResult;
+  const element = selectorResult.element;
+  const inspection = target.inspection;
+
+  if (inspection.tagName && element.tagName.toLowerCase() !== inspection.tagName) {
+    return { status: "identity_mismatch", reason: "element tag changed" };
+  }
+
+  const attributes = inspection.attributes ?? {};
+  const persistedId = attributes.id;
+  if (persistedId !== undefined) {
+    if (element.id !== persistedId) {
+      return { status: "identity_mismatch", reason: "element id changed" };
+    }
+  }
+
+  const hostKeys = Object.keys(attributes).filter((key) =>
+    key.startsWith(HOST_IDENTITY_PREFIX)
+  );
+  if (hostKeys.length > 0) {
+    const live = options.host?.identity?.(element) ?? {};
+    for (const key of hostKeys) {
+      if (live[key.slice(HOST_IDENTITY_PREFIX.length)] !== attributes[key]) {
+        return { status: "identity_mismatch", reason: "host identity changed" };
+      }
+    }
+  }
+
+  const hasStrongIdentity = persistedId !== undefined || hostKeys.length > 0;
+  if (!hasStrongIdentity) {
+    // Old tasks without id/host evidence: exact weak identity only.
+    const persistedRole = attributes.role ?? (inspection.role || undefined);
+    const persistedName =
+      attributes["aria-label"] ?? (inspection.accessibleName || undefined);
+    if (!persistedRole && !persistedName) {
+      return {
+        status: "identity_unverifiable",
+        reason: "no persisted identity evidence",
+      };
+    }
+    if (persistedRole && roleOf(element) !== persistedRole) {
+      return { status: "identity_mismatch", reason: "element role changed" };
+    }
+    if (persistedName && nameOf(element) !== persistedName) {
+      return { status: "identity_mismatch", reason: "accessible name changed" };
+    }
+  }
+
+  return { status: "resolved", element };
 };
 
 export const targetBounds = (element: Element): AgentAnnotationsRect => boundsOf(element);

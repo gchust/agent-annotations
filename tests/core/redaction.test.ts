@@ -184,6 +184,36 @@ describe("generic redaction", () => {
     expect(result.task.annotations[0].extensions["region.context"]).toEqual({ keep: "yes" });
   });
 
+  it("keeps reserved host: identity keys under the existing secret-key rules", () => {
+    const task = taskFixture({
+      annotations: [
+        annotationFixture({
+          targets: [
+            targetFixture({
+              inspection: {
+                ...targetFixture().inspection,
+                attributes: {
+                  id: "card-1",
+                  "host:data-card": "Bearer host-secret",
+                  "host:token": "drop-me",
+                  title: "safe",
+                },
+              },
+            }),
+          ],
+        }),
+      ],
+    });
+    const result = redactAgentAnnotationsTask(task);
+    const attributes = result.task.annotations[0].targets?.[0].inspection.attributes;
+    expect(attributes).toMatchObject({
+      id: "card-1",
+      "host:data-card": expect.stringContaining("[REDACTED]"),
+      title: "safe",
+    });
+    expect(attributes).not.toHaveProperty("host:token");
+    expect(JSON.stringify(attributes)).not.toContain("host-secret");
+  });
   it("drops the extension namespace when a composed redactor throws", () => {
     const task = taskFixture({
       annotations: [

@@ -101,7 +101,10 @@ const redactStringMap = (
 ): Record<string, string> => {
   const result: Record<string, string> = {};
   for (const [key, value] of Object.entries(values)) {
-    if (SECRET_KEY_PATTERN.test(key)) {
+    // Reserved host: identity keys stay under the same secret-key rules as
+    // their unprefixed form (a host key named "token" is still dropped).
+    const secretKey = key.startsWith("host:") ? key.slice("host:".length) : key;
+    if (SECRET_KEY_PATTERN.test(secretKey)) {
       recorder.droppedKeys.add(key);
       continue;
     }

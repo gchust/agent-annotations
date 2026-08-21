@@ -132,6 +132,10 @@ describe("client runtime", () => {
         annotations: [annotationFixture({
           targets: [targetFixture({
             selector: "#outer >>iframe>> #inner >>iframe>> #target",
+            inspection: {
+              ...targetFixture().inspection,
+              attributes: { id: "target" },
+            },
           })],
         })],
       })),
@@ -302,7 +306,13 @@ describe("client runtime", () => {
     const mounted = await mountAgentAnnotations({
       transport: new MemoryTaskTransport(taskFixture({
         annotations: [annotationFixture({
-          targets: [targetFixture({ selector: "#position-target" })],
+          targets: [targetFixture({
+            selector: "#position-target",
+            inspection: {
+              ...targetFixture().inspection,
+              attributes: { id: "position-target" },
+            },
+          })],
         })],
       })),
     });
@@ -2375,11 +2385,23 @@ describe("client runtime", () => {
       annotations: [
         annotationFixture({
           annotationId: "in-root",
-          targets: [targetFixture({ selector: "#inside-root-target" })],
+          targets: [targetFixture({
+            selector: "#inside-root-target",
+            inspection: {
+              ...targetFixture().inspection,
+              attributes: { id: "inside-root-target" },
+            },
+          })],
         }),
         annotationFixture({
           annotationId: "out-root",
-          targets: [targetFixture({ selector: "#outside-root-target" })],
+          targets: [targetFixture({
+            selector: "#outside-root-target",
+            inspection: {
+              ...targetFixture().inspection,
+              attributes: { id: "outside-root-target" },
+            },
+          })],
         }),
       ],
     });
@@ -2417,7 +2439,13 @@ describe("client runtime", () => {
     document.body.append(app, outside);
     const task = taskFixture({
       annotations: [annotationFixture({
-        targets: [targetFixture({ selector: "#duplicate-target" })],
+        targets: [targetFixture({
+          selector: "#duplicate-target",
+          inspection: {
+            ...targetFixture().inspection,
+            attributes: { id: "duplicate-target" },
+          },
+        })],
       })],
     });
     const mounted = await mountAgentAnnotations({
@@ -2456,7 +2484,16 @@ describe("client runtime", () => {
     document.body.append(app, external);
     const task = taskFixture({
       annotations: [annotationFixture({
-        targets: [targetFixture({ selector: "#app-root-target" })],
+        targets: [targetFixture({
+          selector: "#app-root-target",
+          inspection: {
+            ...targetFixture().inspection,
+            tagName: "div",
+            role: "",
+            accessibleName: "",
+            attributes: { id: "app-root-target" },
+          },
+        })],
       })],
     });
     primitives.getElementAtPoint.mockReturnValue(app);
@@ -2488,6 +2525,67 @@ describe("client runtime", () => {
       mounted.unmount();
       app.remove();
       external.remove();
+    }
+  });
+
+  it("hides the marker when the unique selector points at a different element identity", async () => {
+    vi.useFakeTimers();
+    history.pushState({}, "", "/settings");
+    document.body.innerHTML = '<main><button id="actual">Wrong</button></main>';
+    const task = taskFixture({
+      annotations: [annotationFixture({
+        targets: [targetFixture({
+          selector: "main > button",
+          inspection: {
+            ...targetFixture().inspection,
+            attributes: { id: "expected", role: "button", "aria-label": "Save" },
+          },
+        })],
+      })],
+    });
+    const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport(task) });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      const marker = shadow.querySelector<HTMLElement>(".aa-marker")!;
+      expect(marker.hidden).toBe(true);
+      expect(marker.style.left).toBe("");
+      window.dispatchEvent(new Event("resize"));
+      await vi.runAllTimersAsync();
+      expect(marker.hidden).toBe(true);
+    } finally {
+      mounted.unmount();
+    }
+  });
+
+  it("keeps the region rectangle when a region target identity mismatches", async () => {
+    vi.useFakeTimers();
+    history.pushState({}, "", "/settings");
+    document.body.innerHTML = '<main><button id="actual">Wrong</button></main>';
+    const task = taskFixture({
+      annotations: [annotationFixture({
+        kind: "region",
+        region: { coordinateSpace: "document", x: 40, y: 50, width: 300, height: 120 },
+        targets: [targetFixture({
+          selector: "main > button",
+          inspection: {
+            ...targetFixture().inspection,
+            attributes: { id: "expected", role: "button", "aria-label": "Save" },
+          },
+        })],
+      })],
+    });
+    const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport(task) });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      const outline = shadow.querySelector<HTMLElement>('[data-region="true"]');
+      expect(outline).not.toBeNull();
+      expect(outline?.style.left).toBe("40px");
+      expect(outline?.style.top).toBe("50px");
+      window.dispatchEvent(new Event("resize"));
+      await vi.runAllTimersAsync();
+      expect(shadow.querySelector('[data-region="true"]')).not.toBeNull();
+    } finally {
+      mounted.unmount();
     }
   });
 

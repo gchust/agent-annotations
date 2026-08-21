@@ -38,6 +38,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import {
   disposeInspectionEngine,
   inspectTarget,
+  resolvePersistedTarget,
   resolveTargetResult,
   sampleRegionTargets,
   setInspectionFrozen,
@@ -910,9 +911,12 @@ export async function mountAgentAnnotations(
         }, true);
       }
       const target = annotation.targets?.[0]
-        ? resolveTargetInAppRoot(annotation.targets[0].selector)
+        ? resolvePersistedTarget(annotation.targets[0], { appRoot, host })
         : null;
-      const targetInRoot = target && isInAppRoot(target) ? target : null;
+      const targetInRoot =
+        target?.status === "resolved" && isInAppRoot(target.element)
+          ? target.element
+          : null;
       if (targetInRoot) resolved.push(targetInRoot);
       const rect = targetInRoot ? targetBounds(targetInRoot) : null;
       const anchor = rect
@@ -1759,9 +1763,12 @@ export async function mountAgentAnnotations(
           .find((node) => node.dataset.annotationId === annotation.annotationId);
         if (!marker) continue;
         const target = annotation.targets?.[0]
-          ? resolveTargetInAppRoot(annotation.targets[0].selector)
+          ? resolvePersistedTarget(annotation.targets[0], { appRoot, host })
           : null;
-        const targetInRoot = target && isInAppRoot(target) ? target : null;
+        const targetInRoot =
+          target?.status === "resolved" && isInAppRoot(target.element)
+            ? target.element
+            : null;
         if (targetInRoot) resolved.push(targetInRoot);
         const rect = targetInRoot ? targetBounds(targetInRoot) : null;
         const anchor = rect
