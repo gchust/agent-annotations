@@ -4,7 +4,12 @@
 
 - `mountAgentAnnotations(options)` mounts the React runtime and returns
   `{ api, unmount }`. `options.transport` implements `TaskTransport`; optional
-  `options.extensions` uses public client extensions.
+  `options.extensions` uses public client extensions. `options.screenshotEvidence`
+  accepts `"auto" | "manual" | "off"` (default `"auto"`): `auto` captures
+  best-effort screenshot evidence in the background after every save (the save
+  never waits for it), `manual` exposes `studio.commands.annotations.captureEvidence(id)`
+  and the editor's `Capture screenshot` action, and `off` disables capture
+  entirely. Invalid values throw a `TypeError`.
 - `TaskTransport` requires `read`/`mutate` and may add `writeEvidence`,
   `subscribe`, and `appendDiagnostics` (browser diagnostics are persisted
   through `HttpTaskTransport` and bounded/redacted server-side).
@@ -74,6 +79,10 @@ integrations.
   listeners and restores the patched methods on unmount.
 - `StudioPublicApi` exposes snapshots, subscriptions, and commands only. It does
   not expose React setters, reducers, live DOM, or inspection internals.
+  `commands.annotations.captureEvidence(annotationId)` captures best-effort
+  screenshot evidence on demand for an existing annotation on the current
+  route (a no-op in `off` mode); evidence conflicts adopt the latest task and
+  retry exactly once while the annotation still exists.
 
 ## `@gchust/agent-annotations/types`
 

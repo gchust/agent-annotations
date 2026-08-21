@@ -30,9 +30,14 @@ test("packed browser to file to CLI to browser loop, HMR and session security", 
   await shadow(page, 'button[aria-label="Save annotation"]').click();
   const taskPath = path.join(runtimeRoot, "tasks/active-task.json");
   await expect.poll(() => JSON.parse(readFileSync(taskPath, "utf8")).annotations.length).toBe(1);
-  // The annotation is persisted before the screenshot/cancelCapture finishes; wait for the
+  // The annotation is persisted before the background screenshot finishes; wait for the
   // composer to close so focus leaves the shadow host before pressing the shortcut.
   await expect(shadow(page, ".aa-composer")).toHaveCount(0);
+  // Evidence is best-effort and written asynchronously after the save: wait for it.
+  await expect.poll(
+    () => JSON.parse(readFileSync(taskPath, "utf8")).annotations[0]?.evidence?.length ?? 0,
+    { timeout: 10_000 }
+  ).toBe(1);
   const task = JSON.parse(readFileSync(taskPath, "utf8"));
   const id = task.annotations[0].annotationId;
   expect(task.annotations[0].extensions).toEqual({

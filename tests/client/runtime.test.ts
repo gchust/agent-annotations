@@ -322,7 +322,7 @@ describe("client runtime", () => {
       const editor = document.getElementById("agent-annotations-root")!
         .shadowRoot!.querySelector<HTMLElement>(".aa-editor")!;
       expect([...editor.querySelectorAll("button")].map((button) => button.getAttribute("aria-label")))
-        .toEqual(["Save comment", "Complete", "Delete", "Close"]);
+        .toEqual(["Save comment", "Capture screenshot", "Complete", "Delete", "Close"]);
       expect([...editor.querySelectorAll("button")].every((button) =>
         button.textContent === "" && !!button.querySelector("svg")
       )).toBe(true);
@@ -770,6 +770,215 @@ describe("client runtime", () => {
     expect(input.height).toBe(900);
     expect(input.annotationId).toMatch(/^[0-9a-f]{8}-[0-9a-f-]{27}$/);
     mounted.unmount();
+    pageTarget.remove();
+  });
+
+  it("persists the annotation and closes the composer before the screenshot resolves", async () => {
+    const pageTarget = document.createElement("button");
+    document.body.append(pageTarget);
+    primitives.getElementAtPoint.mockReturnValue(pageTarget);
+    let resolveCapture!: (value: unknown) => void;
+    screenshot.captureViewportPng.mockReturnValue(new Promise((resolve) => { resolveCapture = resolve; }));
+    const transport = new MemoryTaskTransport();
+    const writeEvidence = vi.spyOn(transport, "writeEvidence");
+    const mounted = await mountAgentAnnotations({ transport });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    mounted.api.commands.capture.startPick();
+    document.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 10 }));
+    const composer = shadow.querySelector<HTMLElement>(".aa-composer")!;
+    const textarea = composer.querySelector<HTMLTextAreaElement>("textarea")!;
+    textarea.value = "Decoupled save";
+    composer.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await vi.waitFor(async () => expect((await transport.read()).annotations).toHaveLength(1));
+    // The annotation is persisted, the composer is closed, and the status is
+    // already shown while the screenshot is still pending.
+    expect(shadow.querySelector(".aa-composer")).toBeNull();
+    expect(shadow.querySelector('[role="status"]')?.textContent).toBe("Annotation saved");
+    expect(writeEvidence).not.toHaveBeenCalled();
+    resolveCapture({ png: "fake-png", width: 100, height: 100, durationMs: 1, bestEffort: true });
+    await vi.waitFor(() => expect(writeEvidence).toHaveBeenCalledOnce());
+    mounted.unmount();
+    pageTarget.remove();
+  });
+
+  it("captures evidence only on demand in manual mode through the command and the editor", async () => {
+    const pageTarget = document.createElement("button");
+    document.body.append(pageTarget);
+    primitives.getElementAtPoint.mockReturnValue(pageTarget);
+    screenshot.captureViewportPng.mockResolvedValue({ png: "fake-png", width: 100, height: 100, durationMs: 1, bestEffort: true });
+    const transport = new MemoryTaskTransport();
+    const writeEvidence = vi.spyOn(transport, "writeEvidence");
+    const mounted = await mountAgentAnnotations({ transport, screenshotEvidence: "manual" });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    mounted.api.commands.capture.startPick();
+    document.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 10 }));
+    const composer = shadow.querySelector<HTMLElement>(".aa-composer")!;
+    const textarea = composer.querySelector<HTMLTextAreaElement>("textarea")!;
+    textarea.value = "Manual capture";
+    composer.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await vi.waitFor(async () => expect((await transport.read()).annotations).toHaveLength(1));
+    // No automatic capture in manual mode.
+    expect(screenshot.captureViewportPng).not.toHaveBeenCalled();
+    expect(writeEvidence).not.toHaveBeenCalled();
+    const annotationId = (await transport.read()).annotations[0]!.annotationId;
+    // The editor exposes the localized Capture screenshot action.
+    mounted.api.commands.markers.focus(annotationId);
+    const editor = shadow.querySelector<HTMLElement>(".aa-editor")!;
+    const captureButton = [...editor.querySelectorAll("button")]
+      .find((button) => button.getAttribute("aria-label") === "Capture screenshot");
+    expect(captureButton).toBeDefined();
+    captureButton!.click();
+    await vi.waitFor(() => expect(writeEvidence).toHaveBeenCalledOnce());
+    expect(screenshot.captureViewportPng).toHaveBeenCalledOnce();
+    // The public command also captures on demand.
+    writeEvidence.mockClear();
+    screenshot.captureViewportPng.mockClear();
+    await mounted.api.commands.annotations.captureEvidence(annotationId);
+    expect(screenshot.captureViewportPng).toHaveBeenCalledOnce();
+    expect(writeEvidence).toHaveBeenCalledOnce();
+    mounted.unmount();
+    pageTarget.remove();
+  });
+
+  it("disables screenshot evidence in off mode without capture, entry, or command effect", async () => {
+    const pageTarget = document.createElement("button");
+    document.body.append(pageTarget);
+    primitives.getElementAtPoint.mockReturnValue(pageTarget);
+    const transport = new MemoryTaskTransport();
+    const writeEvidence = vi.spyOn(transport, "writeEvidence");
+    const mounted = await mountAgentAnnotations({ transport, screenshotEvidence: "off" });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    mounted.api.commands.capture.startPick();
+    document.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 10 }));
+    const composer = shadow.querySelector<HTMLElement>(".aa-composer")!;
+    const textarea = composer.querySelector<HTMLTextAreaElement>("textarea")!;
+    textarea.value = "No evidence";
+    composer.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await vi.waitFor(async () => expect((await transport.read()).annotations).toHaveLength(1));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screenshot.captureViewportPng).not.toHaveBeenCalled();
+    expect(writeEvidence).not.toHaveBeenCalled();
+    const annotationId = (await transport.read()).annotations[0]!.annotationId;
+    // No Capture screenshot entry in the editor and the command is a no-op.
+    mounted.api.commands.markers.focus(annotationId);
+    const editor = shadow.querySelector<HTMLElement>(".aa-editor")!;
+    expect([...editor.querySelectorAll("button")].some(
+      (button) => button.getAttribute("aria-label") === "Capture screenshot"
+    )).toBe(false);
+    await mounted.api.commands.annotations.captureEvidence(annotationId);
+    expect(screenshot.captureViewportPng).not.toHaveBeenCalled();
+    mounted.unmount();
+    pageTarget.remove();
+  });
+
+  it("retries evidence once after a revision conflict and never overrides a newer task", async () => {
+    const pageTarget = document.createElement("button");
+    document.body.append(pageTarget);
+    primitives.getElementAtPoint.mockReturnValue(pageTarget);
+    screenshot.captureViewportPng.mockResolvedValue({ png: "fake-png", width: 100, height: 100, durationMs: 1, bestEffort: true });
+    const memory = new MemoryTaskTransport();
+    const original = memory.writeEvidence.bind(memory);
+    let first = true;
+    const writeEvidence = vi.spyOn(memory, "writeEvidence").mockImplementation(async (input) => {
+      if (first) {
+        first = false;
+        const latest = await memory.read();
+        // Another tab advances the task while the screenshot is in flight.
+        await memory.mutate({
+          taskId: latest.taskId,
+          expectedRevision: latest.taskRevision,
+          operations: [{
+            op: "update",
+            annotationId: latest.annotations[0]!.annotationId,
+            comment: latest.annotations[0]!.comment,
+          }],
+        });
+        const advanced = await memory.read();
+        throw new RevisionConflictError(advanced, input.expectedRevision, advanced.taskRevision);
+      }
+      return original(input);
+    });
+    const mounted = await mountAgentAnnotations({ transport: memory });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    mounted.api.commands.capture.startPick();
+    document.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 10 }));
+    const composer = shadow.querySelector<HTMLElement>(".aa-composer")!;
+    const textarea = composer.querySelector<HTMLTextAreaElement>("textarea")!;
+    textarea.value = "Conflict retry";
+    composer.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(writeEvidence).toHaveBeenCalledTimes(2));
+    expect(writeEvidence.mock.calls[1]![0].expectedRevision).toBe(2);
+    expect(mounted.api.getSnapshot().task.taskRevision).toBe(3);
+    mounted.unmount();
+    pageTarget.remove();
+  });
+
+  it("abandons evidence when the annotation was deleted during the conflict", async () => {
+    const pageTarget = document.createElement("button");
+    document.body.append(pageTarget);
+    primitives.getElementAtPoint.mockReturnValue(pageTarget);
+    screenshot.captureViewportPng.mockResolvedValue({ png: "fake-png", width: 100, height: 100, durationMs: 1, bestEffort: true });
+    const memory = new MemoryTaskTransport();
+    const writeEvidence = vi.spyOn(memory, "writeEvidence").mockImplementation(async (input) => {
+      const latest = await memory.read();
+      // Another tab deletes the annotation while the screenshot is in flight.
+      await memory.mutate({
+        taskId: latest.taskId,
+        expectedRevision: latest.taskRevision,
+        operations: [{ op: "remove", annotationId: latest.annotations[0]!.annotationId }],
+      });
+      const advanced = await memory.read();
+      throw new RevisionConflictError(advanced, input.expectedRevision, advanced.taskRevision);
+    });
+    const mounted = await mountAgentAnnotations({ transport: memory });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    mounted.api.commands.capture.startPick();
+    document.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 10 }));
+    const composer = shadow.querySelector<HTMLElement>(".aa-composer")!;
+    const textarea = composer.querySelector<HTMLTextAreaElement>("textarea")!;
+    textarea.value = "Deleted during capture";
+    composer.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(writeEvidence).toHaveBeenCalledOnce());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // Exactly one attempt: the annotation is gone, so there is no retry.
+    expect(writeEvidence).toHaveBeenCalledTimes(1);
+    mounted.unmount();
+    pageTarget.remove();
+  });
+
+  it("does not write evidence after a route change or unmount while the capture is pending", async () => {
+    const pageTarget = document.createElement("button");
+    document.body.append(pageTarget);
+    primitives.getElementAtPoint.mockReturnValue(pageTarget);
+    const transport = new MemoryTaskTransport();
+    const writeEvidence = vi.spyOn(transport, "writeEvidence");
+    const mounted = await mountAgentAnnotations({ transport });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    const capture = async (comment: string) => {
+      let resolveCapture!: (value: unknown) => void;
+      screenshot.captureViewportPng.mockReturnValueOnce(new Promise((resolve) => { resolveCapture = resolve; }));
+      mounted.api.commands.capture.startPick();
+      document.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 10 }));
+      const composer = shadow.querySelector<HTMLElement>(".aa-composer")!;
+      const textarea = composer.querySelector<HTMLTextAreaElement>("textarea")!;
+      textarea.value = comment;
+      composer.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      await vi.waitFor(async () => expect((await transport.read()).annotations.length).toBeGreaterThan(0));
+      return resolveCapture;
+    };
+    // Route change while the capture is pending: the evidence is dropped.
+    let resolveCapture = await capture("Route change evidence");
+    history.pushState({}, "", "/route-b");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    resolveCapture({ png: "fake-png", width: 100, height: 100, durationMs: 1, bestEffort: true });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(writeEvidence).not.toHaveBeenCalled();
+    // Unmount while the capture is pending: the evidence is dropped too.
+    resolveCapture = await capture("Unmount evidence");
+    mounted.unmount();
+    resolveCapture({ png: "fake-png", width: 100, height: 100, durationMs: 1, bestEffort: true });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(writeEvidence).not.toHaveBeenCalled();
     pageTarget.remove();
   });
 

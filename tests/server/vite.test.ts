@@ -39,7 +39,7 @@ describe("serve-only Vite plugin", () => {
     expect(String(loaded)).toContain(`from ${JSON.stringify(pkg.name)}`);
     expect(String(loaded)).toContain(`from ${JSON.stringify(`${pkg.name}/vite/client`)}`);
     expect(String(loaded)).toContain("mountAgentAnnotations");
-    expect(String(loaded)).toContain("mountAgentAnnotations({ transport, extensions })");
+    expect(String(loaded)).toContain("mountAgentAnnotations({ transport, extensions, screenshotEvidence: config.screenshotEvidence })");
     expect(String(loaded)).toContain("window[key]?.()");
     expect(String(loaded)).toContain("import.meta.hot.accept()");
     expect(String(loaded)).toContain("import.meta.hot.dispose");
@@ -100,6 +100,19 @@ describe("serve-only Vite plugin", () => {
     expect(tags[0].attrs.src).toBe("/x/main/@id/__x00__virtual:agent-annotations/client");
     const loaded = (plugin.load as Function).call({} as never, "\0virtual:agent-annotations/client", {} as never);
     expect(String(loaded)).toContain('"endpoint":"/x/main/__agent-annotations"');
+    expect(String(loaded)).toContain('"screenshotEvidence":"auto"');
+    expect(String(loaded)).toContain("screenshotEvidence: config.screenshotEvidence");
+  });
+
+  it("injects and validates the screenshot evidence mode", () => {
+    for (const mode of ["auto", "manual", "off"] as const) {
+      const plugin = agentAnnotations({ root: "/tmp/demo", screenshotEvidence: mode });
+      const loaded = String((plugin.load as Function).call({} as never, "\0virtual:agent-annotations/client", {} as never));
+      expect(loaded).toContain(`"screenshotEvidence":${JSON.stringify(mode)}`);
+      expect(loaded).toContain("screenshotEvidence: config.screenshotEvidence");
+    }
+    expect(() => agentAnnotations({ root: "/tmp/demo", screenshotEvidence: "always" as never }))
+      .toThrow(TypeError);
   });
 
   it("serves distinct file URL sources after React transforms", async () => {

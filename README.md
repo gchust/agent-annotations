@@ -27,6 +27,15 @@ export default defineConfig({
 });
 ```
 
+Screenshot evidence mode is configurable on both the plugin and
+`mountAgentAnnotations()`: `screenshotEvidence: "auto" | "manual" | "off"`
+(default `"auto"`). `auto` captures best-effort evidence in the background
+right after an annotation is saved (the save never waits for it); `manual`
+skips automatic capture and exposes the `Capture screenshot` action in the
+annotation editor plus `studio.commands.annotations.captureEvidence(id)`;
+`off` disables capture entirely — no entry, no page cloning. Invalid values
+throw a `TypeError` at plugin/mount time.
+
 The package root exports the host-neutral `agent-annotations.task.v1` core and
 `mountAgentAnnotations()` browser runtime. Public contracts are also available
 from `@gchust/agent-annotations/types`; `MemoryTaskTransport` is available only

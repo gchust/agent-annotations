@@ -355,6 +355,32 @@ describe("file task store", () => {
     expect(existsSync(path.join(store.root, reference2))).toBe(false);
   });
 
+  it("removes the evidence file when the target annotation no longer exists", async () => {
+    const store = new FileTaskStore(root());
+    const task = await store.readOrCreate();
+    await store.mutate({
+      taskId: task.taskId,
+      expectedRevision: 0,
+      operations: [{ op: "add", annotation: annotationFixture() }],
+    });
+    await store.mutate({
+      taskId: task.taskId,
+      expectedRevision: 1,
+      operations: [{ op: "remove", annotationId: "ann-1" }],
+    });
+    const png = Buffer.from("89504e470d0a1a0a00000000", "hex");
+    const evidenceDir = path.join(store.root, "evidence");
+    const before = existsSync(evidenceDir) ? readdirSync(evidenceDir).length : 0;
+    await expect(store.writeEvidence(
+      { taskId: task.taskId, expectedRevision: 2, operations: [] },
+      { annotationId: "ann-1", bytes: png, mediaType: "image/png", width: 10, height: 10 }
+    )).rejects.toThrow("annotation_not_found");
+    // The freshly written evidence file is rolled back: no orphans.
+    expect(readdirSync(evidenceDir).length).toBe(before);
+    // The task itself is untouched (no stale evidence reference).
+    expect(JSON.stringify(store.read())).not.toContain("evidence/");
+  });
+
   it("redacts secrets from update comments before persistence", async () => {
     const store = new FileTaskStore(root());
     const task = await store.readOrCreate();

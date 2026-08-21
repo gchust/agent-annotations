@@ -40,6 +40,36 @@ test("screenshot keeps style, media geometry, scroll, large viewport and aligned
   console.log(`screenshot durationMs=${Date.now() - screenshotStarted} pngBytes=${png.length}`);
   const after = await card.boundingBox();
   expect(after).toEqual(before);
+  // Pixel evidence: the page is scrolled, so the overlay must sit at the
+  // card's viewport position in the PNG (no double scroll subtraction). The
+  // card background rgb(12,34,56) blended with the indigo overlay tint is
+  // ~rgb(24,43,81); the raw background would be exactly rgb(12,34,56).
+  const samples = await page.evaluate(async (base64) => {
+    const image = new Image();
+    image.src = `data:image/png;base64,${base64}`;
+    await image.decode();
+    const canvas = document.createElement("canvas");
+    canvas.width = image.width;
+    canvas.height = image.height;
+    const context = canvas.getContext("2d")!;
+    context.drawImage(image, 0, 0);
+    const rect = document.getElementById("screenshot-card")!.getBoundingClientRect();
+    const scale = image.width / innerWidth;
+    const sample = (x: number, y: number) => {
+      const data = context.getImageData(Math.round(x * scale), Math.round(y * scale), 1, 1).data;
+      return [data[0], data[1], data[2]];
+    };
+    return {
+      inside: sample(rect.x + 8, rect.y + 8),
+      outside: sample(rect.x - 8, rect.y - 8),
+    };
+  }, png.toString("base64"));
+  expect(samples.inside).not.toEqual([12, 34, 56]);
+  expect(samples.inside[0]).toBeGreaterThan(16);
+  expect(samples.inside[0]).toBeLessThan(34);
+  expect(samples.inside[2]).toBeGreaterThan(60);
+  expect(samples.inside[2]).toBeLessThan(102);
+  console.log(`overlay-pixels inside=${JSON.stringify(samples.inside)} outside=${JSON.stringify(samples.outside)}`);
 });
 
 test("nested iframe and iframe open-shadow markers save and recover after reload", async ({ page }) => {

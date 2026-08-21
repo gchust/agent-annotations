@@ -174,9 +174,11 @@ export async function captureViewportPng(
     context.fillStyle = "#6366f122";
     context.strokeStyle = "#6366f1";
     context.lineWidth = 2 / scale;
+    // Overlays are top-level viewport coordinates; the SVG page content is
+    // already translated by -scrollX/-scrollY, so no second scroll subtraction.
     for (const rect of overlays) {
-      context.fillRect(rect.x - scrollX, rect.y - scrollY, rect.width, rect.height);
-      context.strokeRect(rect.x - scrollX, rect.y - scrollY, rect.width, rect.height);
+      context.fillRect(rect.x, rect.y, rect.width, rect.height);
+      context.strokeRect(rect.x, rect.y, rect.width, rect.height);
     }
     context.restore();
     return {

@@ -35,6 +35,7 @@ export type AgentAnnotationsPluginOptions = {
   endpoint?: string;
   allowRemote?: boolean;
   clientExtensions?: string[];
+  screenshotEvidence?: "auto" | "manual" | "off";
 };
 
 export const agentAnnotationsViteEntry = true;
@@ -102,6 +103,12 @@ export default function agentAnnotations(
   if (!/^\/[a-zA-Z0-9/_-]*$/.test(options.endpoint ?? "/__agent-annotations")) {
     throw new Error("agentAnnotations endpoint must be a root-relative path");
   }
+  const screenshotEvidence = options.screenshotEvidence ?? "auto";
+  if (screenshotEvidence !== "auto" && screenshotEvidence !== "manual" && screenshotEvidence !== "off") {
+    throw new TypeError(
+      `screenshotEvidence must be "auto", "manual", or "off" (received ${options.screenshotEvidence})`
+    );
+  }
   let root = path.resolve(options.root ?? process.cwd());
   let realRoot = existsSync(root) ? realpathSync(root) : root;
   let runtimeRoot = path.resolve(root, options.dir ?? ".agent-annotations");
@@ -168,12 +175,12 @@ export default function agentAnnotations(
         `import { mountAgentAnnotations } from ${JSON.stringify(PACKAGE_NAME)};`,
         `import { HttpTaskTransport } from ${JSON.stringify(`${PACKAGE_NAME}/vite/client`)};`,
         imports,
-        `const config = ${JSON.stringify({ endpoint: resolvedEndpoint, token })};`,
+        `const config = ${JSON.stringify({ endpoint: resolvedEndpoint, token, screenshotEvidence })};`,
         `const extensions = [${values}];`,
         "const key = Symbol.for('agent-annotations.mount');",
         "window[key]?.();",
         "const transport = new HttpTaskTransport(config);",
-        "const mounted = await mountAgentAnnotations({ transport, extensions });",
+        "const mounted = await mountAgentAnnotations({ transport, extensions, screenshotEvidence: config.screenshotEvidence });",
         "window[key] = () => { mounted.unmount(); delete window[key]; };",
         "if (import.meta.hot) {",
         "  import.meta.hot.accept();",

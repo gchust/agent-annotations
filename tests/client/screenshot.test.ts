@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   buildScreenshotSvg,
+  captureViewportPng,
   cloneScreenshotRoot,
   computeScreenshotScale,
   inlineScreenshotStyle,
@@ -90,5 +91,43 @@ describe("best-effort screenshot evidence", () => {
     const input = clone.querySelector<HTMLInputElement>("#password")!;
     expect(input.value).toBe("••••••");
     expect(input.getAttribute("value")).toBeNull();
+  });
+
+  it("draws overlays at viewport coordinates without re-subtracting scroll", async () => {
+    vi.spyOn(window, "scrollX", "get").mockReturnValue(300);
+    vi.spyOn(window, "scrollY", "get").mockReturnValue(400);
+    const drawCalls: Array<{ op: "fill" | "stroke"; x: number; y: number }> = [];
+    const context = {
+      save: vi.fn(),
+      restore: vi.fn(),
+      scale: vi.fn(),
+      drawImage: vi.fn(),
+      fillRect: (x: number, y: number) => { drawCalls.push({ op: "fill", x, y }); },
+      strokeRect: (x: number, y: number) => { drawCalls.push({ op: "stroke", x, y }); },
+    } as unknown as CanvasRenderingContext2D;
+    const canvas = {
+      width: 0,
+      height: 0,
+      getContext: () => context,
+      toDataURL: () => "data:image/png;base64,AAAA",
+    } as unknown as HTMLCanvasElement;
+    vi.spyOn(document, "createElement").mockImplementation((tag: string) =>
+      tag === "canvas" ? canvas : document.createElement(tag)
+    );
+    vi.stubGlobal("Image", class {
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      src = "";
+      constructor() {
+        queueMicrotask(() => this.onload?.());
+      }
+    });
+    const result = await captureViewportPng([{ x: 100, y: 200, width: 50, height: 30 }]);
+    expect(result).not.toBeNull();
+    // The SVG content is already translated by -scroll; the overlay must be
+    // drawn at the top-level viewport rect (100, 200), not (100 - 300, 200 - 400).
+    expect(drawCalls).toContainEqual({ op: "fill", x: 100, y: 200 });
+    expect(drawCalls).toContainEqual({ op: "stroke", x: 100, y: 200 });
+    expect(drawCalls.some((call) => call.x !== 100 || call.y !== 200)).toBe(false);
   });
 });

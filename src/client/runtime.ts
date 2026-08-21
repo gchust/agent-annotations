@@ -22,6 +22,7 @@ import type {
   AgentAnnotationsHostTheme,
   AgentAnnotationsMutationOperation,
   AgentAnnotationsRect,
+  AgentAnnotationsScreenshotEvidenceMode,
   AgentAnnotationsTarget,
   AgentAnnotationsTask,
   HostIntegration,
@@ -49,6 +50,7 @@ import {
 import { builtinClientExtension } from "./builtin-extension.js";
 import {
   AnnotationsIcon,
+  CaptureIcon,
   CloseIcon,
   CompleteIcon,
   DeleteIcon,
@@ -56,7 +58,7 @@ import {
   ReopenIcon,
   SaveIcon,
 } from "./icons.js";
-import { captureViewportPng } from "./screenshot.js";
+import { captureViewportPng, type CapturedScreenshot, type ScreenshotRect } from "./screenshot.js";
 import { AGENT_ANNOTATIONS_STYLES } from "./styles.js";
 
 const HOST_ID = "agent-annotations-root";
@@ -250,6 +252,14 @@ export async function mountAgentAnnotations(
   // Unconditional transport boundary: every task entering the runtime is
   // schema-parsed, including third-party custom TaskTransport implementations.
   const transport = createValidatedTaskTransport(options.transport);
+
+  const screenshotMode: AgentAnnotationsScreenshotEvidenceMode =
+    options.screenshotEvidence ?? "auto";
+  if (screenshotMode !== "auto" && screenshotMode !== "manual" && screenshotMode !== "off") {
+    throw new TypeError(
+      `screenshotEvidence must be "auto", "manual", or "off" (received ${options.screenshotEvidence})`
+    );
+  }
 
   let task: AgentAnnotationsTask;
   try {
@@ -604,6 +614,133 @@ export async function mountAgentAnnotations(
     await mutate(operations);
   };
 
+  type ScreenshotEvidenceInput = {
+    annotationId: string;
+    taskId: string;
+    taskRevision: number;
+    routeKey: string;
+  };
+
+  const adoptTask = (candidate: AgentAnnotationsTask): void => {
+    if (destroyed) return;
+    if (isTaskIdentityNewer(taskIdentity(candidate), taskIdentity(task))) {
+      task = candidate;
+      render();
+      emit();
+    }
+  };
+
+  // Best-effort evidence write with exactly one conflict retry: the parsed
+  // latest task is adopted (never overridden by an older identity), the retry
+  // uses its revision, and a deleted annotation abandons the write. All
+  // failures are recorded through the existing redacted diagnostics path.
+  const writeScreenshotEvidence = async (
+    input: ScreenshotEvidenceInput,
+    screenshot: { png: string; width: number; height: number }
+  ): Promise<boolean> => {
+    const attempt = async (expectedRevision: number): Promise<void> => {
+      const evidence = await transport.writeEvidence!({
+        taskId: input.taskId,
+        expectedRevision,
+        annotationId: input.annotationId,
+        png: screenshot.png,
+        width: screenshot.width,
+        height: screenshot.height,
+      });
+      if (!destroyed && routeKey === input.routeKey) adoptTask(evidence);
+    };
+    try {
+      await attempt(input.taskRevision);
+      return true;
+    } catch (error) {
+      if (destroyed || routeKey !== input.routeKey) return false;
+      if (!(error instanceof RevisionConflictError)) {
+        record("console", `screenshot evidence failed: ${String(error)}`);
+        return false;
+      }
+      adoptTask(error.latestTask);
+      const latest = error.latestTask;
+      const stillExists = latest.annotations.some(
+        (annotation) => annotation.annotationId === input.annotationId
+      );
+      if (!stillExists || destroyed || routeKey !== input.routeKey) return false;
+      try {
+        await attempt(latest.taskRevision);
+        return true;
+      } catch (retryError) {
+        if (destroyed || routeKey !== input.routeKey) return false;
+        record("console", `screenshot evidence failed: ${String(retryError)}`);
+        return false;
+      }
+    }
+  };
+
+  // Background capture: the save UI never waits for it, failures never roll
+  // back the annotation, and the promise is always explicitly handled.
+  const scheduleScreenshotEvidence = (
+    input: ScreenshotEvidenceInput & { overlays: readonly ScreenshotRect[] }
+  ): void => {
+    const run = async (): Promise<void> => {
+      if (destroyed || routeKey !== input.routeKey) return;
+      const screenshot = await captureViewportPng(input.overlays);
+      if (!screenshot || destroyed || routeKey !== input.routeKey) return;
+      await writeScreenshotEvidence(input, screenshot);
+    };
+    run().catch(() => {
+      if (!destroyed) record("console", "screenshot evidence failed");
+    });
+  };
+
+  // Manual capture for an existing annotation on the current route: region
+  // annotations use their persisted document rect (converted to viewport),
+  // element/multi annotations use identity-validated live target bounds.
+  const captureEvidence = async (annotationId: string): Promise<void> => {
+    try {
+      if (destroyed || screenshotMode === "off") return;
+      const annotation = task.annotations.find((entry) => entry.annotationId === annotationId);
+      if (!annotation) {
+        setStatus("Annotation not found");
+        return;
+      }
+      if (annotation.pageContext.routeKey !== routeKey) {
+        setStatus("Annotation is on another route");
+        return;
+      }
+      const capturedRouteKey = annotation.pageContext.routeKey;
+      const overlays = annotation.region
+        ? [{
+            x: annotation.region.x - scrollX,
+            y: annotation.region.y - scrollY,
+            width: annotation.region.width,
+            height: annotation.region.height,
+          }]
+        : (annotation.targets?.map((target) => {
+              const resolution = resolvePersistedTarget(target, { appRoot, host });
+              return resolution.status === "resolved" && isInAppRoot(resolution.element)
+                ? targetBounds(resolution.element)
+                : null;
+            }) ?? [])
+            .filter((rect): rect is AgentAnnotationsRect => rect !== null);
+      const screenshot = await captureViewportPng(overlays);
+      if (!screenshot || destroyed || routeKey !== capturedRouteKey) return;
+      const saved = await writeScreenshotEvidence({
+        annotationId,
+        taskId: task.taskId,
+        taskRevision: task.taskRevision,
+        routeKey: capturedRouteKey,
+      }, screenshot);
+      if (!destroyed) {
+        setStatus(
+          saved
+            ? localized({ "en-US": "Screenshot captured", "zh-CN": "截图已保存" })
+            : localized({ "en-US": "Screenshot failed", "zh-CN": "截图失败" })
+        );
+      }
+    } catch (error) {
+      if (!destroyed) record("console", `screenshot evidence failed: ${String(error)}`);
+    }
+  };
+
   const exportTask = async (
     filter: "open" | "all",
     exporterId?: string
@@ -735,6 +872,7 @@ export async function mountAgentAnnotations(
         reopen: (id) => mutateCommand([{ op: "reopen", annotationId: id }]),
         remove: (id) => mutateCommand([{ op: "remove", annotationId: id }]),
         removeCompleted: () => mutateCommand([{ op: "removeCompleted" }]),
+        captureEvidence,
       },
       markers: {
         show: () => setMarkersVisible(true),
@@ -987,36 +1125,27 @@ export async function mountAgentAnnotations(
         if (destroyed || routeKey !== submittedRouteKey) return;
         const persisted = await mutate([{ op: "add", annotation }]);
         if (destroyed) return;
-        if (persisted && transport.writeEvidence && routeKey === submittedRouteKey) {
+        // Copy the immutable data needed for background evidence, then close
+        // the composer and show success immediately: the screenshot never
+        // blocks the save and never rolls back the annotation.
+        let evidenceInput: (ScreenshotEvidenceInput & { overlays: readonly ScreenshotRect[] }) | null = null;
+        if (persisted && transport.writeEvidence && screenshotMode === "auto" && routeKey === submittedRouteKey) {
           const overlays = composer?.kind === "region"
-            ? [composer.rect]
-            : composer?.elements.map(targetBounds) ?? [];
-          const screenshot = await captureViewportPng(overlays);
-          if (screenshot && !destroyed && routeKey === submittedRouteKey) {
-            try {
-              const evidence = await transport.writeEvidence({
-                taskId: persisted.taskId,
-                expectedRevision: persisted.taskRevision,
-                annotationId: annotation.annotationId,
-                png: screenshot.png,
-                width: screenshot.width,
-                height: screenshot.height,
-              });
-              if (!destroyed && isTaskIdentityNewer(taskIdentity(evidence), taskIdentity(task))) {
-                task = evidence;
-              }
-              render();
-              emit();
-            } catch {
-              // Screenshot evidence is explicitly best-effort; the annotation is authoritative.
-            }
-          }
+            ? [{ ...composer.rect }]
+            : composer?.elements.map((element) => ({ ...targetBounds(element) })) ?? [];
+          evidenceInput = {
+            annotationId: annotation.annotationId,
+            taskId: persisted.taskId,
+            taskRevision: persisted.taskRevision,
+            routeKey: submittedRouteKey,
+            overlays,
+          };
         }
-        if (destroyed) return;
         clearTransientSelection();
         render();
         emit();
         setStatus("Annotation saved");
+        if (evidenceInput) scheduleScreenshotEvidence(evidenceInput);
       } catch (error) {
         save.disabled = false;
         setStatus(error instanceof Error ? error.message : "Save failed");
@@ -1080,6 +1209,17 @@ export async function mountAgentAnnotations(
     const actions = document.createElement("div");
     actions.className = "aa-actions";
     const save = submitButton("Save comment", SaveIcon);
+    if (screenshotMode !== "off") {
+      const capture = iconButton(
+        localized({ "en-US": "Capture screenshot", "zh-CN": "截图" }),
+        CaptureIcon,
+        () => { captureEvidence(annotation.annotationId).catch(() => undefined); }
+      );
+      capture.className = "aa-button aa-icon-button";
+      actions.append(save, capture);
+    } else {
+      actions.append(save);
+    }
     const statusButton = iconButton(
       annotation.status === "open" ? "Complete" : "Reopen",
       annotation.status === "open" ? CompleteIcon : ReopenIcon,
@@ -1097,7 +1237,7 @@ export async function mountAgentAnnotations(
     remove.className = "aa-button aa-icon-button aa-danger";
     const close = iconButton("Close", CloseIcon, () => { editingId = null; render(); });
     close.className = "aa-button aa-icon-button";
-    actions.append(save, statusButton, remove, close);
+    actions.append(statusButton, remove, close);
     surface.append(textarea, actions);
     surface.addEventListener("submit", async (event) => {
       event.preventDefault();

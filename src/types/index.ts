@@ -245,6 +245,8 @@ export type AgentAnnotationsShortcutInput = {
 
 export type AgentAnnotationsPlatform = "mac" | "other";
 
+export type AgentAnnotationsScreenshotEvidenceMode = "auto" | "manual" | "off";
+
 export interface TaskTransport {
   read(): Promise<AgentAnnotationsTask>;
   mutate(request: AgentAnnotationsMutationRequest): Promise<AgentAnnotationsTask>;
@@ -362,6 +364,7 @@ export interface StudioPublicApi {
       reopen(id: string): Promise<void>;
       remove(id: string): Promise<void>;
       removeCompleted(): Promise<void>;
+      captureEvidence(annotationId: string): Promise<void>;
     };
     markers: {
       show(): void;
@@ -425,6 +428,7 @@ export interface PanelContribution {
 export type MountAgentAnnotationsOptions = {
   transport: TaskTransport;
   extensions?: readonly AgentAnnotationsClientExtension[];
+  screenshotEvidence?: AgentAnnotationsScreenshotEvidenceMode;
 };
 
 export interface AgentAnnotationsClientExtension {
