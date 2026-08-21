@@ -32,13 +32,23 @@ test("keyboard-only Pick, Multi, Copy, List, and Collapse flows with visual evid
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await page.goto("/");
   await expect(shadow(page, ".aa-dock")).toBeVisible();
+  // The dock starts collapsed by default.
+  await expect(shadow(page, ".aa-dock")).toHaveAttribute("data-collapsed", "true");
+  await expect(shadow(page, ".aa-collapsed-count")).toBeVisible();
+  await page.screenshot({ path: shot("collapsed") });
+
+  // A capture hotkey while collapsed auto-expands the dock and starts pick.
+  await page.keyboard.press("Control+Alt+P");
+  await expect(shadow(page, ".aa-dock")).toHaveAttribute("data-collapsed", "false");
+  await expect(shadow(page, '[aria-label^="Pick"]')).toHaveAttribute("aria-pressed", "true");
   await expect(shadow(page, '[aria-label="Annotations (Ctrl+Alt+L)"]')).toBeVisible();
   await expect(shadow(page, '[aria-label="Shortcut help (Shift+/)"]')).toBeVisible();
 
   // Expanded dock evidence.
   await page.screenshot({ path: shot("expanded") });
 
-  // Tooltip evidence: hover shows the registered shortcut.
+  // Tooltip evidence: hover shows the registered shortcut on the visible
+  // toolbar button.
   await shadow(page, '[aria-label^="Pick"]').hover();
   await expect(shadow(page, '[role="tooltip"]')).toContainText("Pick (Ctrl+Alt+P)");
   await page.screenshot({ path: shot("tooltip") });
@@ -48,10 +58,12 @@ test("keyboard-only Pick, Multi, Copy, List, and Collapse flows with visual evid
   await expect(shadow(page, '[role="tooltip"]')).toContainText("Pick (Ctrl+Alt+P)");
   await page.keyboard.press("Escape");
   await expect(shadow(page, '[role="tooltip"]')).toHaveCount(0);
-
-  // Keyboard-only Pick: hotkey, Tab to the target, Enter, comment, save.
+  // Escape also cancels the armed capture by contract, so re-arm before the
+  // keyboard-only Pick flow.
   await page.keyboard.press("Control+Alt+P");
   await expect(shadow(page, '[aria-label^="Pick"]')).toHaveAttribute("aria-pressed", "true");
+
+  // Keyboard-only Pick: Tab to the target, Enter, comment, save.
   await tabUntil(page, "target");
   await page.keyboard.press("Enter");
   await expect(shadow(page, '[aria-label="Annotation comment"]')).toBeFocused();
@@ -146,6 +158,11 @@ test("keyboard-only Pick, Multi, Copy, List, and Collapse flows with visual evid
   const draggedLeft = dockBox!.x;
   await page.reload();
   await expect(shadow(page, ".aa-dock")).toBeVisible();
+  // A reload resets to the default collapsed initial state; expand again
+  // before any drag/tooltip checks that need the visible toolbar.
+  await expect(shadow(page, ".aa-dock")).toHaveAttribute("data-collapsed", "true");
+  await page.keyboard.press("Control+Alt+K");
+  await expect(shadow(page, ".aa-dock")).toHaveAttribute("data-collapsed", "false");
   const restored = await shadow(page, ".aa-dock").boundingBox();
   expect(restored!.x).toBeCloseTo(draggedLeft, 0);
   // Resize into a viewport that still fits the dock but forces the saved

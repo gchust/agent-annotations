@@ -334,6 +334,35 @@ export type AgentAnnotationsToolbarShortcut = Omit<
   "id"
 >;
 
+export type AgentAnnotationsBuiltinActionId =
+  | "pick"
+  | "multi"
+  | "area"
+  | "copy"
+  | "markers"
+  | "help"
+  | "list"
+  | "collapse";
+
+export type AgentAnnotationsBuiltinsConfig = {
+  pick?: boolean;
+  multi?: boolean;
+  area?: boolean;
+  copy?: boolean;
+  markers?: boolean;
+  help?: boolean;
+  list?: boolean;
+  collapse?: boolean;
+  shortcuts?: Partial<
+    Record<AgentAnnotationsBuiltinActionId, AgentAnnotationsToolbarShortcut | false>
+  >;
+};
+
+export type AgentAnnotationsInitialState = {
+  collapsed?: boolean;
+  markersVisible?: boolean;
+};
+
 export type StudioPublicShortcut = {
   id: string;
   extensionId: string;
@@ -442,6 +471,8 @@ export type MountAgentAnnotationsOptions = {
   screenshotEvidence?: AgentAnnotationsScreenshotEvidenceMode;
   browserStatus?: AgentAnnotationsBrowserStatusConfig;
   handoff?: AgentAnnotationsHandoffConfig;
+  builtins?: false | AgentAnnotationsBuiltinsConfig;
+  initialState?: AgentAnnotationsInitialState;
 };
 
 export interface AgentAnnotationsClientExtension {

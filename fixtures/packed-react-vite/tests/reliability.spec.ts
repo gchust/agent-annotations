@@ -9,7 +9,7 @@ const shadow = (page: import("@playwright/test").Page, selector: string) =>
   page.locator(`#agent-annotations-root >> ${selector}`);
 const save = async (page: import("@playwright/test").Page, target: import("@playwright/test").Locator, comment: string) => {
   const expected = JSON.parse(readFileSync(taskPath, "utf8")).annotations.length + 1;
-  await shadow(page, '[aria-label^="Pick"]').click();
+  await page.keyboard.press("Control+Alt+P");
   await target.click();
   await shadow(page, '[aria-label="Annotation comment"]').fill(comment);
   await shadow(page, 'button[aria-label="Save annotation"]').click();
@@ -113,7 +113,7 @@ test("cross-origin stays explicitly unsupported and public freeze keeps toolbar 
     }
   })).toBe("unsupported");
   const original = await page.evaluate(() => String(window.requestAnimationFrame));
-  await shadow(page, '[aria-label^="Pick"]').click();
+  await page.keyboard.press("Control+Alt+P");
   await page.locator("#animated-target").click();
   await expect(shadow(page, '[aria-label="Annotation composer"]')).toBeVisible();
   await expect(shadow(page, '[aria-label^="Annotations"]')).toBeEnabled();
@@ -138,7 +138,7 @@ test("region is bounded and semantic target survives wrapper-heavy sampling", as
   const durations: number[] = [];
   for (let run = 0; run < 3; run += 1) {
     const started = Date.now();
-    await shadow(page, '[aria-label^="Area"]').click();
+    await page.keyboard.press("Control+Alt+A");
     await page.mouse.move(box!.x - 2, box!.y - 2);
     await page.mouse.down();
     await page.mouse.move(box!.x + box!.width + 2, box!.y + box!.height + 2);

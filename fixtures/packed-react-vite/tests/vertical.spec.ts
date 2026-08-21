@@ -24,7 +24,7 @@ test("packed browser to file to CLI to browser loop, HMR and session security", 
   const session = JSON.parse(readFileSync(path.join(runtimeRoot, "session.json"), "utf8"));
   expect(session.token).toMatch(/^[0-9a-f]{64}$/);
 
-  await shadow(page, 'button[aria-label^="Pick"]').click();
+  await page.keyboard.press("Control+Alt+P");
   await page.locator("#target").click();
   await shadow(page, '[aria-label="Annotation comment"]').fill("Make target purple");
   await shadow(page, 'button[aria-label="Save annotation"]').click();

@@ -39,7 +39,7 @@ const revision = async (page: Page, token: string) => page.evaluate(async (value
 const capture = async (page: Page, selector: string) => {
   const comment = `source ${selector}`;
   const expectedCount = JSON.parse(readFileSync(taskPath, "utf8")).annotations.length + 1;
-  await shadow(page, 'button[aria-label^="Pick"]').click();
+  await page.keyboard.press("Control+Alt+P");
   await page.locator(selector).click();
   await shadow(page, '[aria-label="Annotation comment"]').fill(comment);
   await shadow(page, 'button[aria-label="Save annotation"]').click();
@@ -53,6 +53,14 @@ const capture = async (page: Page, selector: string) => {
     return task.annotations.length === expectedCount
       && annotation?.targets?.[0]?.selector.includes(selector.slice(1)) === true;
   }, { timeout: 10_000, message: `annotation ${selector} was not persisted` }).toBe(true);
+  // Evidence is written asynchronously after the save; waiting for it drains
+  // the server write queue so the later manual rewrite of the task file can
+  // never be overwritten by a late evidence mutation.
+  await expect.poll(() => {
+    const task = JSON.parse(readFileSync(taskPath, "utf8"));
+    const annotation = task.annotations.find((entry: any) => entry.comment === comment);
+    return (annotation?.evidence?.length ?? 0) >= 1;
+  }, { timeout: 10_000, message: `evidence for ${selector} was not persisted` }).toBe(true);
 };
 
 test("source-benchmark duplicate-basename exact path, line, column, and revision", async ({ page }) => {

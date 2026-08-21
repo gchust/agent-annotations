@@ -39,7 +39,7 @@ describe("serve-only Vite plugin", () => {
     expect(String(loaded)).toContain(`from ${JSON.stringify(pkg.name)}`);
     expect(String(loaded)).toContain(`from ${JSON.stringify(`${pkg.name}/vite/client`)}`);
     expect(String(loaded)).toContain("mountAgentAnnotations");
-    expect(String(loaded)).toContain("mountAgentAnnotations({ transport, extensions, screenshotEvidence: config.screenshotEvidence, browserStatus: { endpoint: config.endpoint, token: config.token }, handoff: config.handoff })");
+    expect(String(loaded)).toContain("mountAgentAnnotations({ transport, extensions, screenshotEvidence: config.screenshotEvidence, browserStatus: { endpoint: config.endpoint, token: config.token }, handoff: config.handoff, builtins: config.builtins, initialState: config.initialState })");
     expect(String(loaded)).toContain("mounted.refreshAppliedSourceRevision()");
     expect(String(loaded)).toContain("vite:afterUpdate");
     expect(String(loaded)).toContain("window[key]?.()");
@@ -125,6 +125,24 @@ describe("serve-only Vite plugin", () => {
     expect(loaded).toContain("handoff: config.handoff");
     expect(() => agentAnnotations({ root: "/tmp/demo", handoff: { command: "bad\ncommand" } }))
       .toThrow(TypeError);
+    // builtins/initialState are JSON-safe validated and injected.
+    const configured = agentAnnotations({
+      root: "/tmp/demo",
+      builtins: { help: false, shortcuts: { pick: { key: "X", code: "KeyX", primary: true, alt: true, shift: false } } },
+      initialState: { collapsed: false },
+    });
+    const configuredLoaded = String((configured.load as Function).call({} as never, "\0virtual:agent-annotations/client", {} as never));
+    expect(configuredLoaded).toContain('"builtins":{"help":false');
+    expect(configuredLoaded).toContain('"initialState":{"collapsed":false}');
+    expect(configuredLoaded).toContain("builtins: config.builtins");
+    expect(configuredLoaded).toContain("initialState: config.initialState");
+    expect(() => agentAnnotations({ root: "/tmp/demo", builtins: { pick: "yes" as never } }))
+      .toThrow(/builtins pick must be a boolean/);
+    expect(() => agentAnnotations({ root: "/tmp/demo", initialState: { collapsed: 1 as never } }))
+      .toThrow(/initialState collapsed must be a boolean/);
+    const noBuiltins = agentAnnotations({ root: "/tmp/demo", builtins: false });
+    const noBuiltinsLoaded = String((noBuiltins.load as unknown as Function).call({} as never, "\0virtual:agent-annotations/client", {} as never));
+    expect(noBuiltinsLoaded).toContain('"builtins":false');
   });
 
   it("serves distinct file URL sources after React transforms", async () => {

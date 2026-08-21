@@ -571,9 +571,175 @@ describe("client runtime", () => {
     expect(dispose).toHaveBeenCalledOnce();
   });
 
+  it("starts collapsed by default with the count chrome and explicit initialState support", async () => {
+    const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport() });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      expect(mounted.api.getSnapshot().collapsed).toBe(true);
+      expect(mounted.api.getSnapshot().markersVisible).toBe(true);
+      expect(shadow.querySelector(".aa-dock")?.getAttribute("data-collapsed")).toBe("true");
+      expect(shadow.querySelector(".aa-collapsed-count")).not.toBeNull();
+      // initialState can never auto-enter a capture mode: the snapshot is
+      // idle immediately after mount.
+      expect(mounted.api.getSnapshot().captureMode).toBe("idle");
+    } finally {
+      mounted.unmount();
+    }
+    const expanded = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(),
+      initialState: { collapsed: false, markersVisible: false },
+    });
+    try {
+      expect(expanded.api.getSnapshot().collapsed).toBe(false);
+      expect(expanded.api.getSnapshot().markersVisible).toBe(false);
+    } finally {
+      expanded.unmount();
+    }
+  });
+
+  it("disabling a builtin removes its toolbar entry and shortcut", async () => {
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(),
+      initialState: { collapsed: false },
+      builtins: { help: false, pick: false },
+    });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      expect(shadow.querySelector('[aria-label^="Pick"]')).toBeNull();
+      expect(shadow.querySelector('[aria-label^="Shortcut help"]')).toBeNull();
+      expect(shadow.querySelector('[aria-label^="Annotations"]')).not.toBeNull();
+      const shortcuts = mounted.api.getSnapshot().shortcuts.map((entry) => entry.id);
+      expect(shortcuts).not.toContain("agent-annotations.builtin:pick");
+      expect(shortcuts).not.toContain("agent-annotations.builtin:help");
+      // The disabled help panel is absent too: opening it is rejected.
+      expect(() => mounted.api.commands.panels.open("agent-annotations.builtin:help"))
+        .toThrow("Unknown panel ID: agent-annotations.builtin:help");
+      expect(() => mounted.api.commands.panels.open("agent-annotations.builtin:list"))
+        .not.toThrow();
+    } finally {
+      mounted.unmount();
+    }
+  });
+
+  it("mounts with builtins:false and a custom extension, expanding from the collapsed count", async () => {
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(),
+      builtins: false,
+      extensions: [defineClientExtension({
+        id: "only-third-party",
+        apiVersion: 1,
+        toolbar: [{
+          id: "ping",
+          group: "handoff",
+          label: "Ping",
+          icon: () => null,
+          kind: "action",
+          execute: () => undefined,
+        }],
+      })],
+    });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      // Default collapsed: no list builtin, the count expands the dock.
+      expect(mounted.api.getSnapshot().collapsed).toBe(true);
+      const count = shadow.querySelector<HTMLElement>(".aa-collapsed-count")!;
+      expect(count.getAttribute("data-action-id")).toBe("agent-annotations.builtin:expand");
+      expect(count.getAttribute("aria-label")).toContain("Expand toolbar");
+      count.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(mounted.api.getSnapshot().collapsed).toBe(false);
+      const ping = shadow.querySelector<HTMLButtonElement>('[data-action-id="only-third-party:ping"]');
+      expect(ping).not.toBeNull();
+      expect(mounted.api.getSnapshot().captureMode).toBe("idle");
+    } finally {
+      mounted.unmount();
+    }
+  });
+
+  it("applies builtin shortcut overrides and rejects conflicts", async () => {
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(),
+      initialState: { collapsed: false },
+      builtins: {
+        shortcuts: {
+          pick: { key: "X", code: "KeyX", primary: true, alt: true, shift: false },
+        },
+      },
+    });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      const pick = shadow.querySelector<HTMLButtonElement>('[aria-label^="Pick"]')!;
+      expect(pick.getAttribute("aria-label")).toBe("Pick (Ctrl+Alt+X)");
+      document.dispatchEvent(new KeyboardEvent("keydown", {
+        key: "x", code: "KeyX", ctrlKey: true, altKey: true, bubbles: true,
+      }));
+      expect(mounted.api.getSnapshot().captureMode).toBe("pick");
+    } finally {
+      mounted.unmount();
+    }
+    await expect(mountAgentAnnotations({
+      transport: new MemoryTaskTransport(),
+      builtins: {
+        shortcuts: {
+          pick: { key: "P", code: "KeyP", primary: true, alt: true, shift: false },
+          multi: { key: "P", code: "KeyP", primary: true, alt: true, shift: false },
+        },
+      },
+    })).rejects.toThrow(/Duplicate toolbar shortcut/);
+  });
+
+  it("shortcut false removes only the shortcut while keeping the toolbar action", async () => {
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(),
+      initialState: { collapsed: false },
+      builtins: { shortcuts: { pick: false } },
+    });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      const pick = shadow.querySelector<HTMLButtonElement>('[aria-label^="Pick"]')!;
+      expect(pick.getAttribute("aria-label")).toBe("Pick");
+      expect(pick.getAttribute("aria-label")).not.toContain("Ctrl+Alt");
+      const shortcuts = mounted.api.getSnapshot().shortcuts.map((entry) => entry.id);
+      expect(shortcuts).not.toContain("agent-annotations.builtin:pick");
+      // The toolbar action itself still works.
+      pick.click();
+      expect(mounted.api.getSnapshot().captureMode).toBe("pick");
+      mounted.api.commands.capture.cancel();
+      // The removed shortcut no longer triggers anything.
+      document.dispatchEvent(new KeyboardEvent("keydown", {
+        key: "p", code: "KeyP", ctrlKey: true, altKey: true, bubbles: true,
+      }));
+      expect(mounted.api.getSnapshot().captureMode).toBe("idle");
+    } finally {
+      mounted.unmount();
+    }
+  });
+
+  it("expands from the collapsed count when the list builtin is disabled", async () => {
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(),
+      builtins: { list: false },
+    });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      expect(mounted.api.getSnapshot().collapsed).toBe(true);
+      const count = shadow.querySelector<HTMLElement>(".aa-collapsed-count")!;
+      expect(count.getAttribute("data-action-id")).toBe("agent-annotations.builtin:toggle");
+      expect(count.getAttribute("aria-label")).toContain("Expand toolbar");
+      count.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(mounted.api.getSnapshot().collapsed).toBe(false);
+    } finally {
+      mounted.unmount();
+    }
+  });
+
   it("keeps panels exclusive and returns focus to the opening action", async () => {
     vi.useFakeTimers();
-    const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport() });
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(),
+      initialState: { collapsed: false },
+    });
     const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
     const list = shadow.querySelector<HTMLButtonElement>('[aria-label^="Annotations"]')!;
     list.focus();
@@ -643,7 +809,10 @@ describe("client runtime", () => {
   });
 
   it("preserves built-in toolbar state parity", async () => {
-    const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport() });
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(),
+      initialState: { collapsed: false },
+    });
     const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
     const markers = shadow.querySelector<HTMLButtonElement>('[aria-label^="Markers"]')!;
     markers.click();
@@ -3353,7 +3522,7 @@ describe("client runtime", () => {
     const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport(fifty) });
     const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
     try {
-      shadow.querySelector<HTMLButtonElement>('[aria-label^="Collapse toolbar"]')!.click();
+      // The dock starts collapsed by default: the count is already visible.
       const count = shadow.querySelector<HTMLElement>(".aa-collapsed-count")!;
       expect(count.textContent).toBe("50");
       expect(count.getAttribute("aria-label")).toBe("50 open annotations");
@@ -3364,7 +3533,7 @@ describe("client runtime", () => {
       expect(shadow.querySelector('[role="tooltip"]')?.textContent).toBe("50 open annotations");
       // Clicking the count opens the annotation list and reflects aria-expanded.
       count.click();
-      expect(shadow.querySelector('[aria-label="Annotation list"]')).not.toBeNull();
+      expect(shadow.querySelector('[aria-label^="Annotations"]')).not.toBeNull();
       expect(shadow.querySelector<HTMLElement>(".aa-collapsed-count")!.getAttribute("aria-expanded"))
         .toBe("true");
     } finally {
@@ -3376,7 +3545,7 @@ describe("client runtime", () => {
     const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport() });
     const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
     try {
-      shadow.querySelector<HTMLButtonElement>('[aria-label^="Collapse toolbar"]')!.click();
+      // The dock starts collapsed by default: the count is already visible.
       const count = shadow.querySelector<HTMLElement>(".aa-collapsed-count")!;
       expect(count.querySelector("svg")).not.toBeNull();
       expect(count.textContent?.trim()).toBe("");
@@ -3478,7 +3647,10 @@ describe("client runtime", () => {
     const target = document.createElement("button");
     document.body.append(target);
     primitives.getElementAtPoint.mockReturnValue(target);
-    const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport() });
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(taskFixture()),
+      initialState: { collapsed: false },
+    });
     const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
     try {
       mounted.api.commands.capture.startPick();
@@ -3521,11 +3693,11 @@ describe("client runtime", () => {
     const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport(taskFixture()) });
     const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
     try {
-      shadow.querySelector<HTMLButtonElement>('[aria-label^="Collapse toolbar"]')!.click();
+      // The dock starts collapsed by default: the count is already visible.
       const count = shadow.querySelector<HTMLElement>(".aa-collapsed-count")!;
       expect(count.getAttribute("data-action-id")).toBe("agent-annotations.builtin:list");
       count.click();
-      expect(shadow.querySelector('[aria-label="Annotation list"]')).not.toBeNull();
+      expect(shadow.querySelector('[aria-label^="Annotations"]')).not.toBeNull();
       await vi.runAllTimersAsync();
       // The panel has focus inside the shadow; Escape from there closes it and
       // returns focus to the visible count trigger.
@@ -3654,11 +3826,14 @@ describe("client runtime", () => {
     }
   });
 
-  it("collapse cancels active capture interception but keeps an open draft and blocks capture hotkeys", async () => {
+  it("collapse cancels active capture interception, keeps an open draft, and capture hotkeys auto-expand", async () => {
     const target = document.createElement("button");
     document.body.append(target);
     primitives.getElementAtPoint.mockReturnValue(target);
-    const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport() });
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(taskFixture()),
+      initialState: { collapsed: false },
+    });
     const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
     try {
       mounted.api.commands.capture.startPick();
@@ -3676,14 +3851,21 @@ describe("client runtime", () => {
       expect(shadow.querySelector(".aa-composer")).toBeNull();
       document.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 5, clientY: 5 }));
       expect(shadow.querySelector(".aa-composer")).toBeNull();
-      // Capture hotkeys are blocked while collapsed; collapse hotkey still works.
+      // A capture hotkey while collapsed auto-expands the dock and starts
+      // the capture mode; it is never a silent no-op.
       document.dispatchEvent(new KeyboardEvent("keydown", { key: "p", ctrlKey: true, altKey: true, bubbles: true }));
-      expect(mounted.api.getSnapshot().captureMode).toBe("idle");
-      document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true, altKey: true, bubbles: true }));
       await new Promise((resolve) => setTimeout(resolve, 0));
       expect(mounted.api.getSnapshot().collapsed).toBe(false);
+      expect(mounted.api.getSnapshot().captureMode).toBe("pick");
+      // The collapse hotkey still toggles, and an expanded capture hotkey
+      // starts the capture without changing the dock.
+      mounted.api.commands.capture.cancel();
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true, altKey: true, bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(mounted.api.getSnapshot().collapsed).toBe(true);
       document.dispatchEvent(new KeyboardEvent("keydown", { key: "p", ctrlKey: true, altKey: true, bubbles: true }));
       await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(mounted.api.getSnapshot().collapsed).toBe(false);
       expect(mounted.api.getSnapshot().captureMode).toBe("pick");
     } finally {
       mounted.unmount();

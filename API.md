@@ -93,6 +93,12 @@ integrations.
   their own route. Without `subscribe`, the runtime observes `popstate`,
   `hashchange`, and patched `pushState`/`replaceState`, and removes those
   listeners and restores the patched methods on unmount.
+- `mountAgentAnnotations` accepts `builtins?: false | AgentAnnotationsBuiltinsConfig`
+  (per-action booleans plus `shortcuts` overrides, all JSON-safe validated) and
+  `initialState?: { collapsed?, markersVisible? }` (default collapsed, markers
+  visible). With `builtins: false` only third-party extensions mount; disabled
+  builtins contribute no toolbar entry, panel, or shortcut, and shortcut
+  overrides still pass the registry's conflict validation.
 - `StudioPublicApi` exposes snapshots, subscriptions, and commands only. It does
   not expose React setters, reducers, live DOM, or inspection internals.
   `commands.annotations.captureEvidence(annotationId)` captures best-effort

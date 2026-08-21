@@ -41,6 +41,37 @@ The package root exports the host-neutral `agent-annotations.task.v1` core and
 from `@gchust/agent-annotations/types`; `MemoryTaskTransport` is available only
 from `@gchust/agent-annotations/testing` for tests and playgrounds.
 
+The toolbar starts collapsed by default; a capture shortcut (Pick/Multi/Area)
+expands the dock and starts the capture instead of failing silently. The
+initial UI and the built-in actions are configurable on the Vite plugin and on
+`mountAgentAnnotations()`:
+
+```ts
+// Minimal builtins: keep only Pick and Copy, move Pick to Ctrl+Alt+X.
+agentAnnotations({
+  builtins: {
+    multi: false,
+    area: false,
+    markers: false,
+    help: false,
+    list: false,
+    collapse: false,
+    shortcuts: { pick: { key: "X", code: "KeyX", primary: true, alt: true, shift: false } },
+  },
+});
+
+// No builtins at all: only third-party extensions are mounted.
+agentAnnotations({ builtins: false });
+
+// Explicit initial UI state (default: { collapsed: true, markersVisible: true }).
+agentAnnotations({ initialState: { collapsed: false } });
+```
+
+Unconfigured builtins stay enabled; disabling one removes its toolbar entry,
+panel, and shortcut together, and shortcut overrides still run through the
+extension registry's conflict validation. UI preferences are never written to
+the task file.
+
 ## Minimal client extension
 
 Create `src/annotation-extension.ts` using only the public extension entry:

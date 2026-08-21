@@ -24,7 +24,7 @@ test("route-aware markers, region targets, history navigation, and cross-route f
   await expect(page.locator("#region-fixture")).toBeVisible();
 
   // 1. Element annotation on /route-a with a selector that also exists on /route-b.
-  await shadow(page, '[aria-label^="Pick"]').click();
+  await page.keyboard.press("Control+Alt+P");
   await page.locator("#shared-target").click();
   await shadow(page, '[aria-label="Annotation comment"]').fill("Route A shared target");
   await shadow(page, 'button[aria-label="Save annotation"]').click();
@@ -35,7 +35,7 @@ test("route-aware markers, region targets, history navigation, and cross-route f
   await fixture.scrollIntoViewIfNeeded();
   const box = await fixture.boundingBox();
   expect(box).not.toBeNull();
-  await shadow(page, '[aria-label^="Area"]').click();
+  await page.keyboard.press("Control+Alt+A");
   await page.mouse.move(box!.x - 2, box!.y - 2);
   await page.mouse.down();
   await page.mouse.move(box!.x + box!.width + 2, box!.y + box!.height + 2);

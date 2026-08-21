@@ -4,7 +4,7 @@ const artifactDir = process.env.AGENT_ANNOTATIONS_ARTIFACT_DIR ?? "/tmp/agent-an
 const shadow = (page: Page, selector: string) => page.locator(`#agent-annotations-root >> ${selector}`);
 
 const capturePick = async (page: Page, target: string, comment: string) => {
-  await shadow(page, 'button[aria-label^="Pick"]').click();
+  await page.keyboard.press("Control+Alt+P");
   await page.locator(target).click({ position: { x: 12, y: 12 } });
   await expect(shadow(page, '[aria-label="Annotation composer"]')).toBeVisible();
   await shadow(page, '[aria-label="Annotation comment"]').fill(comment);
@@ -19,12 +19,18 @@ test("complete generic Pick/Multi/Area annotation closed loop", async ({ page, c
     buttons.every((button) => !!button.querySelector("svg") && !button.textContent?.trim())
   )).toBe(true);
 
+  // The dock starts collapsed by default: expand and collapse through the
+  // Ctrl+Alt+K hotkey (the visible Collapse button only exists when expanded).
+  await page.keyboard.press("Control+Alt+K");
+  await expect(shadow(page, ".aa-dock")).toHaveAttribute("data-collapsed", "false");
   await page.screenshot({ path: `${artifactDir}/toolbar-expanded.png` });
-  await shadow(page, 'button[aria-label^="Collapse toolbar"]').click();
+  await page.keyboard.press("Control+Alt+K");
+  await expect(shadow(page, ".aa-dock")).toHaveAttribute("data-collapsed", "true");
   await page.screenshot({ path: `${artifactDir}/toolbar-collapsed.png` });
-  await shadow(page, 'button[aria-label^="Collapse toolbar"]').click();
+  await page.keyboard.press("Control+Alt+K");
+  await expect(shadow(page, ".aa-dock")).toHaveAttribute("data-collapsed", "false");
 
-  await shadow(page, 'button[aria-label^="Pick"]').click();
+  await page.keyboard.press("Control+Alt+P");
   await page.locator("#plain-button").click({ position: { x: 12, y: 12 } });
   await expect(shadow(page, '[aria-label="Annotation composer"]')).toBeVisible();
   const [targetBox, composerBox] = await Promise.all([
@@ -57,7 +63,7 @@ test("complete generic Pick/Multi/Area annotation closed loop", async ({ page, c
   await expect.poll(() => page.evaluate(() => window.__agentAnnotations?.api.getSnapshot().task.annotations[1]?.targets?.length)).toBe(2);
   await page.screenshot({ path: `${artifactDir}/multi-annotation.png` });
 
-  await shadow(page, 'button[aria-label^="Area"]').click();
+  await page.keyboard.press("Control+Alt+A");
   const grid = await page.locator("#fixture-grid").boundingBox();
   expect(grid).not.toBeNull();
   const start = {
@@ -176,7 +182,7 @@ test("captures SVG, map, memo, forwardRef, Portal, and Shadow Root targets", asy
   for (const [selector, label] of targets) {
     await capturePick(page, selector, `Capture ${label}`);
   }
-  await shadow(page, 'button[aria-label^="Pick"]').click();
+  await page.keyboard.press("Control+Alt+P");
   await page.locator("#shadow-fixture").locator("#shadow-button").click();
   await shadow(page, '[aria-label="Annotation comment"]').fill("Capture Shadow Root");
   await shadow(page, 'button[aria-label="Save annotation"]').click();

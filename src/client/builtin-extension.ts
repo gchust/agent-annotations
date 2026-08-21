@@ -1,7 +1,13 @@
 import { createElement, useState } from "react";
 
 import { defineClientExtension } from "../extension/index.js";
-import type { PanelContribution, StudioPublicApi, ToolbarContribution } from "../types/index.js";
+import type {
+  AgentAnnotationsBuiltinActionId,
+  AgentAnnotationsToolbarShortcut,
+  PanelContribution,
+  StudioPublicApi,
+  ToolbarContribution,
+} from "../types/index.js";
 import {
   AnnotationsIcon,
   AreaIcon,
@@ -13,6 +19,13 @@ import {
   MultiIcon,
   PickIcon,
 } from "./icons.js";
+
+export type AgentAnnotationsBuiltinExtensionOptions = {
+  actions?: Partial<Record<AgentAnnotationsBuiltinActionId, boolean>>;
+  shortcuts?: Partial<
+    Record<AgentAnnotationsBuiltinActionId, AgentAnnotationsToolbarShortcut | false>
+  >;
+};
 
 const shortcut = (
   key: string,
@@ -151,23 +164,58 @@ const AnnotationList: PanelContribution["render"] = ({ studio, close }) => {
   );
 };
 
-const toolbar: ToolbarContribution[] = [
-  { id: "pick", group: "capture", order: 10, label: "Pick", icon: PickIcon, kind: "toggle", shortcut: shortcut("P", "KeyP"), isPressed: ({ captureMode }) => captureMode === "pick", execute: ({ studio }) => studio.commands.capture.startPick() },
-  { id: "multi", group: "capture", order: 20, label: "Multi", icon: MultiIcon, kind: "toggle", shortcut: shortcut("M", "KeyM"), isPressed: ({ captureMode }) => captureMode === "multi", execute: ({ studio }) => studio.commands.capture.startMulti() },
-  { id: "area", group: "capture", order: 30, label: "Area", icon: AreaIcon, kind: "toggle", shortcut: shortcut("A", "KeyA"), isPressed: ({ captureMode }) => captureMode === "area", execute: ({ studio }) => studio.commands.capture.startArea() },
-  { id: "copy", group: "handoff", order: 10, label: "Copy", icon: CopyIcon, kind: "action", shortcut: shortcut("C", "KeyC"), execute: ({ studio }) => studio.commands.annotations.copyOpen() },
-  { id: "visibility", group: "view", order: 10, label: "Markers", icon: MarkersIcon, kind: "toggle", shortcut: shortcut("V", "KeyV"), isPressed: ({ markersVisible }) => markersVisible, execute: ({ studio }) => studio.getSnapshot().markersVisible ? studio.commands.markers.hide() : studio.commands.markers.show() },
-  { id: "help", group: "view", order: 20, label: "Shortcut help", icon: HelpIcon, kind: "panel", shortcut: shortcut("/", "Slash", false, false, true), panelId: "help", isPressed: ({ openPanel }) => openPanel === "agent-annotations.builtin:help" },
-  { id: "list", group: "view", order: 30, label: "Annotations", icon: AnnotationsIcon, kind: "panel", shortcut: shortcut("L", "KeyL"), panelId: "list", isPressed: ({ openPanel }) => openPanel === "agent-annotations.builtin:list" },
-  { id: "toggle", group: "view", order: 40, label: "Collapse toolbar", icon: CollapseIcon, kind: "toggle", shortcut: shortcut("K", "KeyK"), isVisible: showCollapse, isPressed: toggleCollapsed, execute: ({ studio }) => studio.commands.toolbar.toggleCollapsed() },
-];
+const baseToolbar: Record<
+  AgentAnnotationsBuiltinActionId,
+  ToolbarContribution
+> = {
+  pick: { id: "pick", group: "capture", order: 10, label: "Pick", icon: PickIcon, kind: "toggle", shortcut: shortcut("P", "KeyP"), isPressed: ({ captureMode }) => captureMode === "pick", execute: ({ studio }) => studio.commands.capture.startPick() },
+  multi: { id: "multi", group: "capture", order: 20, label: "Multi", icon: MultiIcon, kind: "toggle", shortcut: shortcut("M", "KeyM"), isPressed: ({ captureMode }) => captureMode === "multi", execute: ({ studio }) => studio.commands.capture.startMulti() },
+  area: { id: "area", group: "capture", order: 30, label: "Area", icon: AreaIcon, kind: "toggle", shortcut: shortcut("A", "KeyA"), isPressed: ({ captureMode }) => captureMode === "area", execute: ({ studio }) => studio.commands.capture.startArea() },
+  copy: { id: "copy", group: "handoff", order: 10, label: "Copy", icon: CopyIcon, kind: "action", shortcut: shortcut("C", "KeyC"), execute: ({ studio }) => studio.commands.annotations.copyOpen() },
+  markers: { id: "visibility", group: "view", order: 10, label: "Markers", icon: MarkersIcon, kind: "toggle", shortcut: shortcut("V", "KeyV"), isPressed: ({ markersVisible }) => markersVisible, execute: ({ studio }) => studio.getSnapshot().markersVisible ? studio.commands.markers.hide() : studio.commands.markers.show() },
+  help: { id: "help", group: "view", order: 20, label: "Shortcut help", icon: HelpIcon, kind: "panel", shortcut: shortcut("/", "Slash", false, false, true), panelId: "help", isPressed: ({ openPanel }) => openPanel === "agent-annotations.builtin:help" },
+  list: { id: "list", group: "view", order: 30, label: "Annotations", icon: AnnotationsIcon, kind: "panel", shortcut: shortcut("L", "KeyL"), panelId: "list", isPressed: ({ openPanel }) => openPanel === "agent-annotations.builtin:list" },
+  collapse: { id: "toggle", group: "view", order: 40, label: "Collapse toolbar", icon: CollapseIcon, kind: "toggle", shortcut: shortcut("K", "KeyK"), isVisible: showCollapse, isPressed: toggleCollapsed, execute: ({ studio }) => studio.commands.toolbar.toggleCollapsed() },
+};
 
-export const builtinClientExtension = defineClientExtension({
-  id: "agent-annotations.builtin",
-  apiVersion: 1,
-  toolbar,
-  panels: [
-    { id: "list", title: "Annotation list", render: AnnotationList },
-    { id: "help", title: "Shortcut help", render: HelpPanel },
-  ],
-});
+// Configurable builtin extension factory: unconfigured actions stay enabled,
+// a disabled action contributes neither toolbar entry nor shortcut, and
+// shortcut overrides (or `false` to remove a shortcut) still go through the
+// registry's conflict validation. `builtins: false` at mount simply skips
+// this extension entirely.
+export const createBuiltinClientExtension = (
+  options: AgentAnnotationsBuiltinExtensionOptions = {}
+): ReturnType<typeof defineClientExtension> => {
+  const enabled = (id: AgentAnnotationsBuiltinActionId): boolean =>
+    options.actions?.[id] !== false;
+  const shortcutFor = (
+    id: AgentAnnotationsBuiltinActionId,
+    fallback: AgentAnnotationsToolbarShortcut | undefined
+  ): AgentAnnotationsToolbarShortcut | undefined => {
+    const override = options.shortcuts?.[id];
+    if (override === false) return undefined;
+    return override ?? fallback;
+  };
+  const toolbar: ToolbarContribution[] = [];
+  const panels: PanelContribution[] = [];
+  for (const id of [
+    "pick", "multi", "area", "copy", "markers", "help", "list", "collapse",
+  ] as const) {
+    if (!enabled(id)) continue;
+    const base = baseToolbar[id];
+    const shortcut = shortcutFor(id, base.shortcut);
+    toolbar.push({ ...base, shortcut });
+  }
+  if (enabled("list")) {
+    panels.push({ id: "list", title: "Annotation list", render: AnnotationList });
+  }
+  if (enabled("help")) {
+    panels.push({ id: "help", title: "Shortcut help", render: HelpPanel });
+  }
+  return defineClientExtension({
+    id: "agent-annotations.builtin",
+    apiVersion: 1,
+    toolbar,
+    panels,
+  });
+};

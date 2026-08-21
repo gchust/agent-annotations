@@ -18,7 +18,7 @@ const extension = path.resolve("src/demo-extension.ts");
 test("browser status health and HMR-applied source revision ordering", async ({ page }) => {
   await page.goto("/");
   // Capture an annotation whose source is a component file that hot-updates.
-  await shadow(page, 'button[aria-label^="Pick"]').click();
+  await page.keyboard.press("Control+Alt+P");
   await page.locator("#duplicate-a").click();
   await shadow(page, '[aria-label="Annotation comment"]').fill("Status fixture");
   await shadow(page, 'button[aria-label="Save annotation"]').click();

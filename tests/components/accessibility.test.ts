@@ -15,7 +15,10 @@ afterEach(() => document.getElementById("agent-annotations-root")?.remove());
 describe("toolbar accessibility", () => {
   it("shares shortcut labels with buttons and Help and collapses accessibly", async () => {
     vi.useFakeTimers();
-    const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport() });
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(),
+      initialState: { collapsed: false },
+    });
     const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
     const pick = shadow.querySelector<HTMLButtonElement>('[aria-label^="Pick"]')!;
     expect(pick.getAttribute("aria-label")).toContain("Ctrl+Alt+P");

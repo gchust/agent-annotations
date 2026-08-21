@@ -49,7 +49,11 @@ import {
   targetFromEvent,
   targetAtPoint,
 } from "./inspection-engine.js";
-import { builtinClientExtension } from "./builtin-extension.js";
+import { createBuiltinClientExtension } from "./builtin-extension.js";
+import {
+  validateAgentAnnotationsBuiltinsConfig,
+  validateAgentAnnotationsInitialState,
+} from "../core/configuration.js";
 import {
   AnnotationsIcon,
   CaptureIcon,
@@ -240,9 +244,17 @@ export async function mountAgentAnnotations(
   if (document.getElementById(HOST_ID)) throw new Error("Agent Annotations is already mounted");
 
   const registry = new ClientExtensionRegistry();
+  const builtinsConfig = validateAgentAnnotationsBuiltinsConfig(options.builtins === false ? undefined : options.builtins);
+  const initialState = validateAgentAnnotationsInitialState(options.initialState);
   const registrations: Array<() => void> = [];
   try {
-    for (const extension of [builtinClientExtension, ...(options.extensions ?? [])]) {
+    const builtin = options.builtins === false
+      ? undefined
+      : createBuiltinClientExtension({
+          actions: builtinsConfig,
+          shortcuts: builtinsConfig.shortcuts,
+        });
+    for (const extension of [...(builtin ? [builtin] : []), ...(options.extensions ?? [])]) {
       registrations.push(registry.register(extension));
     }
   } catch (error) {
@@ -273,8 +285,8 @@ export async function mountAgentAnnotations(
     throw error;
   }
   let captureMode: AgentAnnotationsCaptureMode = "idle";
-  let collapsed = false;
-  let markersVisible = true;
+  let collapsed = initialState.collapsed ?? true;
+  let markersVisible = initialState.markersVisible ?? true;
   let openPanel: StudioPublicSnapshot["openPanel"] = null;
   let selected: Element[] = [];
   let hover: Element | null = null;
@@ -1504,21 +1516,36 @@ export async function mountAgentAnnotations(
     const listOpen = current.openPanel === "agent-annotations.builtin:list";
     const listPanel = registry.getPanels().find((panel) => panel.id === "agent-annotations.builtin:list");
     const listContribution = toolbar.find((entry) => entry.id === "agent-annotations.builtin:list");
+    const collapseContributionId = toolbar.find((entry) => entry.id === "agent-annotations.builtin:toggle")?.id;
     const listShortcut = shortcuts.find((entry) => entry.id === "agent-annotations.builtin:list");
     const listLabel = listPanel ? localized(listPanel.title) : "Annotation list";
     const zeroLabel = listShortcut ? `${listLabel} (${listShortcut.formatted})` : listLabel;
+    const hasList = listContribution !== undefined;
+    const countLabel = openCount === 0 ? zeroLabel : `${openCount} open annotations`;
+    const expandLabel = localized({ "en-US": "Expand toolbar", "zh-CN": "展开工具栏" });
     return createElement("button", {
       ref,
       type: "button",
       className: "aa-collapsed-count",
-      "aria-label": openCount === 0 ? zeroLabel : `${openCount} open annotations`,
-      "aria-expanded": String(listOpen),
-      "data-action-id": listContribution?.id ?? "agent-annotations.builtin:list",
+      "aria-label": hasList
+        ? countLabel
+        : `${expandLabel}${openCount > 0 ? ` (${openCount} open annotations)` : ""}`,
+      "aria-expanded": String(hasList ? listOpen : false),
+      // The expand id is a runtime chrome id, never a disabled builtin's id:
+      // when both the list and the collapse builtins are absent, this control
+      // still expands the dock with an accurate action identity.
+      "data-action-id": listContribution?.id ?? collapseContributionId ?? "agent-annotations.builtin:expand",
       onClick: () => {
-        // Route through the registered contribution so closing the panel returns
-        // focus to this visible control (same data-action-id as the toolbar list).
-        if (listContribution) executeContribution(listContribution);
-        else api.commands.panels.open("agent-annotations.builtin:list");
+        if (listContribution) {
+          // Route through the registered contribution so closing the panel
+          // returns focus to this visible control (same data-action-id as
+          // the toolbar list).
+          executeContribution(listContribution);
+        } else {
+          // No list panel registered (list disabled or builtins:false): the
+          // visible collapsed control expands the toolbar instead.
+          setCollapsed(false);
+        }
       },
     }, openCount === 0
       ? createElement(AnnotationsIcon, { className: "aa-icon" })
@@ -1892,8 +1919,9 @@ export async function mountAgentAnnotations(
     event.preventDefault();
     const contribution = toolbar.find(({ id }) => id === shortcut.id);
     if (contribution) {
-      // Collapsed chrome must never start an invisible capture session.
-      if (collapsed && contribution.group === "capture") return;
+      // A capture shortcut in a collapsed dock expands the toolbar first and
+      // then starts the capture mode; it is never a silent no-op.
+      if (collapsed && contribution.group === "capture") setCollapsed(false);
       executeContribution(contribution);
     }
   };

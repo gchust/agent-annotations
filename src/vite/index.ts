@@ -6,7 +6,11 @@ import { pathToFileURL } from "node:url";
 
 import MagicString from "magic-string";
 import type { Plugin } from "vite";
-import type { AgentAnnotationsHandoffConfig } from "../types/index.js";
+import type {
+  AgentAnnotationsBuiltinsConfig,
+  AgentAnnotationsHandoffConfig,
+  AgentAnnotationsInitialState,
+} from "../types/index.js";
 
 import { FileTaskStore } from "../server/store.js";
 import {
@@ -18,6 +22,10 @@ import {
 import { appendDiagnostics } from "../server/diagnostics.js";
 import { createSourcePathService } from "../server/source-path.js";
 import { validateAgentAnnotationsHandoffConfig } from "../core/handoff.js";
+import {
+  validateAgentAnnotationsBuiltinsConfig,
+  validateAgentAnnotationsInitialState,
+} from "../core/configuration.js";
 import { PACKAGE_NAME } from "../metadata.js";
 
 const VIRTUAL_ID = "virtual:agent-annotations/client";
@@ -45,6 +53,8 @@ export type AgentAnnotationsPluginOptions = {
   clientExtensions?: string[];
   screenshotEvidence?: "auto" | "manual" | "off";
   handoff?: AgentAnnotationsHandoffConfig;
+  builtins?: false | AgentAnnotationsBuiltinsConfig;
+  initialState?: AgentAnnotationsInitialState;
 };
 
 export const agentAnnotationsViteEntry = true;
@@ -132,6 +142,12 @@ export default function agentAnnotations(
   }
   // Strict handoff config boundary at the plugin level: only shapes Copy text.
   const handoff = validateAgentAnnotationsHandoffConfig(options.handoff);
+  // JSON-safe builtins/initialState config: only booleans and plain objects
+  // reach the virtual client.
+  const builtins = options.builtins === false
+    ? false
+    : validateAgentAnnotationsBuiltinsConfig(options.builtins);
+  const initialState = validateAgentAnnotationsInitialState(options.initialState);
   let root = path.resolve(options.root ?? process.cwd());
   let realRoot = existsSync(root) ? realpathSync(root) : root;
   let runtimeRoot = path.resolve(root, options.dir ?? ".agent-annotations");
@@ -201,12 +217,12 @@ export default function agentAnnotations(
         `import { mountAgentAnnotations } from ${JSON.stringify(PACKAGE_NAME)};`,
         `import { HttpTaskTransport } from ${JSON.stringify(`${PACKAGE_NAME}/vite/client`)};`,
         imports,
-        `const config = ${JSON.stringify({ endpoint: resolvedEndpoint, token, screenshotEvidence, handoff })};`,
+        `const config = ${JSON.stringify({ endpoint: resolvedEndpoint, token, screenshotEvidence, handoff, builtins, initialState })};`,
         `const extensions = [${values}];`,
         "const key = Symbol.for('agent-annotations.mount');",
         "window[key]?.();",
         "const transport = new HttpTaskTransport(config);",
-        `const mounted = await mountAgentAnnotations({ transport, extensions, screenshotEvidence: config.screenshotEvidence, browserStatus: { endpoint: config.endpoint, token: config.token }, handoff: config.handoff });`,
+        `const mounted = await mountAgentAnnotations({ transport, extensions, screenshotEvidence: config.screenshotEvidence, browserStatus: { endpoint: config.endpoint, token: config.token }, handoff: config.handoff, builtins: config.builtins, initialState: config.initialState });`,
         "window[key] = () => { mounted.unmount(); delete window[key]; };",
         "mounted.refreshAppliedSourceRevision();",
         "if (import.meta.hot) {",
