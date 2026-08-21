@@ -982,6 +982,198 @@ describe("client runtime", () => {
     pageTarget.remove();
   });
 
+  it("hides the capture entry and no-ops when the transport cannot write evidence", async () => {
+    history.pushState({}, "", "/settings");
+    const memory = new MemoryTaskTransport(taskFixture());
+    const transport: TaskTransport = {
+      read: () => memory.read(),
+      mutate: (request) => memory.mutate(request),
+    };
+    const mounted = await mountAgentAnnotations({ transport });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    mounted.api.commands.markers.focus("ann-1");
+    const editor = shadow.querySelector<HTMLElement>(".aa-editor")!;
+    expect([...editor.querySelectorAll("button")].some(
+      (button) => button.getAttribute("aria-label") === "Capture screenshot"
+    )).toBe(false);
+    await mounted.api.commands.annotations.captureEvidence("ann-1");
+    expect(screenshot.captureViewportPng).not.toHaveBeenCalled();
+    mounted.unmount();
+  });
+
+  it("adopts the latest task on a second evidence conflict and records a diagnostic", async () => {
+    const pageTarget = document.createElement("button");
+    document.body.append(pageTarget);
+    primitives.getElementAtPoint.mockReturnValue(pageTarget);
+    screenshot.captureViewportPng.mockResolvedValue({ png: "fake-png", width: 100, height: 100, durationMs: 1, bestEffort: true });
+    const memory = new MemoryTaskTransport();
+    const diagnostics: string[] = [];
+    const appendDiagnostics = vi.fn(async (entries: AgentAnnotationsDiagnosticsEntry[]) => {
+      diagnostics.push(entries[0]!.message);
+    });
+    let attempts = 0;
+    const transport: TaskTransport = {
+      read: () => memory.read(),
+      mutate: (request) => memory.mutate(request),
+      writeEvidence: async (input) => {
+        attempts += 1;
+        const latest = await memory.read();
+        const advanced = taskFixture({ ...latest, taskRevision: latest.taskRevision + attempts });
+        throw new RevisionConflictError(advanced, input.expectedRevision, advanced.taskRevision);
+      },
+      appendDiagnostics,
+    };
+    const mounted = await mountAgentAnnotations({ transport });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    mounted.api.commands.capture.startPick();
+    document.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 10 }));
+    const composer = shadow.querySelector<HTMLElement>(".aa-composer")!;
+    const textarea = composer.querySelector<HTMLTextAreaElement>("textarea")!;
+    textarea.value = "Second conflict";
+    composer.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(appendDiagnostics).toHaveBeenCalled());
+    // Exactly one retry; the second conflict's latest task is adopted.
+    expect(attempts).toBe(2);
+    expect(mounted.api.getSnapshot().task.taskRevision).toBe(3);
+    expect(diagnostics[0]).toContain("screenshot evidence failed");
+    mounted.unmount();
+    pageTarget.remove();
+  });
+
+  it("does not retry evidence when a replacement task reuses the annotation id", async () => {
+    const pageTarget = document.createElement("button");
+    document.body.append(pageTarget);
+    primitives.getElementAtPoint.mockReturnValue(pageTarget);
+    screenshot.captureViewportPng.mockResolvedValue({ png: "fake-png", width: 100, height: 100, durationMs: 1, bestEffort: true });
+    const memory = new MemoryTaskTransport();
+    const writeEvidence = vi.spyOn(memory, "writeEvidence").mockImplementation(async (input) => {
+      const latest = await memory.read();
+      // A replacement task reuses the annotation id but is a different task.
+      const replacement = taskFixture({
+        ...latest,
+        taskId: "task-replacement",
+        taskRevision: latest.taskRevision + 1,
+      });
+      throw new RevisionConflictError(replacement, input.expectedRevision, replacement.taskRevision);
+    });
+    const mounted = await mountAgentAnnotations({ transport: memory });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    mounted.api.commands.capture.startPick();
+    document.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 10 }));
+    const composer = shadow.querySelector<HTMLElement>(".aa-composer")!;
+    const textarea = composer.querySelector<HTMLTextAreaElement>("textarea")!;
+    textarea.value = "Replacement task";
+    composer.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(writeEvidence).toHaveBeenCalledOnce());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // The annotation exists in the replacement task, but the task identity
+    // differs: the old-page screenshot must never be written.
+    expect(writeEvidence).toHaveBeenCalledTimes(1);
+    expect(mounted.api.getSnapshot().task.taskId).toBe("task-replacement");
+    mounted.unmount();
+    pageTarget.remove();
+  });
+
+  it("abandons a manual capture when the task is replaced while the capture is pending", async () => {
+    history.pushState({}, "", "/settings");
+    const initial = taskFixture();
+    let publish!: (task: AgentAnnotationsTask) => void;
+    let resolveCapture!: (value: unknown) => void;
+    screenshot.captureViewportPng.mockReturnValue(new Promise((resolve) => { resolveCapture = resolve; }));
+    const writeEvidence = vi.fn(async (input: { taskId: string }) => {
+      expect(input.taskId).toBe(initial.taskId);
+      return initial;
+    });
+    const transport: TaskTransport = {
+      read: async () => initial,
+      mutate: async () => initial,
+      writeEvidence,
+      subscribe(listener) {
+        publish = listener;
+        return () => undefined;
+      },
+    };
+    const mounted = await mountAgentAnnotations({ transport, screenshotEvidence: "manual" });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    mounted.api.commands.markers.focus("ann-1");
+    const editor = shadow.querySelector<HTMLElement>(".aa-editor")!;
+    const captureButton = [...editor.querySelectorAll("button")]
+      .find((button) => button.getAttribute("aria-label") === "Capture screenshot")!;
+    captureButton.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screenshot.captureViewportPng).toHaveBeenCalledOnce();
+    // The task identity is replaced while the capture is pending.
+    publish({ ...initial, taskId: "task-replacement", taskRevision: 0 });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    resolveCapture({ png: "fake-png", width: 100, height: 100, durationMs: 1, bestEffort: true });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(writeEvidence).not.toHaveBeenCalled();
+    mounted.unmount();
+  });
+
+  it("does not update the manual capture status after a route change", async () => {
+    history.pushState({}, "", "/settings");
+    const initial = taskFixture();
+    let resolveWrite!: (value: AgentAnnotationsTask) => void;
+    const transport: TaskTransport = {
+      read: async () => initial,
+      mutate: async () => initial,
+      writeEvidence: () => new Promise((resolve) => { resolveWrite = resolve; }),
+    };
+    screenshot.captureViewportPng.mockResolvedValue({ png: "fake-png", width: 100, height: 100, durationMs: 1, bestEffort: true });
+    const mounted = await mountAgentAnnotations({ transport, screenshotEvidence: "manual" });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    mounted.api.commands.markers.focus("ann-1");
+    const editor = shadow.querySelector<HTMLElement>(".aa-editor")!;
+    const captureButton = [...editor.querySelectorAll("button")]
+      .find((button) => button.getAttribute("aria-label") === "Capture screenshot")!;
+    captureButton.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // The route changes while the evidence write is in flight.
+    history.pushState({}, "", "/route-b");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    resolveWrite(initial);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(shadow.querySelector('[role="status"]')?.textContent ?? "").not.toContain("Screenshot");
+    mounted.unmount();
+  });
+
+  it("defers the background capture through the tracked timer so unmount cancels it", async () => {
+    vi.useFakeTimers();
+    const pageTarget = document.createElement("button");
+    document.body.append(pageTarget);
+    primitives.getElementAtPoint.mockReturnValue(pageTarget);
+    screenshot.captureViewportPng.mockResolvedValue({ png: "fake-png", width: 100, height: 100, durationMs: 1, bestEffort: true });
+    const transport = new MemoryTaskTransport();
+    const writeEvidence = vi.spyOn(transport, "writeEvidence");
+    const mounted = await mountAgentAnnotations({ transport });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    const submitSave = async (comment: string) => {
+      mounted.api.commands.capture.startPick();
+      document.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 10 }));
+      const composer = shadow.querySelector<HTMLElement>(".aa-composer")!;
+      const textarea = composer.querySelector<HTMLTextAreaElement>("textarea")!;
+      textarea.value = comment;
+      composer.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      for (let index = 0; index < 8; index += 1) await Promise.resolve();
+    };
+    // Save 1: the capture is deferred behind the tracked timer.
+    await submitSave("Deferred save");
+    expect(screenshot.captureViewportPng).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(screenshot.captureViewportPng).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(writeEvidence).toHaveBeenCalledTimes(1);
+    // Save 2: unmount cancels the pending deferred capture before the clone.
+    await submitSave("Cancelled capture");
+    expect(screenshot.captureViewportPng).toHaveBeenCalledTimes(1);
+    mounted.unmount();
+    await vi.runOnlyPendingTimersAsync();
+    expect(screenshot.captureViewportPng).toHaveBeenCalledTimes(1);
+    expect(writeEvidence).toHaveBeenCalledTimes(1);
+    pageTarget.remove();
+  });
+
   it("cleans partial setup and leaves no mount when setup fails", async () => {
     const dispose = vi.fn();
     await expect(mountAgentAnnotations({

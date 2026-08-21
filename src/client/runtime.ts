@@ -660,15 +660,22 @@ export async function mountAgentAnnotations(
       }
       adoptTask(error.latestTask);
       const latest = error.latestTask;
-      const stillExists = latest.annotations.some(
-        (annotation) => annotation.annotationId === input.annotationId
-      );
+      // Retry only for the same task identity: a replacement task that
+      // reuses the annotation id must never receive an old-page screenshot.
+      const stillExists =
+        latest.taskId === input.taskId &&
+        latest.annotations.some(
+          (annotation) => annotation.annotationId === input.annotationId
+        );
       if (!stillExists || destroyed || routeKey !== input.routeKey) return false;
       try {
         await attempt(latest.taskRevision);
         return true;
       } catch (retryError) {
         if (destroyed || routeKey !== input.routeKey) return false;
+        // A second conflict still adopts its parsed latest task before
+        // stopping, so the runtime never lags behind the server.
+        if (retryError instanceof RevisionConflictError) adoptTask(retryError.latestTask);
         record("console", `screenshot evidence failed: ${String(retryError)}`);
         return false;
       }
@@ -676,19 +683,23 @@ export async function mountAgentAnnotations(
   };
 
   // Background capture: the save UI never waits for it, failures never roll
-  // back the annotation, and the promise is always explicitly handled.
+  // back the annotation, and the promise is always explicitly handled. The
+  // capture is deferred through the tracked timer so the save UI paints first
+  // and an unmount cancels it before the synchronous DOM clone begins.
   const scheduleScreenshotEvidence = (
     input: ScreenshotEvidenceInput & { overlays: readonly ScreenshotRect[] }
   ): void => {
-    const run = async (): Promise<void> => {
-      if (destroyed || routeKey !== input.routeKey) return;
-      const screenshot = await captureViewportPng(input.overlays);
-      if (!screenshot || destroyed || routeKey !== input.routeKey) return;
-      await writeScreenshotEvidence(input, screenshot);
-    };
-    run().catch(() => {
-      if (!destroyed) record("console", "screenshot evidence failed");
-    });
+    scheduleTimer(() => {
+      const run = async (): Promise<void> => {
+        if (destroyed || routeKey !== input.routeKey) return;
+        const screenshot = await captureViewportPng(input.overlays);
+        if (!screenshot || destroyed || routeKey !== input.routeKey) return;
+        await writeScreenshotEvidence(input, screenshot);
+      };
+      run().catch(() => {
+        if (!destroyed) record("console", "screenshot evidence failed");
+      });
+    }, 0);
   };
 
   // Manual capture for an existing annotation on the current route: region
@@ -696,7 +707,7 @@ export async function mountAgentAnnotations(
   // element/multi annotations use identity-validated live target bounds.
   const captureEvidence = async (annotationId: string): Promise<void> => {
     try {
-      if (destroyed || screenshotMode === "off") return;
+      if (destroyed || screenshotMode === "off" || !transport.writeEvidence) return;
       const annotation = task.annotations.find((entry) => entry.annotationId === annotationId);
       if (!annotation) {
         setStatus("Annotation not found");
@@ -721,15 +732,20 @@ export async function mountAgentAnnotations(
                 : null;
             }) ?? [])
             .filter((rect): rect is AgentAnnotationsRect => rect !== null);
-      const screenshot = await captureViewportPng(overlays);
-      if (!screenshot || destroyed || routeKey !== capturedRouteKey) return;
-      const saved = await writeScreenshotEvidence({
+      // Snapshot the write input before the capture: the task identity must
+      // never be read after screenshot generation.
+      const input: ScreenshotEvidenceInput = {
         annotationId,
         taskId: task.taskId,
         taskRevision: task.taskRevision,
         routeKey: capturedRouteKey,
-      }, screenshot);
-      if (!destroyed) {
+      };
+      const screenshot = await captureViewportPng(overlays);
+      if (!screenshot || destroyed || routeKey !== input.routeKey) return;
+      // The task identity was replaced while the capture was pending: abandon.
+      if (task.taskId !== input.taskId) return;
+      const saved = await writeScreenshotEvidence(input, screenshot);
+      if (!destroyed && routeKey === input.routeKey) {
         setStatus(
           saved
             ? localized({ "en-US": "Screenshot captured", "zh-CN": "截图已保存" })
@@ -1209,7 +1225,7 @@ export async function mountAgentAnnotations(
     const actions = document.createElement("div");
     actions.className = "aa-actions";
     const save = submitButton("Save comment", SaveIcon);
-    if (screenshotMode !== "off") {
+    if (screenshotMode !== "off" && transport.writeEvidence) {
       const capture = iconButton(
         localized({ "en-US": "Capture screenshot", "zh-CN": "截图" }),
         CaptureIcon,
