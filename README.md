@@ -120,11 +120,28 @@ Authorization headers, request bodies, or response bodies.
 
 Generic redaction is the final persistence boundary: every mutation path
 (browser, CLI, Vite API, and direct store calls) passes through
-`redactAgentAnnotationsTask()` before atomic write, so update comments,
-`setExtension` data, completion summaries, and evidence metadata cannot persist
-secrets. Extension redactors run on the client and are composed deterministically
-in stable `(extensionId, redactorId)` order; generic redaction always runs again
-after them and again before persistence. Extension setup receives `{ studio }`
+`prepareAgentAnnotationsTaskForPersistence()` (Parse → Generic Redaction →
+Parse) before atomic write, so update comments, `setExtension` data,
+completion summaries, and evidence metadata cannot persist secrets.
+
+Before that final boundary, the built-in runtime also redacts every delegated
+mutation: `redactAgentAnnotationsMutationRequest()` validates the current task
+and the request, redacts every data-carrying operation, and re-validates the
+redacted payload before any custom `TaskTransport` sees it. Extension
+redactors run on the client and are composed deterministically in stable
+`(extensionId, redactorId)` order; generic redaction runs before and after
+them, and a faulty redactor fails closed for its own namespace. Screenshot PNG
+bytes are never string-redacted; the capture sanitizer and the server-side PNG
+boundary handle screenshot privacy.
+
+Custom persistent transports must call `prepareAgentAnnotationsTaskForPersistence()`
+(or an exactly equivalent boundary) before writing to a database, object
+store, or file. The library redacts everything it delegates and everything it
+persists itself, but it cannot control what a transport does internally:
+redaction guarantees apply to Runtime-originated requests and to data written
+through the official helper, not to arbitrary third-party writes.
+
+Extension setup receives `{ studio }`
 only — raw `TaskTransport` is never exposed to extensions. The CLI is scoped to
 the resolved runtime data directory and does not execute shell commands or
 expose arbitrary file reads.

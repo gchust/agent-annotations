@@ -3,6 +3,7 @@ export * from "./format.js";
 export * from "./hotkeys.js";
 export * from "./ids.js";
 export * from "./mutation.js";
+export * from "./redact-mutation.js";
 export * from "./placement.js";
 export * from "./redaction.js";
 export * from "./schema.js";

@@ -1,3 +1,4 @@
+import { AGENT_ANNOTATIONS_ID_PATTERN } from "../core/index.js";
 import {
   parseValidatedTask,
   validateConflictTask,
@@ -21,6 +22,7 @@ export const createValidatedTaskTransport = (transport: TaskTransport): TaskTran
     },
     writeEvidence: transport.writeEvidence
       ? async (input) => {
+          validateWriteEvidenceMetadata(input);
           try {
             return parseValidatedTask(await transport.writeEvidence!(input), "writeEvidence");
           } catch (error) {
@@ -36,4 +38,38 @@ export const createValidatedTaskTransport = (transport: TaskTransport): TaskTran
       ? (entries) => transport.appendDiagnostics!(entries)
       : undefined,
   };
+};
+
+// PNG bytes are never string-redacted (screenshot privacy is handled by the
+// existing capture sanitizer and the server-side PNG boundary); the metadata
+// around them must be validated before it is delegated to a custom transport.
+const validateWriteEvidenceMetadata = (input: {
+  taskId: string;
+  expectedRevision: number;
+  annotationId: string;
+  png: string;
+  width?: number;
+  height?: number;
+}): void => {
+  if (typeof input.taskId !== "string" || input.taskId.length === 0) {
+    throw new TypeError("writeEvidence taskId must be a non-empty string");
+  }
+  if (!Number.isInteger(input.expectedRevision) || input.expectedRevision < 0) {
+    throw new TypeError("writeEvidence expectedRevision must be a non-negative integer");
+  }
+  if (
+    typeof input.annotationId !== "string" ||
+    !AGENT_ANNOTATIONS_ID_PATTERN.test(input.annotationId)
+  ) {
+    throw new TypeError("writeEvidence annotationId must be a valid annotation id");
+  }
+  if (typeof input.png !== "string") {
+    throw new TypeError("writeEvidence png must be a string");
+  }
+  for (const key of ["width", "height"] as const) {
+    const value = input[key];
+    if (value !== undefined && (!Number.isFinite(value) || value < 0)) {
+      throw new TypeError(`writeEvidence ${key} must be a non-negative finite number`);
+    }
+  }
 };

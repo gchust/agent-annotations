@@ -4,6 +4,7 @@ import {
   formatAgentAnnotationsTask,
   matchesAgentAnnotationsShortcut,
   MAX_TARGETS_PER_ANNOTATION,
+  redactAgentAnnotationsMutationRequest,
   redactAgentAnnotationsTask,
   redactAgentAnnotationsText,
   resolveAgentAnnotationsPlacement,
@@ -558,22 +559,16 @@ export async function mountAgentAnnotations(
         id: redactor.id,
         redact: redactor.redact,
       }));
-      const redactedOperations = operations.map((operation) =>
-        operation.op === "add"
-          ? {
-              ...operation,
-              annotation: redactAgentAnnotationsTask(
-                { ...task, annotations: [operation.annotation] },
-                redactors
-              ).task.annotations[0],
-            }
-          : operation
-      );
-      const next = await transport.mutate({
+      // Every delegated mutation passes the unified boundary first: the
+      // current task and request are validated, every data-carrying operation
+      // is redacted (generic + extension redactors), and the redacted payload
+      // is re-validated before the transport sees it.
+      const redactedRequest = redactAgentAnnotationsMutationRequest(task, {
         taskId: task.taskId,
         expectedRevision,
-        operations: redactedOperations,
-      });
+        operations,
+      }, redactors);
+      const next = await transport.mutate(redactedRequest);
       if (destroyed) return undefined;
       // A successful mutation updates last-seen only when the identity rule
       // accepts it; an older result can never regress the current task.

@@ -696,6 +696,73 @@ describe("client runtime", () => {
     pageTarget.remove();
   });
 
+  it("redacts update comments before a custom transport receives the mutation", async () => {
+    const transport = new MemoryTaskTransport(taskFixture());
+    const mutate = vi.spyOn(transport, "mutate");
+    const mounted = await mountAgentAnnotations({ transport });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    mounted.api.commands.markers.focus("ann-1");
+    const form = shadow.querySelector<HTMLFormElement>(".aa-editor")!;
+    const textarea = form.querySelector<HTMLTextAreaElement>("textarea")!;
+    textarea.value = "Bearer editor-secret";
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(mutate).toHaveBeenCalledOnce());
+    const operation = mutate.mock.calls[0]![0].operations[0] as { op: string; comment: string };
+    expect(operation).toMatchObject({ op: "update", annotationId: "ann-1" });
+    expect(operation.comment).not.toContain("editor-secret");
+    expect(operation.comment).toContain("[REDACTED]");
+    mounted.unmount();
+  });
+
+  it("redacts add annotations before a custom transport receives the mutation", async () => {
+    const pageTarget = document.createElement("button");
+    document.body.append(pageTarget);
+    primitives.getElementAtPoint.mockReturnValue(pageTarget);
+    const transport = new MemoryTaskTransport();
+    const mutate = vi.spyOn(transport, "mutate");
+    const mounted = await mountAgentAnnotations({ transport });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    mounted.api.commands.capture.startPick();
+    document.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 10 }));
+    const composer = shadow.querySelector<HTMLElement>(".aa-composer")!;
+    const textarea = composer.querySelector<HTMLTextAreaElement>("textarea")!;
+    textarea.value = "Bearer composer-secret";
+    composer.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(mutate).toHaveBeenCalledOnce());
+    const operation = mutate.mock.calls[0]![0].operations[0] as { op: string; annotation: { comment: string } };
+    expect(operation.op).toBe("add");
+    expect(operation.annotation.comment).not.toContain("composer-secret");
+    expect(operation.annotation.comment).toContain("[REDACTED]");
+    mounted.unmount();
+    pageTarget.remove();
+  });
+
+  it("passes screenshot png bytes through unredacted with validated metadata", async () => {
+    const pageTarget = document.createElement("button");
+    document.body.append(pageTarget);
+    primitives.getElementAtPoint.mockReturnValue(pageTarget);
+    screenshot.captureViewportPng.mockResolvedValue({ png: "aGVsbG8gc2VjcmV0", width: 1600, height: 900 });
+    const transport = new MemoryTaskTransport();
+    const writeEvidence = vi.spyOn(transport, "writeEvidence");
+    const mounted = await mountAgentAnnotations({ transport });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    mounted.api.commands.capture.startPick();
+    document.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 10 }));
+    const composer = shadow.querySelector<HTMLElement>(".aa-composer")!;
+    const textarea = composer.querySelector<HTMLTextAreaElement>("textarea")!;
+    textarea.value = "Evidence metadata";
+    composer.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(writeEvidence).toHaveBeenCalledOnce());
+    const input = writeEvidence.mock.calls[0]![0];
+    // PNG bytes are never string-redacted; only the metadata is validated.
+    expect(input.png).toBe("aGVsbG8gc2VjcmV0");
+    expect(input.width).toBe(1600);
+    expect(input.height).toBe(900);
+    expect(input.annotationId).toMatch(/^[0-9a-f]{8}-[0-9a-f-]{27}$/);
+    mounted.unmount();
+    pageTarget.remove();
+  });
+
   it("cleans partial setup and leaves no mount when setup fails", async () => {
     const dispose = vi.fn();
     await expect(mountAgentAnnotations({
@@ -1765,7 +1832,7 @@ describe("client runtime", () => {
 
   it("does not retry arbitrary mutation failures", async () => {
     const mutate = vi.fn().mockRejectedValueOnce(new Error("boom"));
-    const memory = new MemoryTaskTransport();
+    const memory = new MemoryTaskTransport(taskFixture());
     const transport: TaskTransport = {
       read: () => memory.read(),
       mutate,

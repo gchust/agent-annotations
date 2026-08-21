@@ -102,4 +102,34 @@ describe("createValidatedTaskTransport", () => {
     await validated.appendDiagnostics?.([{ source: "console", message: "x", timestamp: "2026-08-12T12:00:00.000Z" }]);
     expect(seen).toBe("original-endpoint");
   });
+
+  it("validates writeEvidence metadata before delegating and passes png bytes through", async () => {
+    const seen: Array<Record<string, unknown>> = [];
+    const validated = createValidatedTaskTransport({
+      read: async () => valid,
+      mutate: async () => valid,
+      writeEvidence: async (input) => {
+        seen.push(input as unknown as Record<string, unknown>);
+        return valid;
+      },
+    });
+    await validated.writeEvidence?.({
+      taskId: "task-1",
+      expectedRevision: 0,
+      annotationId: "ann-1",
+      png: "aGVsbG8gc2VjcmV0",
+      width: 10,
+      height: 10,
+    });
+    expect(seen[0]).toMatchObject({ png: "aGVsbG8gc2VjcmV0", width: 10, height: 10 });
+    const rejects = (input: Record<string, unknown>) =>
+      expect(validated.writeEvidence?.(input as never)).rejects.toThrow(TypeError);
+    await rejects({ taskId: "task-1", expectedRevision: 0, annotationId: "bogus id!", png: "x", width: 10, height: 10 });
+    await rejects({ taskId: "task-1", expectedRevision: 0, annotationId: "ann-1", png: 42, width: 10, height: 10 });
+    await rejects({ taskId: "task-1", expectedRevision: 0, annotationId: "ann-1", png: "x", width: -1, height: 10 });
+    await rejects({ taskId: "task-1", expectedRevision: 1.5, annotationId: "ann-1", png: "x", width: 10, height: 10 });
+    await rejects({ taskId: "", expectedRevision: 0, annotationId: "ann-1", png: "x", width: 10, height: 10 });
+    // No metadata was delegated for the rejected inputs.
+    expect(seen).toHaveLength(1);
+  });
 });

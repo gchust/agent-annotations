@@ -404,6 +404,25 @@ describe("file task store", () => {
     expect(JSON.stringify(store.read())).not.toContain("UNIQUE_SECRET_SENTINEL");
   });
 
+  it("keeps the final persistence redaction idempotent across repeated mutations", async () => {
+    const store = new FileTaskStore(root());
+    const task = await store.readOrCreate();
+    await store.mutate({
+      taskId: task.taskId,
+      expectedRevision: 0,
+      operations: [{ op: "add", annotation: annotationFixture({ comment: "Bearer UNIQUE_SECRET_SENTINEL_first" }) }],
+    });
+    expect(readFileSync(store.taskPath, "utf8")).not.toContain("UNIQUE_SECRET_SENTINEL_first");
+    await store.mutate({
+      taskId: task.taskId,
+      expectedRevision: 1,
+      operations: [{ op: "update", annotationId: "ann-1", comment: "Bearer UNIQUE_SECRET_SENTINEL_second" }],
+    });
+    const persisted = readFileSync(store.taskPath, "utf8");
+    expect(persisted).not.toContain("UNIQUE_SECRET_SENTINEL_second");
+    expect(persisted).not.toContain("UNIQUE_SECRET_SENTINEL_first");
+  });
+
   it("persists create through the same redaction boundary and returns the written task", async () => {
     const store = new FileTaskStore(root());
     const created = await store.create();

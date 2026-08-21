@@ -221,3 +221,11 @@ export function redactAgentAnnotationsTask(
   const redactedTask: AgentAnnotationsTask = { ...task, annotations };
   return { task: parseAgentAnnotationsTask(redactedTask), manifest: manifest(recorder) };
 }
+
+// The official final persistence boundary for Node integrations (FileTaskStore
+// and custom persistent transports): Parse → Generic Redaction → Parse.
+// Extension redactors never run here: extensions are browser-only and already
+// ran client-side before the task crossed the transport boundary.
+export function prepareAgentAnnotationsTaskForPersistence(input: unknown): AgentAnnotationsTask {
+  return redactAgentAnnotationsTask(input).task;
+}

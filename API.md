@@ -14,6 +14,21 @@
 - `formatAgentAnnotationsTask` emits Markdown or JSON.
 - `redactAgentAnnotationsTask` and `redactAgentAnnotationsText` remove generic secret
   material before persistence or export.
+- `redactAgentAnnotationsMutationRequest(currentTask, request, redactors?)` is the
+  pre-delegation boundary for mutations: it validates the current task and
+  request, redacts every data-carrying operation (add/update/setExtension/
+  complete/addEvidence) with generic redaction plus extension redactors in
+  stable `(extensionId, redactorId)` order, and re-validates the redacted
+  payload before the transport sees it. Faulty redactors fail closed for their
+  own namespace.
+- `prepareAgentAnnotationsTaskForPersistence(input)` is the official final
+  persistence boundary for Node integrations: Parse → Generic Redaction →
+  Parse. `FileTaskStore` uses it unconditionally; custom persistent transports
+  must call it (or an exactly equivalent boundary) before writing.
+- `createValidatedTaskTransport(transport)` wraps any `TaskTransport` so every
+  task entering the runtime (read/mutate/writeEvidence/subscribe, including
+  conflict payloads) is schema-parsed; writeEvidence metadata is validated
+  while PNG bytes pass through unredacted.
 - `RevisionConflictError` is thrown by stores and transports on stale writes; it
   carries the parsed latest task plus expected/actual revisions and is
   `instanceof`-recognizable in the browser.

@@ -20,7 +20,7 @@ import {
   applyAgentAnnotationsMutation,
   createAgentAnnotationsTask,
   parseAgentAnnotationsTask,
-  redactAgentAnnotationsTask,
+  prepareAgentAnnotationsTaskForPersistence,
   RevisionConflictError,
 } from "../core/index.js";
 import { collectEvidenceRefs, removeEvidenceRefs } from "./evidence.js";
@@ -233,7 +233,9 @@ export class FileTaskStore {
   #writes: Promise<unknown> = Promise.resolve();
 
   #persist(task: AgentAnnotationsTask): AgentAnnotationsTask {
-    const redacted = redactAgentAnnotationsTask(task).task;
+    // Unconditional final defense: Parse → Generic Redaction → Parse. The
+    // client-side pre-delegation redaction never replaces this boundary.
+    const redacted = prepareAgentAnnotationsTaskForPersistence(task);
     atomicWriteJson(this.taskPath, redacted);
     return redacted;
   }
