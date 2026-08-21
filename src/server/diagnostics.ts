@@ -10,13 +10,29 @@ export const MAX_DIAGNOSTICS_ENTRIES = 20;
 export const MAX_DIAGNOSTICS_MESSAGE_LENGTH = 500;
 export const MAX_DIAGNOSTICS_BYTES = 64 * 1024;
 
-const SOURCES = new Set(["console", "window", "promise"]);
+const SOURCES = new Set(["console", "window", "promise", "extension"]);
+const PHASES = new Set([
+  "setup",
+  "visible",
+  "enabled",
+  "pressed",
+  "icon",
+  "panel",
+  "execute",
+  "enrich",
+  "export",
+  "redact",
+  "dispose",
+]);
+const MAX_EXTENSION_ID = 64;
+const MAX_CONTRIBUTION_ID = 256;
 
 const entryIssue = (entry: unknown): string | null => {
   if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
     return "invalid entry";
   }
-  const { source, message, timestamp } = entry as Record<string, unknown>;
+  const { source, message, timestamp, extensionId, contributionId, phase } =
+    entry as Record<string, unknown>;
   if (typeof source !== "string" || !SOURCES.has(source)) return "invalid source";
   if (typeof message !== "string") return "invalid message";
   if (
@@ -25,6 +41,33 @@ const entryIssue = (entry: unknown): string | null => {
     new Date(timestamp).toISOString() !== timestamp
   ) {
     return "invalid timestamp";
+  }
+  if (source === "extension") {
+    // Extension entries must locate the failing extension and phase.
+    if (
+      typeof extensionId !== "string" ||
+      extensionId.length === 0 ||
+      extensionId.length > MAX_EXTENSION_ID
+    ) {
+      return "invalid extensionId";
+    }
+    if (typeof phase !== "string" || !PHASES.has(phase)) {
+      return "invalid phase";
+    }
+    if (
+      contributionId !== undefined &&
+      (typeof contributionId !== "string" ||
+        contributionId.length === 0 ||
+        contributionId.length > MAX_CONTRIBUTION_ID)
+    ) {
+      return "invalid contributionId";
+    }
+  } else if (
+    extensionId !== undefined ||
+    contributionId !== undefined ||
+    phase !== undefined
+  ) {
+    return "invalid extension fields";
   }
   return null;
 };
@@ -37,6 +80,9 @@ const sanitizeEntry = (
     maxLength: MAX_DIAGNOSTICS_MESSAGE_LENGTH,
   }),
   timestamp: entry.timestamp,
+  ...(entry.extensionId !== undefined ? { extensionId: entry.extensionId } : {}),
+  ...(entry.contributionId !== undefined ? { contributionId: entry.contributionId } : {}),
+  ...(entry.phase !== undefined ? { phase: entry.phase } : {}),
 });
 
 export const readDiagnostics = (root: string): AgentAnnotationsDiagnosticsEntry[] => {

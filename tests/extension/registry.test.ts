@@ -36,6 +36,37 @@ const extension = (
 ) => defineClientExtension({ id, apiVersion: 1, ...values });
 
 describe("ClientExtensionRegistry", () => {
+  it("bounds extension and contribution ids to the schema's 64-character limit", () => {
+    const registry = new ClientExtensionRegistry();
+    const id64 = "a".repeat(64);
+    const id65 = "b".repeat(65);
+    const register = (extensionId: string, contributionId: string) =>
+      registry.register(defineClientExtension({
+        id: extensionId,
+        apiVersion: 1,
+        toolbar: [{
+          id: contributionId, group: "view", label: "Boundary", icon: () => null,
+          kind: "action", execute: () => undefined,
+        }],
+      }));
+    expect(register(id64, id64)).toBeTypeOf("function");
+    expect(() => register(id65, id64)).toThrow("Invalid extension ID");
+    expect(() => register(id64, id65)).toThrow("Invalid toolbar contribution ID");
+    // The longest canonical contribution id (64+1+64=129) is emitted by the
+    // registry and stays within the persisted diagnostics contributionId
+    // bound (256).
+    const bounded = new ClientExtensionRegistry();
+    bounded.register(defineClientExtension({
+      id: id64,
+      apiVersion: 1,
+      toolbar: [{
+        id: id64, group: "view", label: "Boundary", icon: () => null,
+        kind: "action", execute: () => undefined,
+      }],
+    }));
+    expect(bounded.getToolbarContributions()[0]!.id.length).toBeLessThanOrEqual(129);
+  });
+
   it("canonicalizes internal ids while preserving local ids in author input", () => {
     const registry = new ClientExtensionRegistry();
     const setup = vi.fn();

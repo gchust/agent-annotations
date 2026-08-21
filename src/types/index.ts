@@ -273,10 +273,26 @@ export interface TaskTransport {
   appendDiagnostics?(entries: AgentAnnotationsDiagnosticsEntry[]): Promise<void>;
 }
 
+export type AgentAnnotationsDiagnosticPhase =
+  | "setup"
+  | "visible"
+  | "enabled"
+  | "pressed"
+  | "icon"
+  | "panel"
+  | "execute"
+  | "enrich"
+  | "export"
+  | "redact"
+  | "dispose";
+
 export type AgentAnnotationsDiagnosticsEntry = {
-  source: "console" | "window" | "promise";
+  source: "console" | "window" | "promise" | "extension";
   message: string;
   timestamp: string;
+  extensionId?: string;
+  contributionId?: string;
+  phase?: AgentAnnotationsDiagnosticPhase;
 };
 
 export type AgentAnnotationsLocaleMessages = Record<string, string>;

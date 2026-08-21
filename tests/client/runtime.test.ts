@@ -186,7 +186,7 @@ describe("client runtime", () => {
     expect(Object.keys(mounted.api)).toEqual(["getSnapshot", "subscribe", "commands"]);
     const publicTask = mounted.api.getSnapshot().task;
     const taskId = publicTask.taskId;
-    publicTask.taskId = "tampered";
+    expect(() => { publicTask.taskId = "tampered"; }).toThrow(TypeError);
     expect(mounted.api.getSnapshot().task.taskId).toBe(taskId);
     unsubscribe();
     mounted.unmount();
@@ -732,6 +732,469 @@ describe("client runtime", () => {
     } finally {
       mounted.unmount();
     }
+  });
+
+  it("isolates failing predicates, icon, and panel per contribution while builtins stay usable", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const action = vi.fn();
+    let iconRenders = 0;
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(),
+      initialState: { collapsed: false },
+      extensions: [defineClientExtension({
+        id: "faulty-contributions",
+        apiVersion: 1,
+        toolbar: [
+          {
+            id: "bad-visible", group: "view", label: "Bad visible",
+            icon: () => null, kind: "action", execute: action,
+            isVisible: () => { throw new Error("visible boom"); },
+          },
+          {
+            id: "bad-enabled", group: "view", label: "Bad enabled",
+            icon: () => null, kind: "action", execute: action,
+            isEnabled: () => { throw new Error("enabled boom"); },
+          },
+          {
+            id: "bad-pressed", group: "view", label: "Bad pressed",
+            icon: () => null, kind: "toggle",
+            isPressed: () => { throw new Error("pressed boom"); },
+            execute: action,
+          },
+          {
+            id: "bad-icon", group: "view", label: "Bad icon",
+            icon: () => { throw new Error("icon boom"); },
+            kind: "action", execute: action,
+          },
+          {
+            id: "counted-icon", group: "view", label: "Counted icon",
+            icon: () => {
+              iconRenders += 1;
+              return null;
+            },
+            kind: "action", execute: action,
+          },
+          {
+            id: "bad-panel", group: "view", label: "Bad panel", kind: "panel", panelId: "bad-panel",
+            icon: () => null, execute: () => undefined,
+          },
+          {
+            id: "bad-execute", group: "view", label: "Bad execute",
+            icon: () => null, kind: "action",
+            execute: () => { throw new Error("execute boom"); },
+          },
+        ],
+        panels: [{
+          id: "bad-panel", title: "Bad panel",
+          render: () => { throw new Error("panel boom"); },
+        }],
+      })],
+    });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      // Contribution guards never synchronously re-enter React: no flushSync
+      // lifecycle warning and the healthy icon renders exactly once.
+      expect(errorSpy.mock.calls.some(([message]) =>
+        String(message).includes("flushSync was called from inside")
+      )).toBe(false);
+      expect(iconRenders).toBeGreaterThan(0);
+      // isVisible failure hides the contribution; isEnabled disables it.
+      expect(shadow.querySelector('[data-action-id="faulty-contributions:bad-visible"]')).toBeNull();
+      const disabled = shadow.querySelector<HTMLButtonElement>('[data-action-id="faulty-contributions:bad-enabled"]')!;
+      expect(disabled.disabled).toBe(true);
+      // isPressed failure: no pressed attribute; icon failure: fallback icon.
+      const pressed = shadow.querySelector<HTMLButtonElement>('[data-action-id="faulty-contributions:bad-pressed"]')!;
+      expect(pressed.hasAttribute("aria-pressed")).toBe(false);
+      const icon = shadow.querySelector<HTMLButtonElement>('[data-action-id="faulty-contributions:bad-icon"]')!;
+      expect(icon.querySelector("svg")).not.toBeNull();
+      // Panel render failure: the safe error panel is shown, builtins still open.
+      mounted.api.commands.panels.open("faulty-contributions:bad-panel");
+      expect(shadow.querySelector(".aa-panel-error")).not.toBeNull();
+      mounted.api.commands.panels.close();
+      // Execute failure: recorded, capture stays usable.
+      shadow.querySelector<HTMLButtonElement>('[data-action-id="faulty-contributions:bad-execute"]')!.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      mounted.api.commands.capture.startPick();
+      expect(mounted.api.getSnapshot().captureMode).toBe("pick");
+      mounted.api.commands.capture.cancel();
+      // Predicate errors are deduplicated per (extension, phase,
+      // contribution): repeated renders never grow the diagnostics.
+      const extensionEntries = () => mounted.api.getSnapshot().diagnostics.filter(
+        (entry) => entry.source === "extension"
+      );
+      const before = extensionEntries().length;
+      window.dispatchEvent(new Event("resize"));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(extensionEntries().length).toBe(before);
+      const keys = new Set(extensionEntries().map((entry) =>
+        `${entry.extensionId}|${entry.phase}|${entry.contributionId ?? ""}`
+      ));
+      expect(keys.size).toBe(extensionEntries().length);
+      expect(extensionEntries().length).toBeLessThanOrEqual(20);
+      // Builtin Copy and List stay usable after every injected failure.
+      await mounted.api.commands.annotations.copyOpen();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(shadow.querySelector<HTMLTextAreaElement>(".aa-copy-fallback textarea")?.value ?? "")
+        .toContain("# Agent Annotations Handoff");
+      mounted.api.commands.panels.open("agent-annotations.builtin:list");
+      expect(shadow.querySelector('[aria-label="Annotation list"]')).not.toBeNull();
+      mounted.api.commands.panels.close();
+    } finally {
+      mounted.unmount();
+    }
+  });
+
+  it("records structured export, enrich, and redact failures without breaking the flows", async () => {
+    const pageTarget = document.createElement("button");
+    document.body.append(pageTarget);
+    primitives.getElementAtPoint.mockReturnValue(pageTarget);
+    const transport = new MemoryTaskTransport();
+    const mounted = await mountAgentAnnotations({
+      transport,
+      initialState: { collapsed: false },
+      extensions: [defineClientExtension({
+        id: "faulty-pipeline",
+        apiVersion: 1,
+        targetEnrichers: [
+          { id: "enrich-throws", enrich: () => { throw new Error("enrich boom"); } },
+          { id: "enrich-ok", enrich: () => ({ ok: true }) },
+        ],
+        redactors: [{ id: "redact", redact: () => { throw new Error("redact boom"); } }],
+        exporters: [
+          { id: "export", export: () => { throw new Error("export boom"); } },
+          { id: "async-export", export: async () => { throw new Error("async export boom"); } },
+        ],
+      })],
+    });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      mounted.api.commands.capture.startPick();
+      document.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 10 }));
+      const composer = shadow.querySelector<HTMLElement>(".aa-composer")!;
+      const textarea = composer.querySelector<HTMLTextAreaElement>("textarea")!;
+      textarea.value = "Pipeline";
+      composer.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      await vi.waitFor(async () => expect((await transport.read()).annotations).toHaveLength(1));
+      // Enrich failure is recorded but the annotation still saves.
+      expect(mounted.api.getSnapshot().diagnostics.some((entry) => entry.phase === "enrich")).toBe(true);
+      // Export failure is recorded and rethrown to the caller; async
+      // rejections are diagnosed before the rethrow too.
+      await expect(mounted.api.commands.exporters.format("faulty-pipeline:export"))
+        .rejects.toThrow("export boom");
+      await expect(mounted.api.commands.exporters.format("faulty-pipeline:async-export"))
+        .rejects.toThrow("async export boom");
+      expect(mounted.api.getSnapshot().diagnostics.some((entry) => entry.phase === "export")).toBe(true);
+      // Redact failure fails the namespace closed and records the phase.
+      await mounted.api.commands.annotations.copyOpen();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(mounted.api.getSnapshot().diagnostics.some((entry) => entry.phase === "redact")).toBe(true);
+      // Builtin Copy, List, and Pick stay usable after every pipeline failure.
+      expect(shadow.querySelector(".aa-composer")).toBeNull();
+      mounted.api.commands.panels.open("agent-annotations.builtin:list");
+      expect(shadow.querySelector('[aria-label="Annotation list"]')).not.toBeNull();
+      mounted.api.commands.panels.close();
+      mounted.api.commands.capture.startPick();
+      expect(mounted.api.getSnapshot().captureMode).toBe("pick");
+      mounted.api.commands.capture.cancel();
+    } finally {
+      mounted.unmount();
+      pageTarget.remove();
+    }
+  });
+
+  it("snapshot is a deep clone that is deeply frozen without freezing extension configs", async () => {
+    const shortcutOverride = { key: "X", code: "KeyX", primary: true, alt: true, shift: false };
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(),
+      initialState: { collapsed: false },
+      builtins: { shortcuts: { pick: shortcutOverride } },
+    });
+    try {
+      const snap = mounted.api.getSnapshot();
+      expect(Object.isFrozen(snap)).toBe(true);
+      expect(Object.isFrozen(snap.task)).toBe(true);
+      expect(Object.isFrozen(snap.diagnostics)).toBe(true);
+      expect(Object.isFrozen(snap.shortcuts)).toBe(true);
+      expect(Object.isFrozen(snap.exporters)).toBe(true);
+      expect(Object.isFrozen(snap.messages)).toBe(true);
+      const before = JSON.stringify(snap);
+      expect(() => { (snap.task as unknown as { taskId: string }).taskId = "x"; }).toThrow(TypeError);
+      expect(() => { (snap.diagnostics as unknown[]).push({} as never); }).toThrow(TypeError);
+      expect(() => { (snap.shortcuts[0] as { label: string }).label = "x"; }).toThrow(TypeError);
+      expect(() => { (snap.shortcuts[0] as { shortcut: { key: string } }).shortcut.key = "x"; }).toThrow(TypeError);
+      expect(() => { (snap.exporters as unknown[]).push({} as never); }).toThrow(TypeError);
+      expect(() => { (snap.messages as Record<string, string>)["x"] = "y"; }).toThrow(TypeError);
+      expect(JSON.stringify(mounted.api.getSnapshot())).toBe(before);
+      // The extension's own config object was never frozen or mutated.
+      expect(Object.isFrozen(shortcutOverride)).toBe(false);
+      expect(shortcutOverride.key).toBe("X");
+    } finally {
+      mounted.unmount();
+    }
+  });
+
+  it("rolls back a failed host+setup extension to default route, history, and appRoot behavior", async () => {
+    history.pushState({}, "", "/");
+    const hostSubscribe = vi.fn();
+    const restrictedAppRoot = document.createElement("div");
+    document.body.append(restrictedAppRoot);
+    const pageTarget = document.createElement("button");
+    document.body.append(pageTarget);
+    primitives.getElementAtPoint.mockReturnValue(pageTarget);
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(taskFixture({
+        annotations: [annotationFixture({
+          pageContext: { ...annotationFixture().pageContext, routeKey: "/" },
+        })],
+      })),
+      initialState: { collapsed: false },
+      extensions: [defineClientExtension({
+        id: "failed-host",
+        apiVersion: 1,
+        setup: () => {
+          throw new Error("host setup failed");
+        },
+        host: {
+          routeKey: () => "/bad-route",
+          locale: () => "fr-FR",
+          theme: () => "dark",
+          appRoot: () => restrictedAppRoot,
+          subscribe: hostSubscribe,
+          messages: { "from-failed-host": "x" },
+        },
+        messages: { "from-failed": "y" },
+        toolbar: [{
+          id: "gone", group: "handoff", label: "Gone", icon: () => null,
+          kind: "action", execute: () => undefined,
+        }],
+        exporters: [{ id: "gone-exporter", export: () => "gone" }],
+      })],
+    });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      // No host subscription leak, no host contributions, no host messages.
+      expect(hostSubscribe).not.toHaveBeenCalled();
+      expect(shadow.querySelector('[data-action-id="failed-host:gone"]')).toBeNull();
+      expect(mounted.api.getSnapshot().exporters).not.toContainEqual({
+        id: "failed-host:gone-exporter",
+        extensionId: "failed-host",
+      });
+      expect(mounted.api.getSnapshot().messages["from-failed"]).toBeUndefined();
+      expect(mounted.api.getSnapshot().messages["from-failed-host"]).toBeUndefined();
+      // Default route behavior: the "/" annotation marker renders.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(shadow.querySelector(".aa-marker")).not.toBeNull();
+      // Default appRoot behavior: a capture on the document body works even
+      // though the failed host had restricted the app root.
+      mounted.api.commands.capture.startPick();
+      document.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 10 }));
+      expect(shadow.querySelector(".aa-composer")).not.toBeNull();
+      mounted.api.commands.capture.cancel();
+    } finally {
+      mounted.unmount();
+      restrictedAppRoot.remove();
+      pageTarget.remove();
+      history.pushState({}, "", "/settings");
+    }
+  });
+
+  it("icon boundary catches later render-dependent throws and keeps the fallback", async () => {
+    let renders = 0;
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(),
+      initialState: { collapsed: false },
+      extensions: [defineClientExtension({
+        id: "late-icon",
+        apiVersion: 1,
+        toolbar: [{
+          id: "late", group: "view", label: "Late icon",
+          icon: () => {
+            renders += 1;
+            if (renders > 1) throw new Error("late icon boom");
+            return null;
+          },
+          kind: "action", execute: () => undefined,
+        }],
+      })],
+    });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      // A chrome re-render makes the icon throw only on its second render:
+      // the boundary catches it, keeps the safe fallback, and records the
+      // phase without a second root or SSR preflight.
+      window.dispatchEvent(new Event("resize"));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(shadow.querySelector('[data-action-id="late-icon:late"] svg')).not.toBeNull();
+      const entry = mounted.api.getSnapshot().diagnostics.find((item) => item.phase === "icon");
+      expect(entry).toBeDefined();
+      expect(entry!.message).toContain("late icon boom");
+    } finally {
+      mounted.unmount();
+    }
+  });
+
+  it("isolates evil throwing-toString values from icon, panel, and enricher boundaries", async () => {
+    const evilToString = {
+      toString() {
+        throw new Error("evil toString");
+      },
+    };
+    const pageTarget = document.createElement("button");
+    document.body.append(pageTarget);
+    primitives.getElementAtPoint.mockReturnValue(pageTarget);
+    const transport = new MemoryTaskTransport();
+    const mounted = await mountAgentAnnotations({
+      transport,
+      initialState: { collapsed: false },
+      extensions: [defineClientExtension({
+        id: "evil-boundaries",
+        apiVersion: 1,
+        targetEnrichers: [{ id: "enrich", enrich: () => { throw evilToString; } }],
+        toolbar: [
+          {
+            id: "evil-icon", group: "view", label: "Evil icon",
+            icon: () => { throw evilToString; },
+            kind: "action", execute: () => undefined,
+          },
+          {
+            id: "evil-panel", group: "view", label: "Evil panel", kind: "panel", panelId: "evil-panel",
+            icon: () => null, execute: () => undefined,
+          },
+        ],
+        panels: [{
+          id: "evil-panel", title: "Evil panel",
+          render: () => { throw evilToString; },
+        }],
+      })],
+    });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      // The icon fallback renders and the panel error boundary shows the safe
+      // panel instead of the thrown value escaping isolation.
+      expect(shadow.querySelector('[data-action-id="evil-boundaries:evil-icon"] svg')).not.toBeNull();
+      mounted.api.commands.panels.open("evil-boundaries:evil-panel");
+      expect(shadow.querySelector(".aa-panel-error")).not.toBeNull();
+      mounted.api.commands.panels.close();
+      // The capture flow continues and the annotation still saves.
+      mounted.api.commands.capture.startPick();
+      document.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 10 }));
+      const composer = shadow.querySelector<HTMLElement>(".aa-composer")!;
+      const textarea = composer.querySelector<HTMLTextAreaElement>("textarea")!;
+      textarea.value = "Evil pipeline";
+      composer.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      await vi.waitFor(async () => expect((await transport.read()).annotations).toHaveLength(1));
+      const diagnostics = mounted.api.getSnapshot().diagnostics;
+      for (const phase of ["icon", "panel", "enrich"]) {
+        const entry = diagnostics.find((item) => item.phase === phase);
+        expect(entry).toBeDefined();
+        expect(entry!.message).toContain("unknown error");
+        expect(entry!.message.length).toBeLessThanOrEqual(500);
+      }
+    } finally {
+      mounted.unmount();
+      pageTarget.remove();
+    }
+  });
+
+  it("isolation survives a throw whose toString itself throws", async () => {
+    const evilToString = {
+      toString() {
+        throw new Error("evil toString");
+      },
+    };
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(),
+      initialState: { collapsed: false },
+      extensions: [defineClientExtension({
+        id: "evil-throw",
+        apiVersion: 1,
+        toolbar: [{
+          id: "evil", group: "view", label: "Evil", icon: () => null, kind: "action",
+          isVisible: () => { throw evilToString; },
+          execute: () => undefined,
+        }],
+      })],
+    });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      // The contribution is hidden and a safe diagnostic is recorded instead
+      // of the error serialization piercing the isolation.
+      expect(shadow.querySelector('[data-action-id="evil-throw:evil"]')).toBeNull();
+      const entry = mounted.api.getSnapshot().diagnostics.find((item) => item.phase === "visible");
+      expect(entry).toBeDefined();
+      expect(entry!.message).toContain("unknown error");
+    } finally {
+      mounted.unmount();
+    }
+  });
+
+  it("isolates a third-party setup that reuses the reserved builtin id", async () => {
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(),
+      initialState: { collapsed: false },
+      builtins: false,
+      extensions: [defineClientExtension({
+        id: "agent-annotations.builtin",
+        apiVersion: 1,
+        setup: () => {
+          throw new Error("impostor setup failed");
+        },
+        toolbar: [{
+          id: "impostor", group: "handoff", label: "Impostor", icon: () => null,
+          kind: "action", execute: () => undefined,
+        }],
+      })],
+    });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    // The impostor is third-party: it is isolated instead of failing the mount.
+    expect(shadow.querySelector('[data-action-id="agent-annotations.builtin:impostor"]')).toBeNull();
+    expect(mounted.api.getSnapshot().diagnostics.some((entry) => entry.phase === "setup")).toBe(true);
+    mounted.unmount();
+  });
+
+  it("continues all cleanup when an extension dispose throws and persists the diagnostic", async () => {
+    const memory = new MemoryTaskTransport();
+    const appendDiagnostics = vi.fn(async (entries: AgentAnnotationsDiagnosticsEntry[]) => undefined);
+    const transport: TaskTransport = {
+      read: () => memory.read(),
+      mutate: (request) => memory.mutate(request),
+      appendDiagnostics,
+    };
+    const disposedFirst = vi.fn();
+    const disposedSecond = vi.fn();
+    const mounted = await mountAgentAnnotations({
+      transport,
+      extensions: [
+        defineClientExtension({
+          id: "dispose-throws",
+          apiVersion: 1,
+          setup: () => () => {
+            disposedFirst();
+            throw new Error("dispose boom");
+          },
+        }),
+        defineClientExtension({
+          id: "dispose-fine",
+          apiVersion: 1,
+          setup: () => disposedSecond,
+        }),
+      ],
+    });
+    const host = document.getElementById("agent-annotations-root")!;
+    mounted.unmount();
+    // Both disposers ran (cleanup continued past the throwing one), and the
+    // structured dispose diagnostic reached the transport boundary even
+    // though the runtime is destroyed.
+    expect(disposedFirst).toHaveBeenCalledOnce();
+    expect(disposedSecond).toHaveBeenCalledOnce();
+    expect(appendDiagnostics).toHaveBeenCalled();
+    const persisted = appendDiagnostics.mock.calls.flatMap(([entries]) => entries ?? []);
+    expect(persisted.some((entry) => entry?.phase === "dispose" && entry?.extensionId === "dispose-throws")).toBe(true);
+    expect(document.getElementById("agent-annotations-root")).toBeNull();
+    expect(host.isConnected).toBe(false);
+    // A second unmount is a no-op.
+    mounted.unmount();
+    expect(disposedFirst).toHaveBeenCalledOnce();
   });
 
   it("keeps panels exclusive and returns focus to the opening action", async () => {
@@ -1504,12 +1967,12 @@ describe("client runtime", () => {
     }
   });
 
-  it("emits no browser status heartbeat when mounting fails during setup", async () => {
+  it("isolates a failing third-party setup and still starts the browser status heartbeat", async () => {
     vi.useFakeTimers();
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("{}", { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
     try {
-      await expect(mountAgentAnnotations({
+      const mounted = await mountAgentAnnotations({
         transport: new MemoryTaskTransport(),
         browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
         extensions: [defineClientExtension({
@@ -1519,9 +1982,16 @@ describe("client runtime", () => {
             throw new Error("setup exploded");
           },
         })],
-      })).rejects.toThrow("setup exploded");
-      await vi.advanceTimersByTimeAsync(20_000);
-      expect(fetchMock).not.toHaveBeenCalled();
+      });
+      // The failing extension was isolated; the runtime stays mounted and
+      // reports its browser status.
+      expect(mounted.api.getSnapshot().collapsed).toBe(true);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/__agent-annotations/heartbeat",
+        expect.objectContaining({ method: "POST" })
+      );
+      mounted.unmount();
     } finally {
       vi.unstubAllGlobals();
     }
@@ -1563,15 +2033,20 @@ describe("client runtime", () => {
     pageTarget.remove();
   });
 
-  it("cleans partial setup and leaves no mount when setup fails", async () => {
+  it("rolls back a failed third-party setup atomically and continues mounting", async () => {
     const dispose = vi.fn();
-    await expect(mountAgentAnnotations({
+    const mounted = await mountAgentAnnotations({
       transport: new MemoryTaskTransport(),
+      initialState: { collapsed: false },
       extensions: [
         defineClientExtension({
           id: "a-setup-first",
           apiVersion: 1,
           setup: () => dispose,
+          toolbar: [{
+            id: "keep", group: "handoff", label: "Keep", icon: () => null,
+            kind: "action", execute: () => undefined,
+          }],
         }),
         defineClientExtension({
           id: "z-setup-fails",
@@ -1579,11 +2054,50 @@ describe("client runtime", () => {
           setup: () => {
             throw new Error("setup failed");
           },
+          host: {
+            routeKey: () => "/bad-route",
+            theme: () => "light",
+            messages: { "from-bad-host": "x" },
+          },
+          messages: { "from-bad": "y" },
+          toolbar: [{
+            id: "gone", group: "handoff", label: "Gone", icon: () => null, kind: "action",
+            shortcut: { key: "G", code: "KeyG", primary: true, alt: true, shift: false },
+            execute: () => undefined,
+          }],
+          exporters: [{ id: "gone-exporter", export: () => "gone" }],
         }),
       ],
-    })).rejects.toThrow("setup failed");
+    });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    // Toolbar, shortcut, exporter, host messages, and own messages of the
+    // failed extension are all rolled back atomically.
+    expect(shadow.querySelector('[data-action-id="z-setup-fails:gone"]')).toBeNull();
+    const shortcutIds = mounted.api.getSnapshot().shortcuts.map((entry) => entry.id);
+    expect(shortcutIds).not.toContain("z-setup-fails:gone");
+    expect(mounted.api.getSnapshot().exporters).not.toContainEqual({
+      id: "z-setup-fails:gone-exporter",
+      extensionId: "z-setup-fails",
+    });
+    expect(mounted.api.getSnapshot().messages["from-bad"]).toBeUndefined();
+    expect(mounted.api.getSnapshot().messages["from-bad-host"]).toBeUndefined();
+    // The healthy extension and the builtins remain.
+    expect(shadow.querySelector('[data-action-id="a-setup-first:keep"]')).not.toBeNull();
+    expect(shadow.querySelector('[aria-label^="Pick"]')).not.toBeNull();
+    expect(mounted.api.getSnapshot().diagnostics.some((entry) => entry.phase === "setup")).toBe(true);
+    // Builtin Pick, Copy, and List stay usable after the isolated failure.
+    mounted.api.commands.capture.startPick();
+    expect(mounted.api.getSnapshot().captureMode).toBe("pick");
+    mounted.api.commands.capture.cancel();
+    await mounted.api.commands.annotations.copyOpen();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(shadow.querySelector<HTMLTextAreaElement>(".aa-copy-fallback textarea")?.value ?? "")
+      .toContain("# Agent Annotations Handoff");
+    mounted.api.commands.panels.open("agent-annotations.builtin:list");
+    expect(shadow.querySelector('[aria-label="Annotation list"]')).not.toBeNull();
+    mounted.api.commands.panels.close();
+    mounted.unmount();
     expect(dispose).toHaveBeenCalledOnce();
-    expect(document.getElementById("agent-annotations-root")).toBeNull();
   });
 
   it("does not expose the raw transport in the extension setup context", async () => {

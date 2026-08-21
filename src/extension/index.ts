@@ -23,12 +23,21 @@ const canonical = (extensionId: string, localId: string): string =>
 
 const GROUP_ORDER = ["capture", "handoff", "view", "host"] as const;
 const ID_PATTERN = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
+// Same 64-character namespace limit the task schema applies to extension
+// ids; local contribution ids share it so a canonical `extensionId:localId`
+// always fits the persisted diagnostics contributionId bound (256).
+const MAX_ID_LENGTH = 64;
 
 const assertId: (kind: string, value: unknown) => asserts value is string = (
   kind,
   value
 ) => {
-  if (typeof value !== "string" || !ID_PATTERN.test(value)) {
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    value.length > MAX_ID_LENGTH ||
+    !ID_PATTERN.test(value)
+  ) {
     throw new TypeError(`Invalid ${kind} ID: ${String(value)}`);
   }
 };

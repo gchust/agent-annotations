@@ -101,6 +101,19 @@ integrations.
   overrides still pass the registry's conflict validation.
 - `StudioPublicApi` exposes snapshots, subscriptions, and commands only. It does
   not expose React setters, reducers, live DOM, or inspection internals.
+  `getSnapshot()` deep-clones and deeply freezes the public payload (task,
+  diagnostics, shortcuts, exporters, messages); mutation attempts throw and
+  never reach runtime state, and extension config objects are never frozen.
+- Extension failures are isolated at the runtime boundary: a throwing `setup`
+  rolls back the extension's registered surface (contributions, shortcuts,
+  host, messages) and mounting continues; side effects produced by `setup`
+  outside the registered surface before the throw are not rolled back; `isVisible`/`isEnabled`/`isPressed` throwing degrade to
+  hidden/disabled/unpressed; a throwing `icon` renders the safe fallback; a
+  throwing `panel` render shows the closable error panel; `execute`/`enrich`/
+  `export`/`redact` keep their fail-closed semantics. All failures record a
+  deduplicated, bounded, redacted diagnostic carrying `extensionId`,
+  `contributionId`, and `phase`; a throwing `dispose` still runs every other
+  cleanup phase and persists its diagnostic.
   `commands.annotations.captureEvidence(annotationId)` captures best-effort
   screenshot evidence on demand for an existing annotation on the current
   route (a no-op in `off` mode); evidence conflicts adopt the latest task and

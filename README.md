@@ -186,6 +186,34 @@ those files; `wait` treats the given sha256 as a baseline and returns
 moves off it, or `{ changed: false, sourceRevision }` when it stays until the
 bounded (30 second) timeout.
 
+## Extension failure isolation
+
+Third-party contributions are isolated at the runtime boundary: a faulty
+contribution disables its own registered surface (toolbar entry, shortcut,
+panel, host integration, exporter, redactor, or message) and never breaks the
+built-in capture/list flows. This covers the registered contributions and
+runtime callbacks; arbitrary side effects a `setup` already produced outside
+that surface before throwing cannot be rolled back.
+
+- `setup` throwing rolls the extension's registered contributions back
+  atomically (toolbar, shortcuts, panels, host integration, exporters,
+  redactors, and messages are all removed) and mounting continues; the
+  trusted built-in fails fast.
+- `isVisible` throwing hides the contribution, `isEnabled` throwing disables
+  it, `isPressed` throwing leaves it unpressed, a throwing `icon` renders a
+  safe fallback, a throwing `panel` render shows the closable error panel,
+  and `execute`/`enrich`/`export`/`redact` failures are caught with the
+  existing per-phase semantics.
+- `dispose` throwing never blocks the remaining cleanup, and the structured
+  dispose diagnostic still reaches the diagnostics boundary.
+- Every failure is recorded once per `(extensionId, phase, contributionId)`
+  into the bounded, redacted diagnostics with the phase locatable in
+  `extensionId`/`contributionId`/`phase` fields; high-frequency predicate
+  errors can never flood the diagnostics.
+- `getSnapshot()` returns a deep clone that is deeply frozen: extensions
+  cannot mutate the task, diagnostics, shortcuts, exporters, or messages, and
+  the extension's own config objects are never frozen.
+
 ## Security
 
 The Vite API binds to loopback by default, requires a random private session

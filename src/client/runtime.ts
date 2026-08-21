@@ -19,9 +19,11 @@ import { PACKAGE_VERSION } from "../metadata.js";
 import type {
   AgentAnnotation,
   AgentAnnotationsCaptureMode,
+  AgentAnnotationsDiagnosticPhase,
   AgentAnnotationsDiagnosticsEntry,
   AgentAnnotationsIconProps,
   AgentAnnotationsHostTheme,
+  AgentAnnotationsJsonObject,
   AgentAnnotationsMutationOperation,
   AgentAnnotationsRect,
   AgentAnnotationsScreenshotEvidenceMode,
@@ -60,6 +62,7 @@ import {
   CloseIcon,
   CompleteIcon,
   DeleteIcon,
+  FallbackIcon,
   GripIcon,
   ReopenIcon,
   SaveIcon,
@@ -69,9 +72,24 @@ import { AGENT_ANNOTATIONS_STYLES } from "./styles.js";
 
 const HOST_ID = "agent-annotations-root";
 const IGNORE_ATTRIBUTE = "data-react-grab-ignore";
+
+// A third-party throw value can itself have a throwing toString; reduce it to
+// text safely so isolation can never be pierced by error serialization. This
+// is the single safe stringification path for third-party-controlled values.
+const safeErrorText = (value: unknown): string => {
+  try {
+    return String(value);
+  } catch {
+    return "unknown error";
+  }
+};
 type RegisteredToolbarContribution = ReturnType<
   ClientExtensionRegistry["getToolbarContributions"]
 >[number];
+type AgentAnnotationDiagnosticReporter = (
+  message: string,
+  details?: { extensionId?: string; contributionId?: string; phase?: AgentAnnotationsDiagnosticPhase }
+) => void;
 type RegisteredTargetEnricher = ReturnType<
   ClientExtensionRegistry["getTargetEnrichers"]
 >[number];
@@ -117,7 +135,7 @@ const regionAnnotation = async (
   comment: string,
   host: HostIntegration | undefined,
   enrichers: readonly RegisteredTargetEnricher[],
-  reportDiagnostic: (message: string) => void
+  reportDiagnostic: AgentAnnotationDiagnosticReporter
 ): Promise<AgentAnnotation> => {
   const inspected = await mapBounded(
     elements,
@@ -154,8 +172,12 @@ const regionAnnotation = async (
         };
       }
     } catch (error) {
-      // A faulty enricher is skipped with a redacted diagnostic; capture continues.
-      reportDiagnostic(`target enricher failed: ${String(error)}`);
+      // A faulty enricher is skipped with a structured diagnostic; capture continues.
+      reportDiagnostic(safeErrorText(error), {
+        extensionId: enricher.extensionId,
+        contributionId: enricher.id,
+        phase: "enrich",
+      });
     }
   }
   return {
@@ -177,7 +199,7 @@ const elementAnnotation = async (
   comment: string,
   host: HostIntegration | undefined,
   enrichers: readonly RegisteredTargetEnricher[],
-  reportDiagnostic: (message: string) => void
+  reportDiagnostic: AgentAnnotationDiagnosticReporter
 ): Promise<AgentAnnotation> => {
   const targets = await Promise.all(elements.map((element) => inspectTarget(element, host)));
   const extensions: AgentAnnotation["extensions"] = {};
@@ -196,8 +218,12 @@ const elementAnnotation = async (
         };
       }
     } catch (error) {
-      // A faulty enricher is skipped with a redacted diagnostic; capture continues.
-      reportDiagnostic(`target enricher failed: ${String(error)}`);
+      // A faulty enricher is skipped with a structured diagnostic; capture continues.
+      reportDiagnostic(safeErrorText(error), {
+        extensionId: enricher.extensionId,
+        contributionId: enricher.id,
+        phase: "enrich",
+      });
     }
   }
   return {
@@ -211,6 +237,34 @@ const elementAnnotation = async (
     extensions,
   };
 };
+
+type IconBoundaryProps = {
+  extensionId: string;
+  contributionId: string;
+  icon: ComponentType<AgentAnnotationsIconProps>;
+  onError: (message: string) => void;
+};
+
+// A local error boundary around each toolbar icon: a faulty third-party icon
+// renders the safe fallback in the existing single root and records
+// phase=icon. The imperative built-in icon markup (iconButton) stays
+// unchanged, and browser-only icons are rendered exactly once.
+class IconBoundary extends Component<IconBoundaryProps, { failed: boolean }> {
+  state = { failed: false };
+
+  static getDerivedStateFromError(): { failed: boolean } {
+    return { failed: true };
+  }
+
+  componentDidCatch(error: unknown): void {
+    this.props.onError(safeErrorText(error));
+  }
+
+  render(): import("react").ReactNode {
+    if (this.state.failed) return createElement(FallbackIcon, { className: "aa-icon" });
+    return createElement(this.props.icon, { className: "aa-icon" });
+  }
+}
 
 type PanelErrorBoundaryProps = {
   onError: (message: string) => void;
@@ -226,7 +280,7 @@ class PanelErrorBoundary extends Component<PanelErrorBoundaryProps, PanelErrorBo
   }
 
   componentDidCatch(error: unknown): void {
-    this.props.onError(String(error));
+    this.props.onError(safeErrorText(error));
   }
 
   render(): import("react").ReactNode {
@@ -247,21 +301,25 @@ export async function mountAgentAnnotations(
   const builtinsConfig = validateAgentAnnotationsBuiltinsConfig(options.builtins === false ? undefined : options.builtins);
   const initialState = validateAgentAnnotationsInitialState(options.initialState);
   const registrations: Array<() => void> = [];
+  const registrationByExtension = new Map<string, () => void>();
+  let builtin: ReturnType<typeof createBuiltinClientExtension> | undefined;
   try {
-    const builtin = options.builtins === false
+    builtin = options.builtins === false
       ? undefined
       : createBuiltinClientExtension({
           actions: builtinsConfig,
           shortcuts: builtinsConfig.shortcuts,
         });
     for (const extension of [...(builtin ? [builtin] : []), ...(options.extensions ?? [])]) {
-      registrations.push(registry.register(extension));
+      const unregister = registry.register(extension);
+      registrations.push(unregister);
+      registrationByExtension.set(extension.id, unregister);
     }
   } catch (error) {
     for (const unregister of registrations.reverse()) unregister();
     throw error;
   }
-  const host = registry.getHostIntegration();
+  let host = registry.getHostIntegration();
 
   // Unconditional transport boundary: every task entering the runtime is
   // schema-parsed, including third-party custom TaskTransport implementations.
@@ -567,11 +625,11 @@ export async function mountAgentAnnotations(
         Object.values(value)[0] ??
         "";
   const platform = /Mac|iPhone|iPad/.test(navigator.platform) ? "mac" : "other";
-  const toolbar = registry.getToolbarContributions();
+  let toolbar = registry.getToolbarContributions();
   collapseAction = toolbar.find(
     (contribution) => contribution.id === "agent-annotations.builtin:toggle"
   )?.id ?? null;
-  const collapseContribution = toolbar.find((contribution) => contribution.id === collapseAction);
+  let collapseContribution = toolbar.find((contribution) => contribution.id === collapseAction);
   const buildShortcuts = () => toolbar.flatMap((contribution) =>
     contribution.shortcut
       ? [{
@@ -587,19 +645,52 @@ export async function mountAgentAnnotations(
       : []
   );
   let shortcuts = buildShortcuts();
-  const exporters = registry.getExporters();
+  let exporters = registry.getExporters();
+  // Rebuild the registry-derived views after an isolated extension rollback
+  // so no contribution, shortcut, host, panel, or message of the failed
+  // extension survives in the running chrome.
+  const refreshRegistryViews = (): void => {
+    host = registry.getHostIntegration();
+    toolbar = registry.getToolbarContributions();
+    collapseAction = toolbar.find(
+      (contribution) => contribution.id === "agent-annotations.builtin:toggle"
+    )?.id ?? null;
+    collapseContribution = toolbar.find((contribution) => contribution.id === collapseAction);
+    shortcuts = buildShortcuts();
+    exporters = registry.getExporters();
+    messages = { ...registry.getMessages(), ...host?.messages };
+    // Re-derive every host-derived state (theme/locale/messages/appRoot/route)
+    // from the surviving host; a rolled-back failed host leaves the defaults.
+    applyHostChange();
+    render();
+    emit();
+  };
 
-  const snapshot = (): StudioPublicSnapshot => ({
-    task: structuredClone(task),
-    captureMode,
-    collapsed,
-    markersVisible,
-    openPanel,
-    diagnostics: [...diagnostics],
-    shortcuts,
-    exporters: exporters.map(({ id, extensionId }) => ({ id, extensionId })),
-    messages: { ...messages },
-  });
+  const deepFreeze = <T>(value: T): T => {
+    if (value && typeof value === "object" && !Object.isFrozen(value)) {
+      Object.freeze(value);
+      for (const entry of Object.values(value as object)) deepFreeze(entry);
+    }
+    return value;
+  };
+
+  const snapshot = (): StudioPublicSnapshot => {
+    const payload: StudioPublicSnapshot = {
+      task: structuredClone(task),
+      captureMode,
+      collapsed,
+      markersVisible,
+      openPanel,
+      diagnostics: [...diagnostics],
+      shortcuts,
+      exporters: exporters.map(({ id, extensionId }) => ({ id, extensionId })),
+      messages: { ...messages },
+    };
+    // Deep clone the complete JSON-safe payload, then deeply freeze the
+    // clone: extension mutation attempts can never touch runtime state or
+    // freeze the extension's own config objects.
+    return deepFreeze(structuredClone(payload));
+  };
   uiSnapshot = snapshot();
   const refreshChrome = () => {
     flushSync(() => {
@@ -661,11 +752,7 @@ export async function mountAgentAnnotations(
   const mutate = async (operations: AgentAnnotationsMutationOperation[]): Promise<AgentAnnotationsTask | undefined> => {
     if (destroyed) return undefined;
     const attempt = async (expectedRevision: number): Promise<AgentAnnotationsTask | undefined> => {
-      const redactors = registry.getRedactors().map((redactor) => ({
-        extensionId: redactor.extensionId,
-        id: redactor.id,
-        redact: redactor.redact,
-      }));
+      const redactors = guardedRedactors();
       // Every delegated mutation passes the unified boundary first: the
       // current task and request are validated, every data-carrying operation
       // is redacted (generic + extension redactors), and the redacted payload
@@ -755,7 +842,7 @@ export async function mountAgentAnnotations(
     } catch (error) {
       if (destroyed || routeKey !== input.routeKey) return false;
       if (!(error instanceof RevisionConflictError)) {
-        record("console", `screenshot evidence failed: ${String(error)}`);
+        record("console", `screenshot evidence failed: ${safeErrorText(error)}`);
         return false;
       }
       adoptTask(error.latestTask);
@@ -778,7 +865,7 @@ export async function mountAgentAnnotations(
         // adoptTask and record guard `destroyed` internally; there is no
         // further retry and no status update from here.
         if (retryError instanceof RevisionConflictError) adoptTask(retryError.latestTask);
-        record("console", `screenshot evidence failed: ${String(retryError)}`);
+        record("console", `screenshot evidence failed: ${safeErrorText(retryError)}`);
         return false;
       }
     }
@@ -855,7 +942,7 @@ export async function mountAgentAnnotations(
         );
       }
     } catch (error) {
-      if (!destroyed) record("console", `screenshot evidence failed: ${String(error)}`);
+      if (!destroyed) record("console", `screenshot evidence failed: ${safeErrorText(error)}`);
     }
   };
 
@@ -863,18 +950,16 @@ export async function mountAgentAnnotations(
     filter: "open" | "all",
     exporterId?: string
   ): Promise<string> => {
-    const redacted = redactAgentAnnotationsTask(
-      task,
-      registry.getRedactors().map((redactor) => ({
-        extensionId: redactor.extensionId,
-        id: redactor.id,
-        redact: redactor.redact,
-      }))
-    ).task;
+    const redacted = redactAgentAnnotationsTask(task, guardedRedactors()).task;
     if (exporterId) {
       const exporter = exporters.find(({ id }) => id === exporterId);
       if (!exporter) throw new TypeError(`Unknown exporter ID: ${exporterId}`);
-      return exporter.export({ task: redacted, annotations: filter });
+      try {
+        return await exporter.export({ task: redacted, annotations: filter });
+      } catch (error) {
+        recordExtensionFailure(exporter.extensionId, "export", exporter.id, error);
+        throw error;
+      }
     }
     // The built-in default Copy is the Agent Handoff contract: instructions,
     // the browser-applied source revision baseline (or explicit unavailable),
@@ -1050,10 +1135,13 @@ export async function mountAgentAnnotations(
   ): void => {
     const current = snapshot();
     if (
-      contribution.isVisible?.(current) === false &&
-      contribution.id !== collapseAction
+      guardedPredicate(contribution.extensionId, contribution.id, "visible", true, () =>
+        contribution.isVisible?.(current) === false
+      ) && contribution.id !== collapseAction
     ) return;
-    if (contribution.isEnabled?.(current) === false) return;
+    if (guardedPredicate(contribution.extensionId, contribution.id, "enabled", true, () =>
+      contribution.isEnabled?.(current) === false
+    )) return;
     if (contribution.kind === "panel") {
       const panelId = contribution.panelId!;
       if (openPanel === panelId) api.commands.panels.close(panelId);
@@ -1074,8 +1162,8 @@ export async function mountAgentAnnotations(
         } satisfies ToolbarCommandContext);
       } catch (error) {
         if (destroyed) return;
-        // A faulty optional action is caught and re-enabled; capture stays usable.
-        record("console", `toolbar action failed: ${String(error)}`);
+        // A faulty action is caught and reported; capture stays usable.
+        recordExtensionFailure(contribution.extensionId, "execute", contribution.id, error);
       } finally {
         if (destroyed) return;
         pendingActions.delete(contribution.id); // Only this action is released.
@@ -1241,7 +1329,12 @@ export async function mountAgentAnnotations(
               comment,
               host,
               registry.getTargetEnrichers(),
-              (message) => record("console", message)
+              (message, details) => recordExtensionFailure(
+                details?.extensionId ?? "unknown",
+                details?.phase ?? "enrich",
+                details?.contributionId,
+                message
+              )
             )
           : await elementAnnotation(
               composer!.kind,
@@ -1249,7 +1342,12 @@ export async function mountAgentAnnotations(
               comment,
               host,
               registry.getTargetEnrichers(),
-              (message) => record("console", message)
+              (message, details) => recordExtensionFailure(
+                details?.extensionId ?? "unknown",
+                details?.phase ?? "enrich",
+                details?.contributionId,
+                message
+              )
             );
         if (destroyed || routeKey !== submittedRouteKey) return;
         const persisted = await mutate([{ op: "add", annotation }]);
@@ -1473,14 +1571,23 @@ export async function mountAgentAnnotations(
       };
     }, []);
     const { contribution, label, shortcut, current } = props;
-    const pressed = contribution.isPressed?.(current);
+    const pressed = guardedPredicate(
+      contribution.extensionId,
+      contribution.id,
+      "pressed",
+      undefined,
+      () => contribution.isPressed?.(current)
+    );
+    const disabled = pendingActions.has(contribution.id)
+      || guardedPredicate(contribution.extensionId, contribution.id, "enabled", true, () =>
+        contribution.isEnabled?.(current) === false
+      );
     return createElement("button", {
       ref,
       key: contribution.id,
       type: "button",
       className: "aa-action",
-      disabled: pendingActions.has(contribution.id)
-        || contribution.isEnabled?.(current) === false,
+      disabled,
       "aria-label": `${label}${shortcut ? ` (${shortcut.formatted})` : ""}`,
       "data-action-id": contribution.id,
       ...(pressed !== undefined ? { "aria-pressed": String(pressed) } : {}),
@@ -1489,7 +1596,17 @@ export async function mountAgentAnnotations(
         : {}),
       ...(contribution.id === collapseAction ? { "data-toggle": "true" } : {}),
       onClick: () => executeContribution(contribution),
-    }, createElement(contribution.icon, { className: "aa-icon" }));
+    }, createElement(IconBoundary, {
+      extensionId: contribution.extensionId,
+      contributionId: contribution.id,
+      icon: contribution.icon,
+      onError: (message) => recordExtensionFailure(
+        contribution.extensionId,
+        "icon",
+        contribution.id,
+        message
+      ),
+    }));
   };
 
   const CollapsedCount = (props: {
@@ -1561,6 +1678,19 @@ export async function mountAgentAnnotations(
     const gripRef = useRef<HTMLButtonElement | null>(null);
     const panelRef = useRef<HTMLElement | null>(null);
     const panelContribution = registry.getPanels().find(({ id }) => id === current.openPanel);
+    const collapseEntry = collapseContribution;
+    const collapseChrome = collapseEntry
+      ? [
+          createElement("div", { key: "aa-divider", className: "aa-divider", role: "separator" }),
+          createElement(ToolbarButton, {
+            key: collapseEntry.id,
+            contribution: collapseEntry,
+            label: localized(collapseEntry.label),
+            shortcut: shortcuts.find(({ id }) => id === collapseEntry.id),
+            current,
+          }),
+        ]
+      : [];
 
     useLayoutEffect(() => {
       const grip = gripRef.current!;
@@ -1638,7 +1768,9 @@ export async function mountAgentAnnotations(
           if (contribution.id === collapseAction) return [];
           const label = localized(contribution.label);
           const shortcut = shortcuts.find(({ id }) => id === contribution.id);
-          if (contribution.isVisible?.(current) === false) {
+          if (guardedPredicate(contribution.extensionId, contribution.id, "visible", true, () =>
+            contribution.isVisible?.(current) === false
+          )) {
             return [];
           }
           return [createElement(ToolbarButton, {
@@ -1649,18 +1781,7 @@ export async function mountAgentAnnotations(
             current,
           })];
         }),
-        ...(collapseContribution
-          ? [
-              createElement("div", { key: "aa-divider", className: "aa-divider", role: "separator" }),
-              createElement(ToolbarButton, {
-                key: collapseContribution.id,
-                contribution: collapseContribution,
-                label: localized(collapseContribution.label),
-                shortcut: shortcuts.find(({ id }) => id === collapseContribution.id),
-                current,
-              }),
-            ]
-          : [])
+        ...collapseChrome
       ),
       panelContribution
         ? createElement("section", {
@@ -1675,7 +1796,12 @@ export async function mountAgentAnnotations(
             createElement("h2", null, localized(panelContribution.title)),
             createElement("div", null,
               createElement(PanelErrorBoundary, {
-                onError: (message) => record("console", `panel render failed: ${message}`),
+                onError: (message) => recordExtensionFailure(
+                  panelContribution.extensionId,
+                  "panel",
+                  panelContribution.id,
+                  message
+                ),
                 children: createElement(panelContribution.render, {
                   studio: api,
                   close: () => api.commands.panels.close(panelContribution.id),
@@ -1925,18 +2051,93 @@ export async function mountAgentAnnotations(
       executeContribution(contribution);
     }
   };
-  const record = (source: AgentAnnotationsDiagnosticsEntry["source"], value: unknown) => {
-    if (destroyed) return;
+  let diagnosticsEmitScheduled = false;
+  const scheduleDiagnosticsEmit = (): void => {
+    // Contribution guards can run inside React render/lifecycle; the UI emit
+    // is deferred and coalesced so it never synchronously re-enters React.
+    if (diagnosticsEmitScheduled) return;
+    diagnosticsEmitScheduled = true;
+    scheduleFrame(() => {
+      diagnosticsEmitScheduled = false;
+      if (!destroyed) emit();
+    });
+  };
+  const record = (
+    source: AgentAnnotationsDiagnosticsEntry["source"],
+    value: unknown,
+    details?: { extensionId?: string; contributionId?: string; phase?: AgentAnnotationsDiagnosticPhase }
+  ) => {
     const entry: AgentAnnotationsDiagnosticsEntry = {
       source,
-      message: redactAgentAnnotationsText(String(value), { maxLength: 500 }),
+      message: redactAgentAnnotationsText(safeErrorText(value), { maxLength: 500 }),
       timestamp: now(),
+      ...(details?.extensionId ? { extensionId: details.extensionId } : {}),
+      ...(details?.contributionId ? { contributionId: details.contributionId } : {}),
+      ...(details?.phase ? { phase: details.phase } : {}),
     };
     diagnostics.push(entry);
     if (diagnostics.length > 20) diagnostics.shift();
-    emit();
+    scheduleDiagnosticsEmit();
+    // Persisting diagnostics stays allowed even while the runtime is
+    // destroyed (dispose failures must still reach the server), but the UI
+    // emit is guarded above.
     void transport.appendDiagnostics?.([entry]).catch(() => undefined);
   };
+
+  // Deduplicated, bounded diagnostics for third-party contribution failures:
+  // one entry per (extensionId, phase, contributionId) at the diagnostics
+  // capacity; new keys after capacity are ignored so high-frequency predicate
+  // errors can never flood diagnostics.
+  const extensionFailureKeys = new Set<string>();
+  const MAX_EXTENSION_FAILURE_KEYS = 20;
+  const recordExtensionFailure = (
+    extensionId: string,
+    phase: AgentAnnotationsDiagnosticPhase,
+    contributionId: string | undefined,
+    error: unknown
+  ): void => {
+    const key = `${extensionId}|${phase}|${contributionId ?? ""}`;
+    if (extensionFailureKeys.has(key)) return;
+    if (extensionFailureKeys.size >= MAX_EXTENSION_FAILURE_KEYS) return;
+    extensionFailureKeys.add(key);
+    record("extension", `${phase} failed for ${extensionId}${contributionId ? `:${contributionId}` : ""}: ${safeErrorText(error)}`, {
+      extensionId,
+      contributionId,
+      phase,
+    });
+  };
+
+  const guardedPredicate = <T>(
+    extensionId: string,
+    contributionId: string,
+    phase: "visible" | "enabled" | "pressed",
+    fallback: T,
+    invoke: () => T
+  ): T => {
+    try {
+      return invoke();
+    } catch (error) {
+      recordExtensionFailure(extensionId, phase, contributionId, error);
+      return fallback;
+    }
+  };
+
+
+
+  const guardedRedactors = () =>
+    registry.getRedactors().map((redactor) => ({
+      extensionId: redactor.extensionId,
+      id: redactor.id,
+      redact: (data: AgentAnnotationsJsonObject, context: { annotationId: string; extensionId: string }) => {
+        try {
+          return redactor.redact(data, context);
+        } catch (error) {
+          recordExtensionFailure(redactor.extensionId, "redact", redactor.id, error);
+          throw error;
+        }
+      },
+    }));
+
   const onError = (event: ErrorEvent) => record("window", event.message);
   const onRejection = (event: PromiseRejectionEvent) => record("promise", event.reason);
   const originalConsoleError = console.error;
@@ -1946,7 +2147,7 @@ export async function mountAgentAnnotations(
     if (recording) return;
     recording = true;
     try {
-      record("console", values.map(String).join(" "));
+      record("console", values.map((value) => safeErrorText(value)).join(" "));
     } finally {
       recording = false;
     }
@@ -2142,8 +2343,86 @@ export async function mountAgentAnnotations(
   }
   hostElement.dataset.markerRefreshes = "0";
   cleanups.push(stopMarkerTracking);
-  // Host subscriptions are registered only after every initialization is complete so
-  // a synchronous first notification can never hit a not-yet-initialized binding.
+  const onViewport = () => {
+    clampDockPosition();
+    positionPanel();
+    positionMultiComplete();
+    if (markerObserver || editingId || composer) scheduleMarkerRefresh();
+  };
+  window.addEventListener("resize", onViewport);
+  window.addEventListener("scroll", onViewport, true);
+  cleanups.push(() => window.removeEventListener("resize", onViewport));
+  cleanups.push(() => window.removeEventListener("scroll", onViewport, true));
+  studioRoot = createRoot(uiMount);
+  flushSync(() => studioRoot!.render(createElement(StudioChrome)));
+  render();
+  const savedDockPosition = readDockPosition();
+  if (savedDockPosition) {
+    dockPosition = savedDockPosition;
+    clampDockPosition();
+  }
+  const setupCleanups: Array<{ extensionId: string; dispose: () => void }> = [];
+  const safeTeardown = (): void => {
+    for (const { extensionId, dispose } of setupCleanups.reverse()) {
+      try {
+        dispose();
+      } catch (error) {
+        recordExtensionFailure(extensionId, "dispose", undefined, error);
+      }
+    }
+    for (const unregister of registrations.reverse()) {
+      try {
+        unregister();
+      } catch (error) {
+        if (!destroyed) record("console", `extension unregister failed: ${String(error)}`);
+      }
+    }
+    for (const cleanup of cleanups.splice(0)) {
+      try {
+        cleanup();
+      } catch (error) {
+        if (!destroyed) record("console", `runtime cleanup failed: ${String(error)}`);
+      }
+    }
+  };
+  try {
+    for (const extension of registry.getExtensions()) {
+      try {
+        const dispose = extension.setup?.({ studio: api });
+        if (dispose) setupCleanups.push({ extensionId: extension.id, dispose });
+      } catch (error) {
+        // A faulty third-party setup is isolated: its contributions are rolled
+        // back atomically and mounting continues. The trusted builtin fails fast.
+        // Trusted builtins fail fast by object identity; a third party that
+        // merely reuses the reserved id is still isolated.
+        if (extension === builtin) throw error;
+        recordExtensionFailure(extension.id, "setup", undefined, error);
+        registrationByExtension.get(extension.id)?.();
+        refreshRegistryViews();
+      }
+    }
+  } catch (error) {
+    studioRoot?.unmount();
+    studioRoot = null;
+    safeTeardown();
+    hostElement.remove();
+    throw error;
+  }
+  const unmount = () => {
+    if (destroyed) return;
+    destroyed = true;
+    studioRoot?.unmount();
+    studioRoot = null;
+    delete hostElement.dataset.studioRenders;
+    safeTeardown();
+    listeners.clear();
+    uiListeners.clear();
+    disposeInspectionEngine();
+    hostElement.remove();
+  };
+  // Host subscriptions and the default history listeners are bound only
+  // after every setup attempt has settled, so a rolled-back failed host can
+  // never leak a subscription or intercept route/history behavior.
   if (host?.subscribe) {
     cleanups.push(host.subscribe(() => applyHostChange()));
   } else {
@@ -2171,54 +2450,6 @@ export async function mountAgentAnnotations(
       if (history.replaceState === replaceState) history.replaceState = originalReplaceState;
     });
   }
-
-  const onViewport = () => {
-    clampDockPosition();
-    positionPanel();
-    positionMultiComplete();
-    if (markerObserver || editingId || composer) scheduleMarkerRefresh();
-  };
-  window.addEventListener("resize", onViewport);
-  window.addEventListener("scroll", onViewport, true);
-  cleanups.push(() => window.removeEventListener("resize", onViewport));
-  cleanups.push(() => window.removeEventListener("scroll", onViewport, true));
-  studioRoot = createRoot(uiMount);
-  flushSync(() => studioRoot!.render(createElement(StudioChrome)));
-  render();
-  const savedDockPosition = readDockPosition();
-  if (savedDockPosition) {
-    dockPosition = savedDockPosition;
-    clampDockPosition();
-  }
-  const setupCleanups: Array<() => void> = [];
-  try {
-    for (const extension of registry.getExtensions()) {
-      const dispose = extension.setup?.({ studio: api });
-      if (dispose) setupCleanups.push(dispose);
-    }
-  } catch (error) {
-    studioRoot?.unmount();
-    studioRoot = null;
-    for (const dispose of setupCleanups.reverse()) dispose();
-    for (const unregister of registrations.reverse()) unregister();
-    for (const cleanup of cleanups.splice(0)) cleanup();
-    hostElement.remove();
-    throw error;
-  }
-  const unmount = () => {
-    if (destroyed) return;
-    destroyed = true;
-    studioRoot?.unmount();
-    studioRoot = null;
-    delete hostElement.dataset.studioRenders;
-    for (const dispose of setupCleanups.reverse()) dispose();
-    for (const unregister of registrations.reverse()) unregister();
-    for (const cleanup of cleanups.splice(0)) cleanup();
-    listeners.clear();
-    uiListeners.clear();
-    disposeInspectionEngine();
-    hostElement.remove();
-  };
   // The browser status loop starts only after every setup step succeeded, so
   // a failed mount can never persist a browserConnected state.
   scheduleBrowserHeartbeat();

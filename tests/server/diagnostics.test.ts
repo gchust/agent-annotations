@@ -73,6 +73,73 @@ describe("persisted diagnostics", () => {
       .toBeLessThanOrEqual(MAX_DIAGNOSTICS_BYTES);
   });
 
+  it("accepts extension entries with bounded locate-able fields", () => {
+    const dir = root();
+    const entries = appendDiagnostics(dir, [{
+      source: "extension",
+      message: "execute failed for demo.extension:boom",
+      timestamp: "2026-08-12T12:00:00.000Z",
+      extensionId: "demo.extension",
+      contributionId: "demo.extension:run",
+      phase: "execute",
+    }]);
+    expect(entries[0]).toMatchObject({
+      source: "extension",
+      extensionId: "demo.extension",
+      contributionId: "demo.extension:run",
+      phase: "execute",
+    });
+    const persisted = readDiagnostics(dir);
+    expect(persisted[0]!.extensionId).toBe("demo.extension");
+    expect(persisted[0]!.phase).toBe("execute");
+    expect(JSON.stringify(persisted)).not.toContain("secret");
+  });
+
+  it("rejects invalid extension fields, arbitrary phases, and oversize ids", () => {
+    const dir = root();
+    const base = { source: "extension", message: "x", timestamp: "2026-08-12T12:00:00.000Z" };
+    expect(() => appendDiagnostics(dir, [{ ...base, extensionId: 7, phase: "setup" }]))
+      .toThrow("invalid extensionId");
+    expect(() => appendDiagnostics(dir, [{ ...base, extensionId: "", phase: "setup" }]))
+      .toThrow("invalid extensionId");
+    expect(() => appendDiagnostics(dir, [{ ...base, extensionId: "x".repeat(65), phase: "setup" }]))
+      .toThrow("invalid extensionId");
+    expect(() => appendDiagnostics(dir, [{ ...base, extensionId: "ext", phase: "setup", contributionId: 7 }]))
+      .toThrow("invalid contributionId");
+    expect(() => appendDiagnostics(dir, [{ ...base, extensionId: "ext", phase: "spawn" }]))
+      .toThrow("invalid phase");
+    expect(() => appendDiagnostics(dir, [{ ...base, extensionId: "ext", phase: 1 }]))
+      .toThrow("invalid phase");
+    expect(() => appendDiagnostics(dir, [{ ...base, phase: "setup" }]))
+      .toThrow("invalid extensionId");
+    expect(() => appendDiagnostics(dir, [{ ...base, extensionId: "ext" }]))
+      .toThrow("invalid phase");
+    expect(() => appendDiagnostics(dir, [{ ...base, extensionId: "ext", phase: "setup" }])).not.toThrow();
+    // Non-extension sources reject extension-only fields.
+    const consoleBase = { source: "console", message: "x", timestamp: "2026-08-12T12:00:00.000Z" };
+    expect(() => appendDiagnostics(dir, [{ ...consoleBase, extensionId: "ext", phase: "execute" }]))
+      .toThrow("invalid extension fields");
+    expect(() => appendDiagnostics(dir, [{ ...consoleBase, phase: "execute" }]))
+      .toThrow("invalid extension fields");
+    expect(() => appendDiagnostics(dir, [consoleBase])).not.toThrow();
+  });
+
+  it("accepts the longest canonical contribution id from a bounded registry", () => {
+    const dir = root();
+    const canonical = `${"a".repeat(64)}:${"b".repeat(64)}`;
+    expect(canonical.length).toBeLessThanOrEqual(129);
+    const entries = appendDiagnostics(dir, [{
+      source: "extension",
+      message: "execute failed",
+      timestamp: "2026-08-12T12:00:00.000Z",
+      extensionId: "a".repeat(64),
+      contributionId: canonical,
+      phase: "execute",
+    }]);
+    expect(entries[0]!.contributionId).toBe(canonical);
+    expect(readDiagnostics(dir)[0]!.contributionId).toBe(canonical);
+  });
+
   it("rejects invalid sources, non-string messages, and bad timestamps", () => {
     const dir = root();
     expect(() => appendDiagnostics(dir, [

@@ -37,3 +37,4 @@ export const CompleteIcon = icon("M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z", "M
 export const ReopenIcon = icon("M4 4v6h6", "M4.5 9a8 8 0 1 1-1 6");
 export const DeleteIcon = icon("M4 7h16", "M9 7V4h6v3", "M7 7l1 13h8l1-13", "M10 11v5", "M14 11v5");
 export const CaptureIcon = icon("M4 8h3l2-3h6l2 3h3v11H4V8z", "M12 12a3 3 0 1 0 0 6 3 3 0 0 0 0-6z");
+export const FallbackIcon = icon("M12 12m-6 0a6 6 0 1 0 12 0a6 6 0 1 0-12 0");
