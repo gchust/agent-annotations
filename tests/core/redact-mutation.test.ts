@@ -314,3 +314,67 @@ describe("prepareAgentAnnotationsTaskForPersistence", () => {
     expect(JSON.stringify(preparedNext)).not.toContain("second-secret");
   });
 });
+
+describe("sequential mutation semantics", () => {
+  it("redacts a setExtension targeting an annotation added earlier in the same request", () => {
+    const task = taskFixture();
+    const redacted = redactAgentAnnotationsMutationRequest(task, {
+      taskId: task.taskId,
+      expectedRevision: 0,
+      operations: [
+        {
+          op: "add",
+          annotation: annotationFixture({
+            annotationId: "ann-new",
+            comment: "Bearer added-secret",
+          }),
+        },
+        {
+          op: "setExtension",
+          annotationId: "ann-new",
+          extensionId: "demo.extension",
+          data: { token: "Bearer ext-secret", keep: "yes" },
+        },
+      ],
+    }, redactors);
+    const addOp = redacted.operations[0] as { op: "add"; annotation: { comment: string } };
+    const setOp = redacted.operations[1] as { op: "setExtension"; data: Record<string, unknown> };
+    expect(addOp.annotation.comment).not.toContain("added-secret");
+    expect(JSON.stringify(setOp.data)).not.toContain("ext-secret");
+    expect(setOp.data).toMatchObject({ keep: "yes", host: expect.stringContaining("[REDACTED]") });
+    // The whole redacted request must still apply sequentially and validly.
+    const applied = applyAgentAnnotationsMutation(task, {
+      taskId: task.taskId,
+      expectedRevision: 0,
+      operations: redacted.operations,
+    }, new Date().toISOString());
+    expect(applied.ok).toBe(true);
+  });
+
+  it("allows update and complete to target an annotation added earlier in the same request", () => {
+    const task = taskFixture();
+    const redacted = redactAgentAnnotationsMutationRequest(task, {
+      taskId: task.taskId,
+      expectedRevision: 0,
+      operations: [
+        { op: "add", annotation: annotationFixture({ annotationId: "ann-new" }) },
+        { op: "update", annotationId: "ann-new", comment: "Bearer update-secret" },
+        {
+          op: "complete",
+          annotationId: "ann-new",
+          evidence: { verified: true, summary: "Bearer summary-secret", source: "test" },
+        },
+      ],
+    });
+    const updateOp = redacted.operations[1] as { op: "update"; comment: string };
+    const completeOp = redacted.operations[2] as { op: "complete"; evidence: { summary: string } };
+    expect(updateOp.comment).not.toContain("update-secret");
+    expect(completeOp.evidence.summary).not.toContain("summary-secret");
+    const applied = applyAgentAnnotationsMutation(task, {
+      taskId: task.taskId,
+      expectedRevision: 0,
+      operations: redacted.operations,
+    }, new Date().toISOString());
+    expect(applied.ok).toBe(true);
+  });
+});

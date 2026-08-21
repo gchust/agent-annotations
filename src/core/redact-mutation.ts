@@ -14,6 +14,9 @@ const invalidRequest = (reason: string): never => {
   throw new TypeError(`invalid mutation request: ${reason}`);
 };
 
+const nextUpdatedAt = (task: AgentAnnotationsTask): string =>
+  new Date(Math.max(Date.now(), Date.parse(task.updatedAt) + 1)).toISOString();
+
 const redactOperation = (
   currentTask: AgentAnnotationsTask,
   operation: AgentAnnotationsMutationOperation,
@@ -104,16 +107,34 @@ export function redactAgentAnnotationsMutationRequest(
     ) {
       return invalidRequest("malformed request");
     }
-    const operations = request.operations.map((operation) =>
-      redactOperation(currentTask, operation, redactors)
-    );
-    const updatedAt = new Date(
-      Math.max(Date.now(), Date.parse(currentTask.updatedAt) + 1)
-    ).toISOString();
+    // Sequential redaction: each operation is redacted against the task state
+    // produced by the previously redacted operations (mirroring
+    // applyAgentAnnotationsMutation), so later operations can target
+    // annotations added earlier in the same request.
+    let state = currentTask;
+    const operations: AgentAnnotationsMutationOperation[] = [];
+    for (const operation of request.operations) {
+      const redacted = redactOperation(state, operation, redactors);
+      operations.push(redacted);
+      const result = applyAgentAnnotationsMutation(
+        state,
+        {
+          taskId: state.taskId,
+          expectedRevision: state.taskRevision,
+          operations: [redacted],
+        },
+        nextUpdatedAt(state)
+      );
+      if (!result.ok) return invalidRequest(result.error);
+      state = result.task;
+    }
+    // Final whole-request validation: taskId, expectedRevision, operation
+    // count, and the full sequential semantics must hold against the original
+    // task before anything is delegated.
     const result = applyAgentAnnotationsMutation(
       currentTask,
       { ...request, operations },
-      updatedAt
+      nextUpdatedAt(currentTask)
     );
     if (!result.ok) return invalidRequest(result.error);
     return { ...request, operations };
