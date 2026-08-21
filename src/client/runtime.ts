@@ -431,9 +431,9 @@ export async function mountAgentAnnotations(
       schema: "agent-annotations.browser-state.v1",
       runtimeId,
       clientVersion,
-      // Privacy: never persist a raw URL query or fragment; the server parser
-      // rejects route keys that still carry one.
-      routeKey: redactAgentAnnotationsText(routeKey.split(/[?#]/, 1)[0] ?? routeKey).slice(0, 500),
+      // Privacy: never persist a raw URL query; hash routes stay intact (the
+      // server parser rejects only route keys that still contain a query).
+      routeKey: redactAgentAnnotationsText(routeKey.split("?", 1)[0] ?? routeKey).slice(0, 500),
       taskId: task.taskId,
       taskRevision: task.taskRevision,
       appliedSourceRevision,

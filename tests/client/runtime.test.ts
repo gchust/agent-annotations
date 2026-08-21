@@ -1245,6 +1245,7 @@ describe("client runtime", () => {
 
   it("reports browser status heartbeats and applies source revisions through the mount hook", async () => {
     vi.useFakeTimers();
+    history.pushState({}, "", "/#/settings?secret=supersecret");
     const fetchMock = vi.fn<typeof fetch>(async (input: RequestInfo | URL) => {
       if (String(input).endsWith("/revision")) {
         return new Response(JSON.stringify({ sourceRevision: "ab".repeat(32) }), { status: 200 });
@@ -1273,6 +1274,9 @@ describe("client runtime", () => {
         taskRevision: 0,
         appliedSourceRevision: null,
       });
+      // The hash route is preserved; the secret query is stripped.
+      expect(body.routeKey).toBe("/#/settings");
+      expect(JSON.stringify(body)).not.toContain("supersecret");
       expect(JSON.stringify(body)).not.toContain("status-token");
       // The applied revision is reported only through the trusted mount hook.
       mounted.refreshAppliedSourceRevision();
