@@ -494,6 +494,30 @@ describe("client runtime", () => {
     }
   });
 
+  it("removes capture document listeners on unmount", async () => {
+    const addSpy = vi.spyOn(document, "addEventListener");
+    const removeSpy = vi.spyOn(document, "removeEventListener");
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(),
+    });
+    try {
+      mounted.api.commands.capture.startPick();
+      for (const type of ["pointermove", "pointerdown", "pointerup", "click"]) {
+        expect(addSpy.mock.calls.some(([eventType]) => eventType === type)).toBe(true);
+      }
+      // Unmount removes every capture listener the runtime had added;
+      // assertions run while the spy is still recording.
+      mounted.unmount();
+      for (const type of ["pointermove", "pointerdown", "pointerup", "click"]) {
+        expect(removeSpy.mock.calls.some(([eventType]) => eventType === type)).toBe(true);
+      }
+    } finally {
+      mounted.unmount();
+      addSpy.mockRestore();
+      removeSpy.mockRestore();
+    }
+  });
+
   it("recovers an unresolved nested iframe marker after the outer document is populated", async () => {
     vi.useFakeTimers();
     history.pushState({}, "", "/settings");
