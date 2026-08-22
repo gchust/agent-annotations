@@ -342,8 +342,8 @@ export default function agentAnnotations(
             return json(response, 200, {
               taskId: task?.taskId ?? null,
               taskRevision: task?.taskRevision ?? null,
-              sourceRevision: task ? sourcePaths.revision(task) : null,
-              sourceFiles: task ? sourcePaths.files(task) : [],
+              referencedSourceRevision: task ? sourcePaths.revision(task) : null,
+              referencedSourceFiles: task ? sourcePaths.files(task) : [],
             });
           }
           if (url.pathname === `${resolvedEndpoint}/diagnostics` && request.method === "POST") {

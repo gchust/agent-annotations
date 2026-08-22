@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Breaking**: split browser update generation from referenced-source hashes.
+  `revision` now returns `referencedSourceRevision`/`referencedSourceFiles`,
+  empty source sets return `null`, and the wait modes are now
+  `--browser-update-revision` and `--referenced-source-revision` with no old
+  aliases.
 - Added `agent-annotations evidence --prune [--json]`: a safe orphan sweep
   that deletes only unreferenced regular files directly inside the evidence
   directory (never symlinks or directories, never files referenced by the

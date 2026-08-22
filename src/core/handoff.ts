@@ -13,10 +13,8 @@ import type {
 } from "../types/index.js";
 
 export type AgentAnnotationsHandoffOptions = AgentAnnotationsHandoffConfig & {
-  // Browser-applied source revision from the runtime state; null/undefined
-  // means the handoff must say exactly "source revision unavailable" and
-  // must not invent a SHA.
-  appliedSourceRevision?: string | null;
+  browserUpdateRevision?: number | null;
+  referencedSourceRevision?: string | null;
 };
 
 export type NormalizedAgentAnnotationsHandoffConfig = {
@@ -192,11 +190,8 @@ const formatAnnotation = (
   return [...lines, ""];
 };
 
-// Pure default handoff formatter: one Code-Agent executable contract instead
-// of a data dump. The source revision baseline is the browser-applied
-// revision when available; otherwise the output says exactly
-// "source revision unavailable"
-// and omits the browser-source wait command (never invents a disk-only SHA).
+// Pure default handoff formatter: browser update generation is the primary
+// verification baseline; the referenced-source hash is supplementary evidence.
 export function formatAgentAnnotationsHandoff(
   input: unknown,
   options: AgentAnnotationsHandoffOptions = {}
@@ -208,10 +203,15 @@ export function formatAgentAnnotationsHandoff(
     includeCompleted: options.includeCompleted,
   });
   const command = config.command;
-  const applied = options.appliedSourceRevision !== null &&
-    typeof options.appliedSourceRevision === "string" &&
-    SHA256.test(options.appliedSourceRevision)
-    ? options.appliedSourceRevision
+  const browserUpdateRevision = typeof options.browserUpdateRevision === "number" &&
+    Number.isSafeInteger(options.browserUpdateRevision) &&
+    options.browserUpdateRevision >= 0
+    ? options.browserUpdateRevision
+    : null;
+  const referencedSourceRevision = options.referencedSourceRevision !== null &&
+    typeof options.referencedSourceRevision === "string" &&
+    SHA256.test(options.referencedSourceRevision)
+    ? options.referencedSourceRevision
     : null;
   const annotations = selectAgentAnnotations(
     task.annotations,
@@ -222,7 +222,8 @@ export function formatAgentAnnotationsHandoff(
     "",
     `- task revision: ${task.taskRevision}`,
     `- schema: ${task.schema}`,
-    `- source revision baseline: ${applied ?? "source revision unavailable"}`,
+    `- browser update revision baseline: ${browserUpdateRevision ?? "browser update revision unavailable"}`,
+    `- referenced source revision: ${referencedSourceRevision ?? "referenced source revision unavailable"}`,
     `- command: ${command}`,
     "",
     "## Instructions",
@@ -230,10 +231,10 @@ export function formatAgentAnnotationsHandoff(
     "- Modify the real application source code; editing active-task.json is not a solution.",
     "- Run the project-relevant typecheck and tests.",
     ...config.verificationCommands.map((verification) => `- Run: ${verification}`),
-    ...(applied
-      ? [`- Run ${command} wait --browser-source-revision ${applied} --json and wait until the browser reports the change as applied.`]
+    ...(browserUpdateRevision !== null
+      ? [`- Run ${command} wait --browser-update-revision ${browserUpdateRevision} --json and wait until the browser reports a newer applied update.`]
       : []),
-    `- Run ${command} status --check --json; task validity, browser connection, task synchronization, and source synchronization must all pass.`,
+    `- Run ${command} status --check --json; task validity, browser connection, task synchronization, and available referenced-source synchronization must pass.`,
     `- Run ${command} validate-task --json to confirm the task file itself is valid.`,
     `- Only after every verification passes, complete each affected annotation with ${command} complete <annotation-id> --verified --summary "<text>".`,
     "- If verification fails, do not mark anything complete; keep the error and report it.",

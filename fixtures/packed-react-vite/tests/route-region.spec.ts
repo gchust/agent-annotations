@@ -62,12 +62,12 @@ test("route-aware markers, region targets, history navigation, and cross-route f
   const regionOnly = path.resolve("src/route-a/RegionOnly.tsx");
   const token = JSON.parse(readFileSync(path.join(runtimeRoot, "session.json"), "utf8")).token;
   const baseline = await revision(page, token);
-  expect(baseline.sourceFiles).toContain("src/route-a/RegionOnly.tsx");
+  expect(baseline.referencedSourceFiles).toContain("src/route-a/RegionOnly.tsx");
   const before = readFileSync(regionOnly, "utf8");
   try {
     writeFileSync(regionOnly, `${before}\n`);
     const after = await revision(page, token);
-    expect(after.sourceRevision).not.toBe(baseline.sourceRevision);
+    expect(after.referencedSourceRevision).not.toBe(baseline.referencedSourceRevision);
   } finally {
     writeFileSync(regionOnly, before);
   }

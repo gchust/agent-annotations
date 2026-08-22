@@ -83,9 +83,11 @@ export const createSourcePathService = (workspaceRoot: string) => {
     return [...paths].flatMap((file) => canonicalize(file) ?? []).sort();
   };
 
-  const revision = (task: AgentAnnotationsTask): string => {
+  const revision = (task: AgentAnnotationsTask): string | null => {
+    const referencedSourceFiles = files(task);
+    if (referencedSourceFiles.length === 0) return null;
     const hash = createHash("sha256");
-    for (const canonical of files(task)) {
+    for (const canonical of referencedSourceFiles) {
       hash.update(canonical);
       hash.update("\0");
       hash.update(readFileSync(path.join(root, canonical)));

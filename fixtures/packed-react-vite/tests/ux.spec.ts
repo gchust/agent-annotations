@@ -32,6 +32,11 @@ test("keyboard-only Pick, Multi, Copy, List, and Collapse flows with visual evid
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await page.goto("/");
   await expect(shadow(page, ".aa-dock")).toBeVisible();
+  await page.keyboard.press("Control+Alt+C");
+  const emptyHandoff = await page.evaluate(() => navigator.clipboard.readText());
+  expect(emptyHandoff).toContain("- browser update revision baseline: 1");
+  expect(emptyHandoff).toContain("- referenced source revision: referenced source revision unavailable");
+  expect(emptyHandoff).toContain("wait --browser-update-revision 1 --json");
   // The dock starts collapsed by default.
   await expect(shadow(page, ".aa-dock")).toHaveAttribute("data-collapsed", "true");
   await expect(shadow(page, ".aa-collapsed-count")).toBeVisible();
@@ -110,8 +115,9 @@ test("keyboard-only Pick, Multi, Copy, List, and Collapse flows with visual evid
   expect(clipboard).toContain("--verified --summary");
   // Adding the first referenced source is task-only work. It invalidates the
   // old empty-task snapshot and cannot claim that the browser applied it.
-  expect(clipboard).toContain("- source revision baseline: source revision unavailable");
-  expect(clipboard).not.toContain("wait --browser-source-revision");
+  expect(clipboard).toContain("- browser update revision baseline: 1");
+  expect(clipboard).toContain("- referenced source revision: referenced source revision unavailable");
+  expect(clipboard).toContain("wait --browser-update-revision 1 --json");
   await expect.poll(() => annotations()).toBe(2);
   await expect(shadow(page, '[aria-label^="Pick"]')).toHaveAttribute("aria-pressed", "false");
   await expect(shadow(page, '[aria-label^="Multi"]')).toHaveAttribute("aria-pressed", "true");

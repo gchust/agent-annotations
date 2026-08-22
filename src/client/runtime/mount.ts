@@ -239,13 +239,13 @@ export async function mountAgentAnnotations(
   };
   // The generated Vite client is the only caller: once after mount and after
   // each successful vite:afterUpdate. Task changes never enter this path.
-  let sourceRevisionRequest = 0;
+  let referencedSourceRevisionRequest = 0;
   const reportBrowserUpdate = (): void => {
     if (destroyed || !browserStatus) return;
     browserUpdateRevision += 1;
     referencedSourceRevision = null;
     sendBrowserHeartbeat();
-    const request = ++sourceRevisionRequest;
+    const request = ++referencedSourceRevisionRequest;
     const reportedTaskId = task.taskId;
     const reportedTaskRevision = task.taskRevision;
     const run = async (): Promise<void> => {
@@ -258,23 +258,25 @@ export async function mountAgentAnnotations(
         const payload = await response.json() as {
           taskId?: unknown;
           taskRevision?: unknown;
-          sourceRevision?: unknown;
-          sourceFiles?: unknown;
+          referencedSourceRevision?: unknown;
+          referencedSourceFiles?: unknown;
         };
         if (
-          request === sourceRevisionRequest &&
+          request === referencedSourceRevisionRequest &&
           task.taskId === reportedTaskId &&
           task.taskRevision === reportedTaskRevision &&
           payload.taskId === reportedTaskId &&
           payload.taskRevision === reportedTaskRevision &&
-          typeof payload.sourceRevision === "string" &&
-          /^[0-9a-f]{64}$/i.test(payload.sourceRevision) &&
-          Array.isArray(payload.sourceFiles) &&
-          payload.sourceFiles.length <= 256 &&
-          payload.sourceFiles.every((file) => typeof file === "string" && file.length > 0 && file.length <= 2_048)
+          (payload.referencedSourceRevision === null ||
+            (typeof payload.referencedSourceRevision === "string" &&
+              /^[0-9a-f]{64}$/i.test(payload.referencedSourceRevision))) &&
+          Array.isArray(payload.referencedSourceFiles) &&
+          payload.referencedSourceFiles.length <= 256 &&
+          payload.referencedSourceFiles.every((file) => typeof file === "string" && file.length > 0 && file.length <= 2_048) &&
+          (payload.referencedSourceFiles.length > 0 || payload.referencedSourceRevision === null)
         ) {
-          referencedSourceRevision = payload.sourceRevision.toLowerCase();
-          referencedSourceFiles = [...payload.sourceFiles].sort();
+          referencedSourceRevision = payload.referencedSourceRevision?.toLowerCase() ?? null;
+          referencedSourceFiles = [...payload.referencedSourceFiles].sort();
           sendBrowserHeartbeat();
         }
       } catch {
@@ -618,14 +620,15 @@ export async function mountAgentAnnotations(
       }
     }
     // The built-in default Copy is the Agent Handoff contract: instructions,
-    // the browser-applied source revision baseline (or explicit unavailable),
-    // and exact completion commands. A final generic text redaction over the
+    // the browser update generation baseline and referenced-source evidence,
+    // plus exact completion commands. A final generic text redaction over the
     // complete output keeps config/instruction interpolation from leaking.
     const output = formatAgentAnnotationsHandoff(redacted, {
       command: handoff.command,
       verificationCommands: handoff.verificationCommands,
       includeCompleted: handoff.includeCompleted || filter === "all",
-      appliedSourceRevision: referencedSourceRevision,
+      browserUpdateRevision,
+      referencedSourceRevision,
     });
     // Final generic text redaction over the complete output. The task and the
     // bounded handoff config already bound the output, so this second pass

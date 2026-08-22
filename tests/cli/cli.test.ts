@@ -291,31 +291,31 @@ describe("public CLI processes", () => {
     });
     writeFileSync(path.join(root, "tasks/active-task.json"), JSON.stringify(task));
     const sourcePaths = createSourcePathService(root);
-    const expected = sourcePaths.revision(task);
+    const expected = sourcePaths.revision(task)!;
     expect(expected).toMatch(/^[0-9a-f]{64}$/);
     expect(JSON.parse(run(root, ["revision", "--json"]))).toEqual({
       taskRevision: 0,
-      sourceRevision: expected,
-      sourceFiles: ["src/settings.tsx"],
+      referencedSourceRevision: expected,
+      referencedSourceFiles: ["src/settings.tsx"],
     });
     const text = run(root, ["revision"]);
     expect(text).toContain("taskRevision 0");
-    expect(text).toContain(`sourceRevision ${expected}`);
-    expect(text).toContain("sourceFiles: src/settings.tsx");
+    expect(text).toContain(`referencedSourceRevision ${expected}`);
+    expect(text).toContain("referencedSourceFiles: src/settings.tsx");
     expect(text).not.toMatch(/^\{/);
     // Human and JSON wait output share the same facts.
-    expect(run(root, ["wait", "--source-revision", expected, "--timeout-ms", "0"]))
-      .toBe(`changed: false, sourceRevision: ${expected}\n`);
-    expect(JSON.parse(run(root, ["wait", "--source-revision", expected, "--timeout-ms", "0", "--json"])))
-      .toEqual({ changed: false, sourceRevision: expected });
+    expect(run(root, ["wait", "--referenced-source-revision", expected, "--timeout-ms", "0"]))
+      .toBe(`changed: false, referencedSourceRevision: ${expected}\n`);
+    expect(JSON.parse(run(root, ["wait", "--referenced-source-revision", expected, "--timeout-ms", "0", "--json"])))
+      .toEqual({ changed: false, referencedSourceRevision: expected });
     // Unrelated and duplicate-basename files never move the revision.
     writeFileSync(path.join(root, "src", "unrelated.tsx"), "export const B = 1;\n");
     writeFileSync(path.join(root, "src", "other", "settings.tsx"), "export const C = 1;\n");
-    expect(JSON.parse(run(root, ["revision", "--json"])).sourceRevision).toBe(expected);
-    expect(JSON.parse(run(root, ["wait", "--source-revision", expected, "--timeout-ms", "0", "--json"])))
-      .toEqual({ changed: false, sourceRevision: expected });
+    expect(JSON.parse(run(root, ["revision", "--json"])).referencedSourceRevision).toBe(expected);
+    expect(JSON.parse(run(root, ["wait", "--referenced-source-revision", expected, "--timeout-ms", "0", "--json"])))
+      .toEqual({ changed: false, referencedSourceRevision: expected });
     // A delayed change to the referenced source flips the wait to changed: true.
-    const child = spawn(process.execPath, [script, "wait", "--source-revision", expected, "--timeout-ms", "10000", "--json"], {
+    const child = spawn(process.execPath, [script, "wait", "--referenced-source-revision", expected, "--timeout-ms", "10000", "--json"], {
       cwd: root,
       env: cleanEnv({ AGENT_ANNOTATIONS_DIR: root }),
       stdio: ["ignore", "pipe", "pipe"],
@@ -329,23 +329,28 @@ describe("public CLI processes", () => {
     writeFileSync(path.join(root, "src", "settings.tsx"), "export const A = 2;\n");
     const waited = JSON.parse(await output);
     expect(waited).toMatchObject({ changed: true });
-    expect(waited.sourceRevision).not.toBe(expected);
-    expect(waited.sourceRevision).toMatch(/^[0-9a-f]{64}$/);
+    expect(waited.referencedSourceRevision).not.toBe(expected);
+    expect(waited.referencedSourceRevision).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it("rejects invalid revision wait arguments with exit code 2", () => {
     const root = fixture();
     const missing = runExpectingFailure(root, ["wait"]);
     expect(missing.status).toBe(2);
-    expect(missing.stderr).toContain("--source-revision");
-    const badSha = runExpectingFailure(root, ["wait", "--source-revision", "short"]);
+    expect(missing.stderr).toContain("--referenced-source-revision");
+    const badSha = runExpectingFailure(root, ["wait", "--referenced-source-revision", "short"]);
     expect(badSha.status).toBe(2);
     expect(badSha.stderr).toContain("64-character hex");
-    const badTimeout = runExpectingFailure(root, ["wait", "--source-revision", "0".repeat(64), "--timeout-ms", "99999"]);
+    const badTimeout = runExpectingFailure(root, ["wait", "--referenced-source-revision", "0".repeat(64), "--timeout-ms", "99999"]);
     expect(badTimeout.status).toBe(2);
     expect(badTimeout.stderr).toContain("between 0 and 30000");
-    const badRange = runExpectingFailure(root, ["wait", "--source-revision", "0".repeat(64), "--timeout-ms", "-1"]);
+    const badRange = runExpectingFailure(root, ["wait", "--referenced-source-revision", "0".repeat(64), "--timeout-ms", "-1"]);
     expect(badRange.status).toBe(2);
+    expect(runExpectingFailure(root, ["wait", "--browser-update-revision", "-1"]).status).toBe(2);
+    expect(runExpectingFailure(root, ["wait", "--browser-update-revision", "1.5"]).status).toBe(2);
+    expect(runExpectingFailure(root, ["wait", "--browser-update-revision", "9007199254740992"]).status).toBe(2);
+    expect(runExpectingFailure(root, ["wait", "--source-revision", "0".repeat(64)]).status).toBe(2);
+    expect(runExpectingFailure(root, ["wait", "--browser-source-revision", "0".repeat(64)]).status).toBe(2);
     const unknown = runExpectingFailure(root, ["revision", "--bogus"]);
     expect(unknown.status).toBe(2);
     expect(unknown.stderr).toContain("unknown option");
@@ -395,8 +400,8 @@ describe("public CLI processes", () => {
     const output = runWith(src, ["revision", "--json"], cleanEnv());
     expect(JSON.parse(output)).toEqual({
       taskRevision: 0,
-      sourceRevision: createSourcePathService(workspace).revision(task),
-      sourceFiles: ["packages/app/src/settings.tsx"],
+      referencedSourceRevision: createSourcePathService(workspace).revision(task),
+      referencedSourceFiles: ["packages/app/src/settings.tsx"],
     });
     expect(JSON.parse(runWith(src, ["validate-task", "--json"], cleanEnv()))).toMatchObject({ ok: true, taskId: "task-mono" });
   });
@@ -407,8 +412,8 @@ describe("public CLI processes", () => {
     const nested = nestedAppFixture(fixture);
     const anchored = {
       taskRevision: 0,
-      sourceRevision: createSourcePathService(app).revision(nested.task),
-      sourceFiles: ["src/settings.tsx"],
+      referencedSourceRevision: createSourcePathService(app).revision(nested.task),
+      referencedSourceFiles: ["src/settings.tsx"],
     };
     expect(JSON.parse(runWith(src, ["--root", app, "revision", "--json"], cleanEnv()))).toEqual(anchored);
     expect(JSON.parse(runWith(src, ["revision", "--json", "--root", app], cleanEnv()))).toEqual(anchored);
@@ -422,8 +427,8 @@ describe("public CLI processes", () => {
     writeSession(outside, workspace, outside);
     const expected = {
       taskRevision: 0,
-      sourceRevision: createSourcePathService(workspace).revision(task),
-      sourceFiles: ["packages/app/src/settings.tsx"],
+      referencedSourceRevision: createSourcePathService(workspace).revision(task),
+      referencedSourceFiles: ["packages/app/src/settings.tsx"],
     };
     expect(JSON.parse(runWith(src, ["--dir", outside, "revision", "--json"], cleanEnv()))).toEqual(expected);
     expect(JSON.parse(runWith(src, ["revision", "--json"], cleanEnv({ AGENT_ANNOTATIONS_DIR: outside })))).toEqual(expected);
@@ -435,12 +440,12 @@ describe("public CLI processes", () => {
     const nested = nestedAppFixture(fixture);
     expect(JSON.parse(runWith(src, ["revision", "--json"], cleanEnv({ AGENT_ANNOTATIONS_ROOT: app })))).toEqual({
       taskRevision: 0,
-      sourceRevision: createSourcePathService(app).revision(nested.task),
-      sourceFiles: ["src/settings.tsx"],
+      referencedSourceRevision: createSourcePathService(app).revision(nested.task),
+      referencedSourceFiles: ["src/settings.tsx"],
     });
     // --root beats the environment: the flag re-anchors the same task at the
     // monorepo root, where the app-relative source path does not resolve.
-    expect(JSON.parse(runWith(src, ["revision", "--json", "--root", workspace], cleanEnv({ AGENT_ANNOTATIONS_ROOT: app }))).sourceFiles)
+    expect(JSON.parse(runWith(src, ["revision", "--json", "--root", workspace], cleanEnv({ AGENT_ANNOTATIONS_ROOT: app }))).referencedSourceFiles)
       .toEqual([]);
   });
 
@@ -469,8 +474,8 @@ describe("public CLI processes", () => {
     writeFileSync(path.join(pkg, ".agent-annotations", "tasks/active-task.json"), JSON.stringify(task));
     expect(JSON.parse(runWith(deep, ["revision", "--json"], cleanEnv()))).toEqual({
       taskRevision: 0,
-      sourceRevision: createSourcePathService(pkg).revision(task),
-      sourceFiles: ["src/settings.tsx"],
+      referencedSourceRevision: createSourcePathService(pkg).revision(task),
+      referencedSourceFiles: ["src/settings.tsx"],
     });
   });
 
@@ -499,7 +504,7 @@ describe("public CLI processes", () => {
       sessionPresent: false,
       browserConnected: false,
       taskSynchronized: false,
-      sourceSynchronized: false,
+      referencedSourceSynchronized: null,
       diagnosticCount: 0,
     });
     expect(result.taskId).toBe("task-cli");
@@ -516,7 +521,7 @@ describe("public CLI processes", () => {
       taskValid: true,
       browserConnected: false,
       taskSynchronized: false,
-      sourceSynchronized: false,
+      referencedSourceSynchronized: null,
     });
     writeBrowserState(root, {
       taskId: "task-cli",
@@ -548,11 +553,11 @@ describe("public CLI processes", () => {
       })],
     });
     writeFileSync(path.join(root, "tasks/active-task.json"), JSON.stringify(task));
-    const sourceRevision = createSourcePathService(root).revision(task);
+    const referencedSourceRevision = createSourcePathService(root).revision(task);
     writeBrowserState(root, {
       taskId: task.taskId,
       taskRevision: task.taskRevision,
-      referencedSourceRevision: sourceRevision,
+      referencedSourceRevision: referencedSourceRevision,
       referencedSourceFiles: ["src/settings.tsx"],
       routeKey: "/",
     });
@@ -561,8 +566,9 @@ describe("public CLI processes", () => {
       taskValid: true,
       browserConnected: true,
       taskSynchronized: true,
-      sourceSynchronized: true,
-      referencedSourceRevision: sourceRevision,
+      referencedSourceSynchronized: true,
+      referencedSourceRevision: referencedSourceRevision,
+      browserReferencedSourceRevision: referencedSourceRevision,
     });
     // Disk changed but the browser has not applied it yet.
     writeFileSync(path.join(root, "src", "settings.tsx"), "export const A = 2;\n");
@@ -570,49 +576,75 @@ describe("public CLI processes", () => {
     expect(ahead.status).toBe(1);
     expect(JSON.parse(ahead.stdout)).toMatchObject({
       taskSynchronized: true,
-      sourceSynchronized: false,
+      referencedSourceSynchronized: false,
     });
     // A different task identity fails taskSynchronized.
     writeFileSync(path.join(root, "src", "settings.tsx"), "export const A = 1;\n");
     writeBrowserState(root, {
       taskId: "other-task",
       taskRevision: 0,
-      referencedSourceRevision: sourceRevision,
+      referencedSourceRevision: referencedSourceRevision,
     });
     const mismatched = runExpectingFailure(root, ["status", "--check", "--json"]);
     expect(JSON.parse(mismatched.stdout).taskSynchronized).toBe(false);
   });
 
-  it("waits for the browser-applied source revision and times out without a browser", async () => {
+  it("passes status --check with an explicit unavailable referenced-source state", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "agent-annotations-cli-status-null-"));
+    roots.push(root);
+    mkdirSync(path.join(root, "tasks"), { recursive: true });
+    const task = createAgentAnnotationsTask({ taskId: "task-status-null", createdAt: "2026-08-12T12:00:00.000Z" });
+    writeFileSync(path.join(root, "tasks/active-task.json"), JSON.stringify(task));
+    writeBrowserState(root, { taskId: task.taskId, taskRevision: task.taskRevision });
+    expect(JSON.parse(run(root, ["status", "--check", "--json"]))).toMatchObject({
+      browserConnected: true,
+      taskSynchronized: true,
+      referencedSourceRevision: null,
+      referencedSourceFiles: [],
+      browserReferencedSourceRevision: null,
+      browserReferencedSourceFiles: [],
+      referencedSourceSynchronized: null,
+    });
+  });
+
+  it("waits for a newer browser update generation and ignores stale browsers", () => {
     const root = mkdtempSync(path.join(tmpdir(), "agent-annotations-cli-browser-wait-"));
     roots.push(root);
     mkdirSync(path.join(root, "tasks"), { recursive: true });
     const task = createAgentAnnotationsTask({ taskId: "task-bw", createdAt: "2026-08-12T12:00:00.000Z" });
     writeFileSync(path.join(root, "tasks/active-task.json"), JSON.stringify(task));
-    const baseline = "0".repeat(64);
-    // No browser state: the wait must not treat the disk as applied.
-    expect(JSON.parse(run(root, ["wait", "--browser-source-revision", baseline, "--timeout-ms", "0", "--json"])))
-      .toEqual({ changed: false, sourceRevision: null });
-    // A fresh browser with the baseline applied times out unchanged.
-    writeBrowserState(root, { taskId: "task-bw", taskRevision: 0, referencedSourceRevision: baseline });
-    expect(JSON.parse(run(root, ["wait", "--browser-source-revision", baseline, "--timeout-ms", "0", "--json"])))
-      .toEqual({ changed: false, sourceRevision: baseline });
-    // The browser applies a new revision: the wait flips to changed.
-    const applied = "a".repeat(64);
-    writeBrowserState(root, { taskId: "task-bw", taskRevision: 0, referencedSourceRevision: applied });
-    expect(JSON.parse(run(root, ["wait", "--browser-source-revision", baseline, "--timeout-ms", "0", "--json"])))
-      .toEqual({ changed: true, sourceRevision: applied });
-    expect(run(root, ["wait", "--browser-source-revision", baseline, "--timeout-ms", "0"]))
-      .toBe(`changed: true, sourceRevision: ${applied}\n`);
+    expect(JSON.parse(run(root, ["wait", "--browser-update-revision", "1", "--timeout-ms", "0", "--json"])))
+      .toEqual({ changed: false, browserUpdateRevision: null });
+    writeBrowserState(root, { taskId: "task-bw", taskRevision: 0, browserUpdateRevision: 1 });
+    expect(JSON.parse(run(root, ["wait", "--browser-update-revision", "1", "--timeout-ms", "0", "--json"])))
+      .toEqual({ changed: false, browserUpdateRevision: 1 });
+    writeBrowserState(root, { taskId: "task-bw", taskRevision: 0, browserUpdateRevision: 2 });
+    expect(JSON.parse(run(root, ["wait", "--browser-update-revision", "1", "--timeout-ms", "0", "--json"])))
+      .toEqual({ changed: true, browserUpdateRevision: 2 });
+    expect(run(root, ["wait", "--browser-update-revision", "1", "--timeout-ms", "0"]))
+      .toBe("changed: true, browserUpdateRevision: 2\n");
     // Stale browser state never flips.
     writeBrowserState(root, {
       taskId: "task-bw",
       taskRevision: 0,
-      referencedSourceRevision: applied,
+      browserUpdateRevision: 2,
       lastHeartbeatAt: "2026-08-12T12:00:00.000Z",
     });
-    expect(JSON.parse(run(root, ["wait", "--browser-source-revision", baseline, "--timeout-ms", "0", "--json"])))
-      .toEqual({ changed: false, sourceRevision: null });
+    expect(JSON.parse(run(root, ["wait", "--browser-update-revision", "1", "--timeout-ms", "0", "--json"])))
+      .toEqual({ changed: false, browserUpdateRevision: null });
+  });
+
+  it("returns an explicit unavailable referenced-source wait result", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "agent-annotations-cli-source-null-"));
+    roots.push(root);
+    mkdirSync(path.join(root, "tasks"), { recursive: true });
+    const task = createAgentAnnotationsTask({ taskId: "task-source-null", createdAt: "2026-08-12T12:00:00.000Z" });
+    writeFileSync(path.join(root, "tasks/active-task.json"), JSON.stringify(task));
+    const baseline = "0".repeat(64);
+    expect(JSON.parse(run(root, ["wait", "--referenced-source-revision", baseline, "--timeout-ms", "10000", "--json"])))
+      .toEqual({ changed: false, referencedSourceRevision: null });
+    expect(run(root, ["wait", "--referenced-source-revision", baseline, "--timeout-ms", "0"]))
+      .toBe("changed: false, referencedSourceRevision: unavailable\n");
   });
 
   it("rejects a session whose runtime root escapes the workspace root unless --dir is explicit", () => {

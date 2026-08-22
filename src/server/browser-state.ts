@@ -126,6 +126,9 @@ export const parseAgentAnnotationsBrowserState = (
     const issue = boundedString(file, MAX_SOURCE_FILE, "referencedSourceFiles entry");
     if (issue) throw new TypeError(issue);
   }
+  if (input.referencedSourceFiles.length === 0 && input.referencedSourceRevision !== null) {
+    throw new TypeError("referencedSourceRevision must be null when referencedSourceFiles is empty");
+  }
   const mountedAt = timestampIssue(input.mountedAt, "mountedAt");
   if (mountedAt) throw new TypeError(mountedAt);
   const lastHeartbeatAt = timestampIssue(input.lastHeartbeatAt, "lastHeartbeatAt");

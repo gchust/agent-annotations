@@ -69,6 +69,11 @@ describe("browser state v2", () => {
       ...state,
       referencedSourceFiles: ["x".repeat(2_049)],
     })).toThrow(/referencedSourceFiles/);
+    expect(() => parseAgentAnnotationsBrowserState({
+      ...state,
+      referencedSourceRevision: "ab".repeat(32),
+      referencedSourceFiles: [],
+    })).toThrow(/must be null/);
     expect(() => parseAgentAnnotationsBrowserState({ ...state, mountedAt: "not-a-date" }))
       .toThrow(/mountedAt/);
     expect(() => parseAgentAnnotationsBrowserState({ ...state, lastHeartbeatAt: "2026-13-99" }))

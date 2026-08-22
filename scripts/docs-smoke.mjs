@@ -17,8 +17,8 @@ for (const text of [
   `${bin} status [--json] [--check]`,
   `${bin} --root <path> --dir <path> <command> [options]`,
   `${bin} revision [--json]`,
-  `${bin} wait --source-revision <sha256> [--timeout-ms <n>] [--json]`,
-  `${bin} wait --browser-source-revision <sha256> [--timeout-ms <n>] [--json]`,
+  `${bin} wait --browser-update-revision <integer> [--timeout-ms <n>] [--json]`,
+  `${bin} wait --referenced-source-revision <sha256> [--timeout-ms <n>] [--json]`,
   `${bin} diagnostics [--json|--clear]`,
   `${bin} evidence [--json|--prune [--json]]`,
 ]) {
@@ -37,6 +37,12 @@ for (const file of forbiddenVerify) {
   const content = readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
   if (oldVerifyUsage.test(content)) {
     throw new Error(`${file} must not document the removed verify command`);
+  }
+}
+for (const file of forbiddenVerify) {
+  const content = readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
+  for (const flag of ["--source-" + "revision", "--browser-source-" + "revision"]) {
+    if (content.includes(flag)) throw new Error(`${file} must not document removed wait option ${flag}`);
   }
 }
 // Dependency governance: the manifest dependency keys must never couple to

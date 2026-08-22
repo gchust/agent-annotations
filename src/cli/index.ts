@@ -35,8 +35,8 @@ Commands:
   validate-task [--json]
   status [--json] [--check]
   revision [--json]
-  wait --source-revision <sha256> [--timeout-ms <n>] [--json]
-  wait --browser-source-revision <sha256> [--timeout-ms <n>] [--json]
+  wait --browser-update-revision <integer> [--timeout-ms <n>] [--json]
+  wait --referenced-source-revision <sha256> [--timeout-ms <n>] [--json]
   diagnostics [--json|--clear]
   evidence [--json|--prune [--json]]
 `;
@@ -201,32 +201,32 @@ const main = async (): Promise<void> => {
     const browser = readAgentAnnotationsBrowserState(runtimeRoot);
     const browserConnected = browser !== null && isBrowserStateFresh(browser);
     const sourcePaths = createSourcePathService(workspaceRoot);
-    const sourceRevision = current ? sourcePaths.revision(current) : null;
+    const referencedSourceRevision = current ? sourcePaths.revision(current) : null;
+    const referencedSourceFiles = current ? sourcePaths.files(current) : [];
     const taskSynchronized =
       taskValid &&
       browserConnected &&
       browser.taskId === current!.taskId &&
       browser.taskRevision === current!.taskRevision;
-    const sourceSynchronized =
-      browserConnected &&
-      browser.referencedSourceRevision !== null &&
-      sourceRevision !== null &&
-      browser.referencedSourceRevision === sourceRevision;
+    const referencedSourceSynchronized = referencedSourceRevision === null
+      ? null
+      : browserConnected && browser.referencedSourceRevision === referencedSourceRevision;
     const report = {
       taskValid,
       // The resolved, shape-validated session (canonical roots, token, pid).
       sessionPresent: session !== null,
       browserConnected,
       taskSynchronized,
-      sourceSynchronized,
+      referencedSourceSynchronized,
       taskId: current?.taskId ?? null,
       taskRevision: current?.taskRevision ?? null,
       browserTaskId: browser?.taskId ?? null,
       browserTaskRevision: browser?.taskRevision ?? null,
-      sourceRevision,
       browserUpdateRevision: browser?.browserUpdateRevision ?? null,
-      referencedSourceRevision: browser?.referencedSourceRevision ?? null,
-      referencedSourceFiles: browser?.referencedSourceFiles ?? [],
+      referencedSourceRevision,
+      referencedSourceFiles,
+      browserReferencedSourceRevision: browser?.referencedSourceRevision ?? null,
+      browserReferencedSourceFiles: browser?.referencedSourceFiles ?? [],
       routeKey: browser?.routeKey ?? null,
       lastHeartbeatAt: browser?.lastHeartbeatAt ?? null,
       diagnosticCount: (await readDiagnostics(runtimeRoot)).length,
@@ -238,7 +238,12 @@ const main = async (): Promise<void> => {
         process.stdout.write(`${key}: ${String(value)}\n`);
       }
     }
-    if (check && !(report.taskValid && report.browserConnected && report.taskSynchronized && report.sourceSynchronized)) {
+    if (check && !(
+      report.taskValid &&
+      report.browserConnected &&
+      report.taskSynchronized &&
+      report.referencedSourceSynchronized !== false
+    )) {
       return fail("status check failed", 1);
     }
     return;
@@ -252,34 +257,36 @@ const main = async (): Promise<void> => {
     const sourcePaths = createSourcePathService(workspaceRoot);
     const revision = {
       taskRevision: current.taskRevision,
-      sourceRevision: sourcePaths.revision(current),
-      sourceFiles: sourcePaths.files(current),
+      referencedSourceRevision: sourcePaths.revision(current),
+      referencedSourceFiles: sourcePaths.files(current),
     };
     if (json) {
       process.stdout.write(`${JSON.stringify(revision)}\n`);
       return;
     }
     process.stdout.write(
-      `taskRevision ${revision.taskRevision} sourceRevision ${revision.sourceRevision} sourceFiles: ${revision.sourceFiles.join(", ") || "(none)"}\n`
+      `taskRevision ${revision.taskRevision} referencedSourceRevision ${revision.referencedSourceRevision ?? "unavailable"} referencedSourceFiles: ${revision.referencedSourceFiles.join(", ") || "(none)"}\n`
     );
     return;
   }
   if (command === "wait") {
-    let target: string | null = null;
-    let browserTarget: string | null = null;
+    let browserUpdateTarget: string | null = null;
+    let referencedSourceTarget: string | null = null;
     let timeoutMs = 30_000;
     const json = args.includes("--json");
     const rest = args.filter((arg) => arg !== "--json");
     while (rest.length) {
       const option = rest.shift();
-      if (option === "--source-revision") {
-        if (target !== null || browserTarget !== null) return fail("duplicate --source-revision", 2);
-        target = rest.shift() ?? "";
-      } else if (option === "--browser-source-revision") {
-        if (target !== null || browserTarget !== null) {
-          return fail("duplicate --browser-source-revision", 2);
+      if (option === "--browser-update-revision") {
+        if (browserUpdateTarget !== null || referencedSourceTarget !== null) {
+          return fail("wait accepts exactly one revision option", 2);
         }
-        browserTarget = rest.shift() ?? "";
+        browserUpdateTarget = rest.shift() ?? "";
+      } else if (option === "--referenced-source-revision") {
+        if (browserUpdateTarget !== null || referencedSourceTarget !== null) {
+          return fail("wait accepts exactly one revision option", 2);
+        }
+        referencedSourceTarget = rest.shift() ?? "";
       } else if (option === "--timeout-ms") {
         const value = rest.shift() ?? "";
         if (!/^\d+$/.test(value)) {
@@ -294,38 +301,53 @@ const main = async (): Promise<void> => {
         return fail(`unknown option: ${option}`, 2);
       }
     }
-    if (target === null && browserTarget === null) {
-      return fail("wait requires --source-revision or --browser-source-revision <sha256>", 2);
+    if (browserUpdateTarget === null && referencedSourceTarget === null) {
+      return fail("wait requires --browser-update-revision <integer> or --referenced-source-revision <sha256>", 2);
     }
-    const baseline = (target ?? browserTarget)!.toLowerCase();
-    if (!/^[0-9a-f]{64}$/i.test(baseline)) {
-      return fail("--source-revision must be a 64-character hex sha256", 2);
+    let browserUpdateBaseline: number | null = null;
+    let referencedSourceBaseline: string | null = null;
+    if (browserUpdateTarget !== null) {
+      if (!/^\d+$/.test(browserUpdateTarget)) {
+        return fail("--browser-update-revision must be a non-negative safe integer", 2);
+      }
+      browserUpdateBaseline = Number(browserUpdateTarget);
+      if (!Number.isSafeInteger(browserUpdateBaseline)) {
+        return fail("--browser-update-revision must be a non-negative safe integer", 2);
+      }
+    } else {
+      referencedSourceBaseline = referencedSourceTarget!.toLowerCase();
+      if (!/^[0-9a-f]{64}$/i.test(referencedSourceBaseline)) {
+        return fail("--referenced-source-revision must be a 64-character hex sha256", 2);
+      }
     }
     const store = new FileTaskStore(runtimeRoot);
     const sourcePaths = createSourcePathService(workspaceRoot);
     const deadline = Date.now() + timeoutMs;
-    let observed: string | null = null;
     while (true) {
-      if (browserTarget !== null) {
-        // Only a fresh browser-reported applied revision can count as applied;
-        // a missing or stale browser never flips the wait.
+      if (browserUpdateBaseline !== null) {
         const browser = readAgentAnnotationsBrowserState(runtimeRoot);
-        observed = browser !== null && isBrowserStateFresh(browser)
-          ? browser.referencedSourceRevision
+        const observed = browser !== null && isBrowserStateFresh(browser)
+          ? browser.browserUpdateRevision
           : null;
+        const changed = observed !== null && observed > browserUpdateBaseline;
+        if (changed || Date.now() >= deadline) {
+          const result = { changed, browserUpdateRevision: observed };
+          process.stdout.write(json
+            ? `${JSON.stringify(result)}\n`
+            : `changed: ${changed}, browserUpdateRevision: ${observed}\n`);
+          return;
+        }
       } else {
         const current = store.read();
-        observed = current ? sourcePaths.revision(current) : null;
-      }
-      if (observed !== null && observed !== baseline) {
-        if (json) process.stdout.write(`${JSON.stringify({ changed: true, sourceRevision: observed })}\n`);
-        else process.stdout.write(`changed: true, sourceRevision: ${observed}\n`);
-        return;
-      }
-      if (Date.now() >= deadline) {
-        if (json) process.stdout.write(`${JSON.stringify({ changed: false, sourceRevision: observed })}\n`);
-        else process.stdout.write(`changed: false, sourceRevision: ${observed}\n`);
-        return;
+        const observed = current ? sourcePaths.revision(current) : null;
+        const changed = observed !== null && observed !== referencedSourceBaseline;
+        if (changed || observed === null || Date.now() >= deadline) {
+          const result = { changed, referencedSourceRevision: observed };
+          process.stdout.write(json
+            ? `${JSON.stringify(result)}\n`
+            : `changed: ${changed}, referencedSourceRevision: ${observed ?? "unavailable"}\n`);
+          return;
+        }
       }
       await new Promise((resolve) => setTimeout(resolve, 250));
     }

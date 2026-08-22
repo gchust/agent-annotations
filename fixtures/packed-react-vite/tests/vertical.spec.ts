@@ -58,11 +58,11 @@ test("packed browser to file to CLI to browser loop, HMR and session security", 
   expect(JSON.parse(cli("diagnostics", "--json"))).toEqual([]);
   // Revision and wait commands report and poll exact referenced sources.
   const revision = JSON.parse(cli("revision", "--json"));
-  expect(revision).toMatchObject({ taskRevision: expect.any(Number), sourceFiles: ["src/main.tsx"] });
-  expect(revision.sourceRevision).toMatch(/^[0-9a-f]{64}$/);
+  expect(revision).toMatchObject({ taskRevision: expect.any(Number), referencedSourceFiles: ["src/main.tsx"] });
+  expect(revision.referencedSourceRevision).toMatch(/^[0-9a-f]{64}$/);
   // The given revision is a baseline: an unchanged revision times out with changed: false.
-  expect(JSON.parse(cli("wait", "--source-revision", revision.sourceRevision, "--timeout-ms", "0", "--json")))
-    .toEqual({ changed: false, sourceRevision: revision.sourceRevision });
+  expect(JSON.parse(cli("wait", "--referenced-source-revision", revision.referencedSourceRevision, "--timeout-ms", "0", "--json")))
+    .toEqual({ changed: false, referencedSourceRevision: revision.referencedSourceRevision });
   expect(JSON.parse(cli("list", "--json"))).toMatchObject({
     taskId: task.taskId,
     taskRevision: expect.any(Number),

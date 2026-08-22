@@ -2607,7 +2607,7 @@ describe("client runtime", () => {
     screenshot.captureViewportPng.mockResolvedValue({ png: "fake-png", width: 100, height: 100, durationMs: 1, bestEffort: true });
     const fetchMock = vi.fn<typeof fetch>(async (input: RequestInfo | URL) => {
       if (String(input).endsWith("/revision")) {
-        return new Response(JSON.stringify({ sourceRevision: "ab".repeat(32) }), { status: 200 });
+        return new Response(JSON.stringify({ referencedSourceRevision: "ab".repeat(32) }), { status: 200 });
       }
       return new Response("{}", { status: 200 });
     });
@@ -2806,8 +2806,8 @@ describe("client runtime", () => {
         return new Response(JSON.stringify({
           taskId: "task-1",
           taskRevision: 0,
-          sourceRevision: "ab".repeat(32),
-          sourceFiles: [],
+          referencedSourceRevision: null,
+          referencedSourceFiles: [],
         }), { status: 200 });
       }
       return new Response("{}", { status: 200 });
@@ -2855,8 +2855,8 @@ describe("client runtime", () => {
         return new Response(JSON.stringify({
           taskId: initial.taskId,
           taskRevision: initial.taskRevision,
-          sourceRevision: "ab".repeat(32),
-          sourceFiles: ["src/App.tsx"],
+          referencedSourceRevision: "ab".repeat(32),
+          referencedSourceFiles: ["src/App.tsx"],
         }), { status: 200 });
       }
       return new Response("{}", { status: 200 });
@@ -2922,8 +2922,8 @@ describe("client runtime", () => {
           new Response(JSON.stringify({
             taskId: initial.taskId,
             taskRevision: initial.taskRevision,
-            sourceRevision: "cd".repeat(32),
-            sourceFiles: ["src/pages/settings.tsx"],
+            referencedSourceRevision: "cd".repeat(32),
+            referencedSourceFiles: ["src/pages/settings.tsx"],
           }), { status: 200 })
         );
       }
@@ -2948,8 +2948,8 @@ describe("client runtime", () => {
       resolveFirst(new Response(JSON.stringify({
         taskId: initial.taskId,
         taskRevision: initial.taskRevision,
-        sourceRevision: "ab".repeat(32),
-        sourceFiles: ["src/pages/settings.tsx"],
+        referencedSourceRevision: "ab".repeat(32),
+        referencedSourceFiles: ["src/pages/settings.tsx"],
       }), { status: 200 }));
       await vi.advanceTimersByTimeAsync(0);
       expect(JSON.parse(heartbeats().at(-1)![1]!.body as string).referencedSourceRevision)
@@ -5478,8 +5478,9 @@ describe("client runtime", () => {
       const fallback = shadow.querySelector<HTMLTextAreaElement>(".aa-copy-fallback textarea")!;
       const output = fallback.value;
       expect(output).toContain("# Agent Annotations Handoff");
-      expect(output).toContain("- source revision baseline: source revision unavailable");
-      expect(output).not.toContain("wait --browser-source-revision");
+      expect(output).toContain("- browser update revision baseline: 0");
+      expect(output).toContain("- referenced source revision: referenced source revision unavailable");
+      expect(output).toContain("wait --browser-update-revision 0 --json");
       expect(output).toContain("agent-annotations status --check --json");
       expect(output).toContain("agent-annotations validate-task --json");
       expect(output).toContain(
@@ -5525,7 +5526,7 @@ describe("client runtime", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     try {
-      const initial = await new MemoryTaskTransport().read();
+      const initial = taskFixture();
       let publish!: (task: AgentAnnotationsTask) => void;
       const transport: TaskTransport = {
         read: async () => initial,
@@ -5550,15 +5551,16 @@ describe("client runtime", () => {
         new Response(JSON.stringify({
           taskId: initial.taskId,
           taskRevision: initial.taskRevision,
-          sourceRevision: "ab".repeat(32),
-          sourceFiles: [],
+          referencedSourceRevision: "ab".repeat(32),
+          referencedSourceFiles: ["src/pages/settings.tsx"],
         }), { status: 200 })
       );
       mounted.reportBrowserUpdate();
       await vi.advanceTimersByTimeAsync(0);
       await mounted.api.commands.annotations.copyOpen();
       await vi.advanceTimersByTimeAsync(0);
-      expect(fallbackValue()).toContain(`- source revision baseline: ${"ab".repeat(32)}`);
+      expect(fallbackValue()).toContain("- browser update revision baseline: 1");
+      expect(fallbackValue()).toContain(`- referenced source revision: ${"ab".repeat(32)}`);
       const heartbeats = () => fetchMock.mock.calls.filter((call) => String(call[0]).endsWith("/heartbeat"));
       const generation = JSON.parse(heartbeats().at(-1)![1]!.body as string).browserUpdateRevision;
       const revisionFetches = () => fetchMock.mock.calls.filter((call) => String(call[0]).endsWith("/revision"));
@@ -5569,7 +5571,8 @@ describe("client runtime", () => {
       await vi.advanceTimersByTimeAsync(0);
       await mounted.api.commands.annotations.copyOpen();
       await vi.advanceTimersByTimeAsync(0);
-      expect(fallbackValue()).toContain(`- source revision baseline: ${"ab".repeat(32)}`);
+      expect(fallbackValue()).toContain("- browser update revision baseline: 1");
+      expect(fallbackValue()).toContain(`- referenced source revision: ${"ab".repeat(32)}`);
       expect(JSON.parse(heartbeats().at(-1)![1]!.body as string).browserUpdateRevision).toBe(generation);
       expect(revisionFetches()).toHaveLength(1);
       // A trusted browser update advances the generation, but a response for
@@ -5578,8 +5581,8 @@ describe("client runtime", () => {
         JSON.stringify({
           taskId: initial.taskId,
           taskRevision: 99,
-          sourceRevision: "ef".repeat(32),
-          sourceFiles: [],
+          referencedSourceRevision: null,
+          referencedSourceFiles: [],
         }),
         { status: 200 }
       ));
@@ -5587,8 +5590,9 @@ describe("client runtime", () => {
       await vi.advanceTimersByTimeAsync(0);
       await mounted.api.commands.annotations.copyOpen();
       await vi.advanceTimersByTimeAsync(0);
-      expect(fallbackValue()).toContain("- source revision baseline: source revision unavailable");
-      expect(fallbackValue()).not.toContain("wait --browser-source-revision");
+      expect(fallbackValue()).toContain("- browser update revision baseline: 2");
+      expect(fallbackValue()).toContain("- referenced source revision: referenced source revision unavailable");
+      expect(fallbackValue()).toContain("wait --browser-update-revision 2");
       // A task update racing an in-flight trusted report invalidates the
       // response, so the newer task cannot inherit a disk hash it never ran.
       let resolveStale!: (value: Response) => void;
@@ -5596,8 +5600,8 @@ describe("client runtime", () => {
       mounted.reportBrowserUpdate();
       publish({ ...initial, taskRevision: 2 });
       resolveStale(new Response(JSON.stringify({
-        sourceRevision: "ef".repeat(32),
-        sourceFiles: [],
+        referencedSourceRevision: null,
+        referencedSourceFiles: [],
       }), { status: 200 }));
       await vi.advanceTimersByTimeAsync(0);
       expect(JSON.parse(heartbeats().at(-1)![1]!.body as string).referencedSourceRevision).toBeNull();
@@ -5606,16 +5610,17 @@ describe("client runtime", () => {
         new Response(JSON.stringify({
           taskId: initial.taskId,
           taskRevision: 2,
-          sourceRevision: "cd".repeat(32),
-          sourceFiles: ["src/pages/settings.tsx"],
+          referencedSourceRevision: "cd".repeat(32),
+          referencedSourceFiles: ["src/pages/settings.tsx"],
         }), { status: 200 })
       );
       mounted.reportBrowserUpdate();
       await vi.advanceTimersByTimeAsync(0);
       await mounted.api.commands.annotations.copyOpen();
       await vi.advanceTimersByTimeAsync(0);
-      expect(fallbackValue()).toContain(`- source revision baseline: ${"cd".repeat(32)}`);
-      expect(fallbackValue()).toContain("wait --browser-source-revision");
+      expect(fallbackValue()).toContain("- browser update revision baseline: 4");
+      expect(fallbackValue()).toContain(`- referenced source revision: ${"cd".repeat(32)}`);
+      expect(fallbackValue()).toContain("wait --browser-update-revision 4");
       mounted.unmount();
     } finally {
       vi.unstubAllGlobals();

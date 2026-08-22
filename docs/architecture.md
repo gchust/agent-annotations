@@ -47,7 +47,7 @@ flowchart TD
   under a shared cross-process file lock with stale-lock recovery.
 - `Browser State / Diagnostics` feed the CLI `status` check, the
   `diagnostics` boundary, and handoff output; the CLI is the Code agent's
-  read/write authority (`validate-task`, `wait --browser-source-revision`,
+  read/write authority (`validate-task`, `wait --browser-update-revision`,
   `complete`, `reopen`, `evidence`, `revision`).
 
 ## Runtime module graph

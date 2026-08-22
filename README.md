@@ -82,8 +82,8 @@ the task file.
 4. **Capture**: pick an element with `Ctrl+Alt+P`, type a comment, save. The
    task lands in `.agent-annotations/tasks/active-task.json`.
 5. **Hand off**: the browser runtime stays in sync; a code agent edits the
-   source, then runs `agent-annotations wait --browser-source-revision <sha>` —
-   the browser waits for the applied change, then
+   source, then runs `agent-annotations wait --browser-update-revision <generation>` —
+   the browser waits for the applied update, then
    `agent-annotations complete <id> --verified --summary <text>`.
 
 ## Manual runtime and custom transports
@@ -204,8 +204,8 @@ agent-annotations print [--json|--markdown]
 agent-annotations validate-task [--json]
 agent-annotations status [--json] [--check]
 agent-annotations revision [--json]
-agent-annotations wait --source-revision <sha256> [--timeout-ms <n>] [--json]
-agent-annotations wait --browser-source-revision <sha256> [--timeout-ms <n>] [--json]
+agent-annotations wait --browser-update-revision <integer> [--timeout-ms <n>] [--json]
+agent-annotations wait --referenced-source-revision <sha256> [--timeout-ms <n>] [--json]
 agent-annotations diagnostics [--json|--clear]
 agent-annotations evidence [--json|--prune [--json]]
 ```
@@ -216,27 +216,25 @@ claims anything about the browser or the running dev server. `--json` prints
 exactly one parseable JSON value on stdout; without it the CLI prints stable
 human-readable text; errors go to stderr with stable exit codes.
 
-`status [--json] [--check]` reports the development-loop state: task validity,
-session presence, browser connection (fresh heartbeats within 15 seconds),
-task synchronization, source synchronization (the browser-reported applied
-source revision vs the referenced-source revision), plus ids, revisions,
-route, last heartbeat, and diagnostic count. Without `--check` it is purely
-informational and exits 0 even with no browser; `--check` exits 1 unless
-task, browser, task synchronization, and source synchronization are all
-healthy. `wait --browser-source-revision <sha256>` waits until the
-browser-applied source revision moves off the baseline (a missing or stale
-browser never counts as applied), while `wait --source-revision` keeps
-waiting on the referenced-source revision computed from disk.
+`status [--json] [--check]` reports task validity, session presence, browser
+connection, task synchronization, browser update generation, disk-computed
+referenced-source revision, browser-reported referenced-source revision, and
+whether referenced-source synchronization is available. When no source files
+are known, the revision and synchronization fields are `null`; this does not
+make `status --check` fail. `wait --browser-update-revision <integer>` waits
+for a fresh browser generation above the baseline, while `wait
+--referenced-source-revision <sha256>` watches known referenced files and
+returns an explicit unavailable result when none are known.
 
 The default `Copy` action emits a Code-Agent handoff instead of a data dump:
-instructions, the browser-applied source revision baseline (or exactly
-`source revision unavailable` without one — a SHA is never invented), and an exact
+instructions, the browser update generation baseline and supplementary
+referenced-source revision (or explicit unavailable values — a SHA is never invented), and an exact
 `complete --verified --summary` command per annotation. The loop is:
 
 ```text
 # 1. the agent edits real source files (never active-task.json)
 # 2. wait until the browser actually applied the change
-agent-annotations wait --browser-source-revision <sha256> --json
+agent-annotations wait --browser-update-revision <generation> --json
 # 3. the full runtime is synchronized and healthy
 agent-annotations status --check --json
 # 4. the task file itself is valid
@@ -265,10 +263,8 @@ privacy-safe network failures (transport, method, status, and the sanitized
 origin+path URL — never queries, bodies, headers, or auth); `evidence`
 lists task-referenced screenshot files with their annotation ids and never
 touches files outside the runtime evidence directory. `revision` reports the
-exact task revision, the sha256 of the referenced canonical source files, and
-those files; `wait` treats the given sha256 as a baseline and returns
-`{ changed: true, sourceRevision }` as soon as the referenced-source revision
-moves off it, or `{ changed: false, sourceRevision }` when it stays until the
+task revision, `referencedSourceRevision` (or `null`), and canonical referenced
+files. The two wait modes return their named observed field and use the same
 bounded (30 second) timeout.
 
 ## Localization

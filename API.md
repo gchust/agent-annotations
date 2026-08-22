@@ -204,17 +204,17 @@ to stderr with exit code 1 (runtime) or 2 (usage). The removed `verify` command
 has no alias.
 
 `status [--json] [--check]` reads the browser runtime state persisted by the
-authenticated dev client (`.agent-annotations/browser-state.json`, strict v1
+authenticated dev client (`.agent-annotations/browser-state.json`, strict v2
 schema, mode 0600, no token or sensitive text) and reports task validity,
 session presence, browser connection (fresh heartbeat within 15 seconds), task
 and source synchronization, ids/revisions, route, last heartbeat, and
 diagnostic count. `--check` exits 1 unless `taskValid`, `browserConnected`,
-`taskSynchronized`, and `sourceSynchronized` are all true; without `--check`
-the command is informational and exits 0. `wait --browser-source-revision
-<sha256>` waits for the browser-reported applied source revision to leave the
-baseline (a stale or missing browser never counts as applied);
-`wait --source-revision` keeps watching the disk-computed referenced-source
-revision.
+`taskSynchronized`, and available referenced-source synchronization are
+healthy; without `--check`
+the command is informational and exits 0. `wait --browser-update-revision
+<integer>` waits for a fresh browser generation above the baseline; `wait
+--referenced-source-revision <sha256>` watches known referenced files and
+returns an explicit unavailable result when no files are known.
 
 Path resolution is shared by every command and distinguishes the workspace
 root from the runtime data directory: `--root`/`AGENT_ANNOTATIONS_ROOT` set the

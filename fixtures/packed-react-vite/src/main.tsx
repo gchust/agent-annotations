@@ -6,6 +6,7 @@ import { RouteA } from "./route-a/RouteA";
 import { RouteB } from "./route-b/RouteB";
 import { DuplicateA } from "./duplicate-a/Card";
 import { DuplicateB } from "./duplicate-b/Card";
+import "./theme.css";
 
 export const MemoCard = memo(() => <button id="memo-card">Memo source</button>);
 export const ForwardCard = forwardRef<HTMLButtonElement>((_, ref) => <button id="forward-card" ref={ref}>Forward source</button>);

@@ -106,8 +106,8 @@ test("source-benchmark duplicate-basename exact path, line, column, and revision
   const wrong = path.resolve("src/duplicate-b/Card.tsx");
   const token = JSON.parse(readFileSync(path.join(runtimeRoot, "session.json"), "utf8")).token;
   const baseline = await revision(page, token);
-  expect(baseline.sourceFiles).toContain("src/duplicate-a/Card.tsx");
-  expect(baseline.sourceFiles).not.toContain("src/duplicate-b/Card.tsx");
+  expect(baseline.referencedSourceFiles).toContain("src/duplicate-a/Card.tsx");
+  expect(baseline.referencedSourceFiles).not.toContain("src/duplicate-b/Card.tsx");
   const wrongBefore = readFileSync(wrong, "utf8");
   const correctBefore = readFileSync(correct, "utf8");
   try {
@@ -118,9 +118,9 @@ test("source-benchmark duplicate-basename exact path, line, column, and revision
     const afterCorrect = await revision(page, token);
     expect(afterCorrect).toMatchObject({
       taskRevision: baseline.taskRevision,
-      sourceFiles: baseline.sourceFiles,
+      referencedSourceFiles: baseline.referencedSourceFiles,
     });
-    expect(afterCorrect.sourceRevision).not.toBe(baseline.sourceRevision);
+    expect(afterCorrect.referencedSourceRevision).not.toBe(baseline.referencedSourceRevision);
     console.log(`source-revision baseline=${JSON.stringify(baseline)} afterWrong=${JSON.stringify(afterWrong)} afterCorrect=${JSON.stringify(afterCorrect)}`);
   } finally {
     writeFileSync(wrong, wrongBefore);

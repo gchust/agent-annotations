@@ -26,12 +26,16 @@ const annotated = () => taskFixture({
 });
 
 describe("agent handoff formatter", () => {
-  it("emits instructions, the browser baseline, exact completion commands, and evidence refs", () => {
-    const output = formatAgentAnnotationsHandoff(annotated(), { appliedSourceRevision: sha });
+  it("emits browser update and referenced-source baselines with exact completion commands", () => {
+    const output = formatAgentAnnotationsHandoff(annotated(), {
+      browserUpdateRevision: 7,
+      referencedSourceRevision: sha,
+    });
     expect(output).toContain(`# Agent Annotations Handoff ${annotated().taskId}`);
     expect(output).toContain(`- task revision: 4`);
-    expect(output).toContain(`- source revision baseline: ${sha}`);
-    expect(output).toContain(`agent-annotations wait --browser-source-revision ${sha} --json`);
+    expect(output).toContain("- browser update revision baseline: 7");
+    expect(output).toContain(`- referenced source revision: ${sha}`);
+    expect(output).toContain("agent-annotations wait --browser-update-revision 7 --json");
     expect(output).toContain("agent-annotations status --check --json");
     expect(output).toContain("agent-annotations validate-task --json");
     expect(output).toContain("editing active-task.json is not a solution");
@@ -59,7 +63,7 @@ describe("agent handoff formatter", () => {
         ],
       })],
     });
-    const output = formatAgentAnnotationsHandoff(task, { appliedSourceRevision: sha });
+    const output = formatAgentAnnotationsHandoff(task, { browserUpdateRevision: 7 });
     expect(output).toContain("- evidence: evidence/ann-1.png");
     expect(output).toContain("- evidence: evidence/subdir/file.png");
     for (const unsafe of [
@@ -75,37 +79,43 @@ describe("agent handoff formatter", () => {
     expect(output.match(/- evidence: /g) ?? []).toHaveLength(2);
   });
 
-  it("says source revision unavailable and omits the wait command without a baseline", () => {
+  it("reports unavailable baselines without inventing values", () => {
     const output = formatAgentAnnotationsHandoff(annotated());
-    expect(output).toContain("- source revision baseline: source revision unavailable");
-    expect(output).not.toContain("wait --browser-source-revision");
+    expect(output).toContain("- browser update revision baseline: browser update revision unavailable");
+    expect(output).toContain("- referenced source revision: referenced source revision unavailable");
+    expect(output).not.toContain("wait --browser-update-revision");
     expect(output).toContain("agent-annotations status --check --json");
     expect(output).toContain("agent-annotations complete ann-open --verified");
     // An invalid revision is never invented.
-    const malformed = formatAgentAnnotationsHandoff(annotated(), { appliedSourceRevision: "not-a-sha" });
-    expect(malformed).toContain("- source revision baseline: source revision unavailable");
+    const malformed = formatAgentAnnotationsHandoff(annotated(), {
+      browserUpdateRevision: 1.5,
+      referencedSourceRevision: "not-a-sha",
+    });
+    expect(malformed).toContain("browser update revision unavailable");
+    expect(malformed).toContain("referenced source revision unavailable");
   });
 
   it("honors custom command and verification commands", () => {
     const output = formatAgentAnnotationsHandoff(annotated(), {
       command: "pnpm exec agent-annotations",
       verificationCommands: ["pnpm typecheck", "pnpm test"],
-      appliedSourceRevision: sha,
+      browserUpdateRevision: 7,
+      referencedSourceRevision: sha,
     });
     expect(output).toContain("- command: pnpm exec agent-annotations");
     expect(output).toContain("- Run: pnpm typecheck");
     expect(output).toContain("- Run: pnpm test");
-    expect(output).toContain("pnpm exec agent-annotations wait --browser-source-revision");
+    expect(output).toContain("pnpm exec agent-annotations wait --browser-update-revision 7");
     expect(output).toContain(
       `pnpm exec agent-annotations complete ann-open --verified --summary 'Make the button purple'`
     );
   });
 
   it("includes completed annotations only when explicitly requested", () => {
-    const open = formatAgentAnnotationsHandoff(annotated(), { appliedSourceRevision: sha });
+    const open = formatAgentAnnotationsHandoff(annotated(), { browserUpdateRevision: 7 });
     expect(open).not.toContain("ann-done");
     const all = formatAgentAnnotationsHandoff(annotated(), {
-      appliedSourceRevision: sha,
+      browserUpdateRevision: 7,
       includeCompleted: true,
     });
     expect(all).toContain("ann-done");
@@ -121,7 +131,7 @@ describe("agent handoff formatter", () => {
         comment: "Fix $(rm -rf /) `touch /tmp/x` $HOME and 'quotes'\n\n\nwith many newlines",
       })],
     });
-    const output = formatAgentAnnotationsHandoff(task, { appliedSourceRevision: sha });
+    const output = formatAgentAnnotationsHandoff(task, { browserUpdateRevision: 7 });
     // Standard POSIX single-quote escaping: ' renders as '\'\'' inside the
     // single-quoted argument, so nothing can expand; all controls replaced.
     const q = `'"'"'`;
@@ -146,7 +156,7 @@ describe("agent handoff formatter", () => {
         })],
       })],
     });
-    const output = formatAgentAnnotationsHandoff(task, { appliedSourceRevision: sha });
+    const output = formatAgentAnnotationsHandoff(task, { browserUpdateRevision: 7 });
     const lines = output.split("\n");
     expect(lines.some((line) => line.startsWith("- Run:"))).toBe(false);
     const commentLine = lines.find((line) => line.startsWith("Comment:"))!;

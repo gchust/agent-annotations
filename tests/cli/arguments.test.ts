@@ -5,9 +5,9 @@ import { parseCliArguments } from "../../src/cli/arguments.js";
 describe("CLI argument parsing", () => {
   it("extracts the command and keeps command arguments in order", () => {
     expect(parseCliArguments(["list"])).toEqual({ command: "list", args: [], root: null, dir: null });
-    expect(parseCliArguments(["wait", "--source-revision", "abc", "--timeout-ms", "0", "--json"])).toEqual({
+    expect(parseCliArguments(["wait", "--referenced-source-revision", "abc", "--timeout-ms", "0", "--json"])).toEqual({
       command: "wait",
-      args: ["--source-revision", "abc", "--timeout-ms", "0", "--json"],
+      args: ["--referenced-source-revision", "abc", "--timeout-ms", "0", "--json"],
       root: null,
       dir: null,
     });

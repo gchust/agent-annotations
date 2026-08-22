@@ -25,6 +25,12 @@ const fixture = () => {
 afterEach(() => roots.splice(0).forEach((root) => rmSync(root, { recursive: true, force: true })));
 
 describe("source path integrity", () => {
+  it("returns null when no referenced source files resolve", () => {
+    const { source } = fixture();
+    expect(source.files(taskFixture({ annotations: [] }))).toEqual([]);
+    expect(source.revision(taskFixture({ annotations: [] }))).toBeNull();
+  });
+
   it("canonicalizes every supported transport form without basename guessing", () => {
     const { root, source } = fixture();
     const absolute = path.join(root, "src", "a", "Card.tsx");
