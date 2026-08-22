@@ -22,6 +22,9 @@ test("browser status health and HMR-applied source revision ordering", async ({ 
   await page.locator("#duplicate-a").click();
   await shadow(page, '[aria-label="Annotation comment"]').fill("Status fixture");
   await shadow(page, 'button[aria-label="Save annotation"]').click();
+  // The annotation introduces its first referenced source. A full reload is
+  // the trusted update that establishes the corresponding source snapshot.
+  await page.reload();
 
   // Propagation is asynchronous (heartbeats every 5s): poll the full health
   // contract instead of assuming the latest save is already reported.
@@ -38,7 +41,8 @@ test("browser status health and HMR-applied source revision ordering", async ({ 
     taskSynchronized: true,
     sourceSynchronized: true,
   });
-  expect(healthy.appliedSourceRevision).toMatch(/^[0-9a-f]{64}$/);
+  expect(healthy.browserUpdateRevision).toBe(1);
+  expect(healthy.referencedSourceRevision).toMatch(/^[0-9a-f]{64}$/);
 
   // Navigate with an ordinary secret query: the route key never persists it.
   await page.goto("/?secret=supersecretquery");
@@ -53,9 +57,25 @@ test("browser status health and HMR-applied source revision ordering", async ({ 
       : null;
   }, { timeout: 15_000 }).not.toBeNull();
 
-  const baseline = statusJson().appliedSourceRevision;
+  const baselineStatus = statusJson();
+  const baseline = baselineStatus.referencedSourceRevision;
+  const baselineGeneration = baselineStatus.browserUpdateRevision;
   const before = readFileSync(card, "utf8");
   try {
+    // A transform error keeps the old module running. Completing the task is
+    // task-only work and cannot advance either browser-applied field.
+    writeFileSync(card, `${before}\nexport const broken = ;\n`);
+    await page.locator("vite-error-overlay").waitFor();
+    const failedBaseline = statusJson();
+    expect(failedBaseline.browserUpdateRevision).toBe(baselineGeneration);
+    expect(failedBaseline.referencedSourceRevision).toBe(baseline);
+    const task = JSON.parse(readFileSync(path.join(runtimeRoot, "tasks/active-task.json"), "utf8"));
+    cli("complete", task.annotations[0].annotationId, "--verified", "--summary", "Failed HMR remains unapplied");
+    await expect.poll(() => statusJson().taskSynchronized, { timeout: 15_000 }).toBe(true);
+    const failedUpdate = statusJson();
+    expect(failedUpdate.browserUpdateRevision).toBe(failedBaseline.browserUpdateRevision);
+    expect(failedUpdate.referencedSourceRevision).toBe(failedBaseline.referencedSourceRevision);
+
     // Modify the rendered Card content: the browser must report the new
     // revision only after the HMR update is actually applied, and the live
     // DOM must show the new value once the browser-source wait returns.
@@ -74,10 +94,11 @@ test("browser status health and HMR-applied source revision ordering", async ({ 
     // After the HMR applied, the disk and browser revisions agree again.
     const applied = JSON.parse(cli("status", "--check", "--json"));
     expect(applied.sourceSynchronized).toBe(true);
-    expect(applied.appliedSourceRevision).toBe(statusJson().sourceRevision);
+    expect(applied.browserUpdateRevision).toBe(failedBaseline.browserUpdateRevision + 1);
+    expect(applied.referencedSourceRevision).toBe(statusJson().sourceRevision);
     // An unrelated module's HMR update is visibly applied (the extension
     // re-setups) but never moves the referenced-source applied revision.
-    const appliedRevision = applied.appliedSourceRevision;
+    const appliedRevision = applied.referencedSourceRevision;
     const extensionBefore = readFileSync(extension, "utf8");
     const setupBefore = await page.evaluate(() =>
       (window as { __demoExtension?: { setupCount?: number } }).__demoExtension?.setupCount ?? 0
@@ -86,7 +107,7 @@ test("browser status health and HMR-applied source revision ordering", async ({ 
     await expect.poll(() => page.evaluate(() =>
       (window as { __demoExtension?: { setupCount?: number } }).__demoExtension?.setupCount ?? 0
     ), { timeout: 15_000 }).toBeGreaterThan(setupBefore);
-    await expect.poll(() => statusJson().appliedSourceRevision, { timeout: 15_000 })
+    await expect.poll(() => statusJson().referencedSourceRevision, { timeout: 15_000 })
       .toBe(appliedRevision);
     writeFileSync(extension, extensionBefore);
   } finally {

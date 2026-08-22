@@ -24,18 +24,20 @@ const root = () => {
 afterEach(() => roots.splice(0).forEach((value) => rmSync(value, { recursive: true, force: true })));
 
 const state: AgentAnnotationsBrowserState = {
-  schema: "agent-annotations.browser-state.v1",
+  schema: "agent-annotations.browser-state.v2",
   runtimeId: "runtime-1",
   clientVersion: "0.1.0-alpha.0",
   routeKey: "/settings",
   taskId: "task-1",
   taskRevision: 3,
-  appliedSourceRevision: null,
+  browserUpdateRevision: 1,
+  referencedSourceRevision: null,
+  referencedSourceFiles: ["src/settings.tsx"],
   mountedAt: "2026-08-12T12:00:00.000Z",
   lastHeartbeatAt: "2026-08-12T12:00:05.000Z",
 };
 
-describe("browser state v1", () => {
+describe("browser state v2", () => {
   it("parses a valid state and rejects unknown fields", () => {
     expect(parseAgentAnnotationsBrowserState(state)).toEqual(state);
     expect(() => parseAgentAnnotationsBrowserState({ ...state, token: "secret" }))
@@ -45,7 +47,7 @@ describe("browser state v1", () => {
   });
 
   it("rejects wrong schemas, unbounded strings, bad revisions, and bad timestamps", () => {
-    expect(() => parseAgentAnnotationsBrowserState({ ...state, schema: "other.v1" }))
+    expect(() => parseAgentAnnotationsBrowserState({ ...state, schema: "agent-annotations.browser-state.v1" }))
       .toThrow(/unknown browser state schema/);
     expect(() => parseAgentAnnotationsBrowserState({ ...state, routeKey: "x".repeat(501) }))
       .toThrow(/routeKey/);
@@ -55,8 +57,18 @@ describe("browser state v1", () => {
       .toThrow(/taskId/);
     expect(() => parseAgentAnnotationsBrowserState({ ...state, taskRevision: 1.5 }))
       .toThrow(/taskRevision/);
-    expect(() => parseAgentAnnotationsBrowserState({ ...state, appliedSourceRevision: "short" }))
-      .toThrow(/appliedSourceRevision/);
+    expect(() => parseAgentAnnotationsBrowserState({ ...state, browserUpdateRevision: -1 }))
+      .toThrow(/browserUpdateRevision/);
+    expect(() => parseAgentAnnotationsBrowserState({ ...state, referencedSourceRevision: "short" }))
+      .toThrow(/referencedSourceRevision/);
+    expect(() => parseAgentAnnotationsBrowserState({
+      ...state,
+      referencedSourceFiles: Array.from({ length: 257 }, () => "src/a.ts"),
+    })).toThrow(/referencedSourceFiles/);
+    expect(() => parseAgentAnnotationsBrowserState({
+      ...state,
+      referencedSourceFiles: ["x".repeat(2_049)],
+    })).toThrow(/referencedSourceFiles/);
     expect(() => parseAgentAnnotationsBrowserState({ ...state, mountedAt: "not-a-date" }))
       .toThrow(/mountedAt/);
     expect(() => parseAgentAnnotationsBrowserState({ ...state, lastHeartbeatAt: "2026-13-99" }))

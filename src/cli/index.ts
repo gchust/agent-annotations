@@ -209,9 +209,9 @@ const main = async (): Promise<void> => {
       browser.taskRevision === current!.taskRevision;
     const sourceSynchronized =
       browserConnected &&
-      browser.appliedSourceRevision !== null &&
+      browser.referencedSourceRevision !== null &&
       sourceRevision !== null &&
-      browser.appliedSourceRevision === sourceRevision;
+      browser.referencedSourceRevision === sourceRevision;
     const report = {
       taskValid,
       // The resolved, shape-validated session (canonical roots, token, pid).
@@ -224,7 +224,9 @@ const main = async (): Promise<void> => {
       browserTaskId: browser?.taskId ?? null,
       browserTaskRevision: browser?.taskRevision ?? null,
       sourceRevision,
-      appliedSourceRevision: browser?.appliedSourceRevision ?? null,
+      browserUpdateRevision: browser?.browserUpdateRevision ?? null,
+      referencedSourceRevision: browser?.referencedSourceRevision ?? null,
+      referencedSourceFiles: browser?.referencedSourceFiles ?? [],
       routeKey: browser?.routeKey ?? null,
       lastHeartbeatAt: browser?.lastHeartbeatAt ?? null,
       diagnosticCount: (await readDiagnostics(runtimeRoot)).length,
@@ -309,7 +311,7 @@ const main = async (): Promise<void> => {
         // a missing or stale browser never flips the wait.
         const browser = readAgentAnnotationsBrowserState(runtimeRoot);
         observed = browser !== null && isBrowserStateFresh(browser)
-          ? browser.appliedSourceRevision
+          ? browser.referencedSourceRevision
           : null;
       } else {
         const current = store.read();

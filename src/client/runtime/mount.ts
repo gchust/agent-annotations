@@ -180,13 +180,24 @@ export async function mountAgentAnnotations(
   const runtimeId = createAgentAnnotationsId();
   const clientVersion = PACKAGE_VERSION;
   const mountedAt = now();
-  let appliedSourceRevision: string | null = null;
+  let browserUpdateRevision = 0;
+  let referencedSourceRevision: string | null = null;
+  let referencedSourceFiles: string[];
+  const taskSourceFiles = (value: AgentAnnotationsTask): string[] => [
+    ...new Set(value.annotations.flatMap((annotation) =>
+      (annotation.targets ?? []).flatMap((target) =>
+        [target.inspection.source, ...target.inspection.sourceStack]
+          .flatMap((source) => source?.filePath ?? [])
+      )
+    )),
+  ].sort();
+  referencedSourceFiles = taskSourceFiles(task);
   const sendBrowserHeartbeat = (): void => {
     if (destroyed || !browserStatus) return;
     const state = {
       // Protocol literal mirrored with the server parser (browser bundle must
       // stay free of server/node modules).
-      schema: "agent-annotations.browser-state.v1",
+      schema: "agent-annotations.browser-state.v2",
       runtimeId,
       clientVersion,
       // Privacy: never persist a raw URL query; hash routes stay intact (the
@@ -194,7 +205,9 @@ export async function mountAgentAnnotations(
       routeKey: redactAgentAnnotationsText(routeKey.split("?", 1)[0] ?? routeKey).slice(0, 500),
       taskId: task.taskId,
       taskRevision: task.taskRevision,
-      appliedSourceRevision,
+      browserUpdateRevision,
+      referencedSourceRevision,
+      referencedSourceFiles,
       mountedAt,
       lastHeartbeatAt: now(),
     };
@@ -209,31 +222,32 @@ export async function mountAgentAnnotations(
       // The dev server may be restarting; the next heartbeat reconnects.
     });
   };
+  const setTask = (next: AgentAnnotationsTask): void => {
+    const nextFiles = taskSourceFiles(next);
+    if (nextFiles.length !== referencedSourceFiles.length ||
+      nextFiles.some((file, index) => file !== referencedSourceFiles[index])) {
+      referencedSourceRevision = null;
+      referencedSourceFiles = nextFiles;
+    }
+    task = next;
+    sendBrowserHeartbeat();
+  };
   const scheduleBrowserHeartbeat = (): void => {
     if (destroyed || !browserStatus) return;
     sendBrowserHeartbeat();
     scheduleTimer(scheduleBrowserHeartbeat, 5_000);
   };
-  const applyReportedSourceRevision = (revision: string | null): void => {
-    if (destroyed) return;
-    if (revision !== null && !/^[0-9a-f]{64}$/i.test(revision)) return;
-    appliedSourceRevision = revision?.toLowerCase() ?? null;
-    // The report is immediately reflected in the browser state.
-    sendBrowserHeartbeat();
-  };
-  // Runtime-owned, generation-guarded refresh: every refresh supersedes the
-  // previous request, so a stale response can never regress the applied
-  // revision. The generated Vite client calls this after mount and after
-  // vite:afterUpdate; the runtime calls it on every accepted task change.
+  // The generated Vite client is the only caller: once after mount and after
+  // each successful vite:afterUpdate. Task changes never enter this path.
   let sourceRevisionRequest = 0;
-  const refreshAppliedSourceRevision = (): void => {
+  const reportBrowserUpdate = (): void => {
     if (destroyed || !browserStatus) return;
-    // The previous baseline is no longer trustworthy while a refresh is in
-    // flight (it may fail or be superseded): clear it and heartbeat the
-    // cleared state immediately, then fetch.
-    appliedSourceRevision = null;
+    browserUpdateRevision += 1;
+    referencedSourceRevision = null;
     sendBrowserHeartbeat();
     const request = ++sourceRevisionRequest;
+    const reportedTaskId = task.taskId;
+    const reportedTaskRevision = task.taskRevision;
     const run = async (): Promise<void> => {
       try {
         const response = await fetch(`${browserStatus.endpoint}/revision`, {
@@ -241,9 +255,27 @@ export async function mountAgentAnnotations(
         });
         // A non-ok revision response is a failure: never parse or apply it.
         if (!response.ok) return;
-        const payload = await response.json() as { sourceRevision?: unknown };
-        if (request === sourceRevisionRequest && typeof payload.sourceRevision === "string") {
-          applyReportedSourceRevision(payload.sourceRevision);
+        const payload = await response.json() as {
+          taskId?: unknown;
+          taskRevision?: unknown;
+          sourceRevision?: unknown;
+          sourceFiles?: unknown;
+        };
+        if (
+          request === sourceRevisionRequest &&
+          task.taskId === reportedTaskId &&
+          task.taskRevision === reportedTaskRevision &&
+          payload.taskId === reportedTaskId &&
+          payload.taskRevision === reportedTaskRevision &&
+          typeof payload.sourceRevision === "string" &&
+          /^[0-9a-f]{64}$/i.test(payload.sourceRevision) &&
+          Array.isArray(payload.sourceFiles) &&
+          payload.sourceFiles.length <= 256 &&
+          payload.sourceFiles.every((file) => typeof file === "string" && file.length > 0 && file.length <= 2_048)
+        ) {
+          referencedSourceRevision = payload.sourceRevision.toLowerCase();
+          referencedSourceFiles = [...payload.sourceFiles].sort();
+          sendBrowserHeartbeat();
         }
       } catch {
         // Best-effort; the next refresh reconnects.
@@ -270,8 +302,7 @@ export async function mountAgentAnnotations(
       // Identity rule: a different task id replaces the current task even at
       // revision 0; the same task id only advances on a larger revision.
       if (destroyed || !isTaskIdentityNewer(taskIdentity(next), taskIdentity(task))) return;
-      task = next;
-      refreshAppliedSourceRevision();
+      setTask(next);
       scheduleFrame(() => {
         render();
         emit();
@@ -465,10 +496,9 @@ export async function mountAgentAnnotations(
 
   const taskController = createTaskController({
     task: () => task,
-    setTask: (next) => { task = next; },
+    setTask,
     transport: () => transport,
     guardedRedactors,
-    refreshAppliedSourceRevision: () => refreshAppliedSourceRevision(),
     render: () => render(),
     emit: () => emit(),
     destroyed: () => destroyed,
@@ -595,7 +625,7 @@ export async function mountAgentAnnotations(
       command: handoff.command,
       verificationCommands: handoff.verificationCommands,
       includeCompleted: handoff.includeCompleted || filter === "all",
-      appliedSourceRevision,
+      appliedSourceRevision: referencedSourceRevision,
     });
     // Final generic text redaction over the complete output. The task and the
     // bounded handoff config already bound the output, so this second pass
@@ -1389,5 +1419,5 @@ export async function mountAgentAnnotations(
   // The browser status loop starts only after every setup step succeeded, so
   // a failed mount can never persist a browserConnected state.
   scheduleBrowserHeartbeat();
-  return { api, unmount, refreshAppliedSourceRevision };
+  return { api, unmount, reportBrowserUpdate };
 }

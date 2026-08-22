@@ -3,7 +3,7 @@
 ## `@gchust/agent-annotations`
 
 - `mountAgentAnnotations(options)` mounts the React runtime and returns
-  `{ api, unmount, refreshAppliedSourceRevision }`. `options.transport`
+  `{ api, unmount, reportBrowserUpdate }`. `options.transport`
   implements `TaskTransport`; optional `options.extensions` uses public client
   extensions. `options.screenshotEvidence`
   accepts `"auto" | "manual" | "off"` (default `"auto"`): `auto` captures
@@ -13,7 +13,7 @@
   entirely. Invalid values throw a `TypeError`. `options.browserStatus`
   (`{ endpoint, token }`) enables the authenticated browser runtime status
   heartbeat (`.agent-annotations/browser-state.json`).
-  `refreshAppliedSourceRevision()` is a trusted mount-level hook (used by the
+  `reportBrowserUpdate()` is a trusted mount-level hook (used by the
   generated Vite client after mount and after `vite:afterUpdate`): it re-fetches
   the current source revision through the runtime-owned, generation-guarded
   refresh path and reports it as applied. It is not part of `StudioPublicApi`,

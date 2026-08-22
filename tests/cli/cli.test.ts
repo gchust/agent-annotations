@@ -476,13 +476,15 @@ describe("public CLI processes", () => {
 
   const writeBrowserState = (target: string, state: Record<string, unknown>) => {
     writeFileSync(path.join(target, "browser-state.json"), JSON.stringify({
-      schema: "agent-annotations.browser-state.v1",
+      schema: "agent-annotations.browser-state.v2",
       runtimeId: "runtime-1",
       clientVersion: "0.1.0-alpha.0",
       routeKey: "/settings",
       taskId: "task-1",
       taskRevision: 0,
-      appliedSourceRevision: null,
+      browserUpdateRevision: 1,
+      referencedSourceRevision: null,
+      referencedSourceFiles: [],
       mountedAt: "2026-08-12T12:00:00.000Z",
       lastHeartbeatAt: new Date().toISOString(),
       ...state,
@@ -550,7 +552,8 @@ describe("public CLI processes", () => {
     writeBrowserState(root, {
       taskId: task.taskId,
       taskRevision: task.taskRevision,
-      appliedSourceRevision: sourceRevision,
+      referencedSourceRevision: sourceRevision,
+      referencedSourceFiles: ["src/settings.tsx"],
       routeKey: "/",
     });
     const healthy = run(root, ["status", "--check", "--json"]);
@@ -559,7 +562,7 @@ describe("public CLI processes", () => {
       browserConnected: true,
       taskSynchronized: true,
       sourceSynchronized: true,
-      appliedSourceRevision: sourceRevision,
+      referencedSourceRevision: sourceRevision,
     });
     // Disk changed but the browser has not applied it yet.
     writeFileSync(path.join(root, "src", "settings.tsx"), "export const A = 2;\n");
@@ -574,7 +577,7 @@ describe("public CLI processes", () => {
     writeBrowserState(root, {
       taskId: "other-task",
       taskRevision: 0,
-      appliedSourceRevision: sourceRevision,
+      referencedSourceRevision: sourceRevision,
     });
     const mismatched = runExpectingFailure(root, ["status", "--check", "--json"]);
     expect(JSON.parse(mismatched.stdout).taskSynchronized).toBe(false);
@@ -591,12 +594,12 @@ describe("public CLI processes", () => {
     expect(JSON.parse(run(root, ["wait", "--browser-source-revision", baseline, "--timeout-ms", "0", "--json"])))
       .toEqual({ changed: false, sourceRevision: null });
     // A fresh browser with the baseline applied times out unchanged.
-    writeBrowserState(root, { taskId: "task-bw", taskRevision: 0, appliedSourceRevision: baseline });
+    writeBrowserState(root, { taskId: "task-bw", taskRevision: 0, referencedSourceRevision: baseline });
     expect(JSON.parse(run(root, ["wait", "--browser-source-revision", baseline, "--timeout-ms", "0", "--json"])))
       .toEqual({ changed: false, sourceRevision: baseline });
     // The browser applies a new revision: the wait flips to changed.
     const applied = "a".repeat(64);
-    writeBrowserState(root, { taskId: "task-bw", taskRevision: 0, appliedSourceRevision: applied });
+    writeBrowserState(root, { taskId: "task-bw", taskRevision: 0, referencedSourceRevision: applied });
     expect(JSON.parse(run(root, ["wait", "--browser-source-revision", baseline, "--timeout-ms", "0", "--json"])))
       .toEqual({ changed: true, sourceRevision: applied });
     expect(run(root, ["wait", "--browser-source-revision", baseline, "--timeout-ms", "0"]))
@@ -605,7 +608,7 @@ describe("public CLI processes", () => {
     writeBrowserState(root, {
       taskId: "task-bw",
       taskRevision: 0,
-      appliedSourceRevision: applied,
+      referencedSourceRevision: applied,
       lastHeartbeatAt: "2026-08-12T12:00:00.000Z",
     });
     expect(JSON.parse(run(root, ["wait", "--browser-source-revision", baseline, "--timeout-ms", "0", "--json"])))

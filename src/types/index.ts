@@ -529,8 +529,7 @@ export type MountedAgentAnnotations = {
   api: StudioPublicApi;
   unmount(): void;
   // Trusted mount-level hook (the generated Vite client, not extensions):
-  // re-fetches and reports the current source revision through the
-  // runtime-owned, generation-guarded refresh path. Extensions only receive
-  // the StudioPublicApi and cannot spoof the applied revision.
-  refreshAppliedSourceRevision(): void;
+  // reports a confirmed browser update and then snapshots the referenced
+  // source revision. Extensions only receive StudioPublicApi and cannot call it.
+  reportBrowserUpdate(): void;
 };

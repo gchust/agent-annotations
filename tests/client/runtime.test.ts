@@ -2646,11 +2646,9 @@ describe("client runtime", () => {
       expect(attempts).toBe(2);
       expect(mounted.api.getSnapshot().task.taskRevision).toBe(3);
       expect(diagnostics[0]).toContain("screenshot evidence failed");
-      // Every accepted task adoption refreshes the applied source revision:
-      // the mutate success, the first conflict adoption, and the second
-      // conflict adoption each trigger exactly one /revision fetch.
+      // Task mutation and both conflict adoptions cannot report a browser update.
       const revisionFetches = fetchMock.mock.calls.filter((call) => String(call[0]).endsWith("/revision"));
-      expect(revisionFetches).toHaveLength(3);
+      expect(revisionFetches).toHaveLength(0);
       mounted.unmount();
     } finally {
       vi.unstubAllGlobals();
@@ -2801,11 +2799,16 @@ describe("client runtime", () => {
     mounted.unmount();
   });
 
-  it("reports the current source revision when an accepted task changes the referenced sources", async () => {
+  it("does not report a browser update when an accepted task changes the referenced sources", async () => {
     vi.useFakeTimers();
     const fetchMock = vi.fn<typeof fetch>(async (input: RequestInfo | URL) => {
       if (String(input).endsWith("/revision")) {
-        return new Response(JSON.stringify({ sourceRevision: "ab".repeat(32) }), { status: 200 });
+        return new Response(JSON.stringify({
+          taskId: "task-1",
+          taskRevision: 0,
+          sourceRevision: "ab".repeat(32),
+          sourceFiles: [],
+        }), { status: 200 });
       }
       return new Response("{}", { status: 200 });
     });
@@ -2826,15 +2829,15 @@ describe("client runtime", () => {
         browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
       });
       await vi.advanceTimersByTimeAsync(0);
-      // An accepted task revision introduces a referenced source file: the
-      // runtime re-fetches the current revision and heartbeats it immediately.
+      // An accepted task revision introduces a referenced source file. It may
+      // invalidate the source snapshot, but it cannot report a browser update.
       publish({ ...taskFixture(), taskId: initial.taskId, taskRevision: 1 });
       await vi.advanceTimersByTimeAsync(0);
       const revisionFetches = fetchMock.mock.calls.filter((call) => String(call[0]).endsWith("/revision"));
-      expect(revisionFetches).toHaveLength(1);
+      expect(revisionFetches).toHaveLength(0);
       const heartbeats = fetchMock.mock.calls.filter((call) => String(call[0]).endsWith("/heartbeat"));
       const latest = JSON.parse(heartbeats.at(-1)![1]!.body as string);
-      expect(latest.appliedSourceRevision).toBe("ab".repeat(32));
+      expect(latest.referencedSourceRevision).toBeNull();
       expect(latest.taskRevision).toBe(1);
       mounted.unmount();
     } finally {
@@ -2845,9 +2848,16 @@ describe("client runtime", () => {
   it("reports browser status heartbeats and applies source revisions through the mount hook", async () => {
     vi.useFakeTimers();
     history.pushState({}, "", "/#/settings?secret=supersecret");
+    const transport = new MemoryTaskTransport();
+    const initial = await transport.read();
     const fetchMock = vi.fn<typeof fetch>(async (input: RequestInfo | URL) => {
       if (String(input).endsWith("/revision")) {
-        return new Response(JSON.stringify({ sourceRevision: "ab".repeat(32) }), { status: 200 });
+        return new Response(JSON.stringify({
+          taskId: initial.taskId,
+          taskRevision: initial.taskRevision,
+          sourceRevision: "ab".repeat(32),
+          sourceFiles: ["src/App.tsx"],
+        }), { status: 200 });
       }
       return new Response("{}", { status: 200 });
     });
@@ -2855,7 +2865,7 @@ describe("client runtime", () => {
     let mounted: Awaited<ReturnType<typeof mountAgentAnnotations>> | null = null;
     try {
       mounted = await mountAgentAnnotations({
-        transport: new MemoryTaskTransport(),
+        transport,
         browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
       });
       await vi.advanceTimersByTimeAsync(0);
@@ -2868,21 +2878,23 @@ describe("client runtime", () => {
       );
       const body = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string);
       expect(body).toMatchObject({
-        schema: "agent-annotations.browser-state.v1",
+        schema: "agent-annotations.browser-state.v2",
         clientVersion: "0.1.0-alpha.0",
         taskId: expect.any(String),
         taskRevision: 0,
-        appliedSourceRevision: null,
+        browserUpdateRevision: 0,
+        referencedSourceRevision: null,
+        referencedSourceFiles: [],
       });
       // The hash route is preserved; the secret query is stripped.
       expect(body.routeKey).toBe("/#/settings");
       expect(JSON.stringify(body)).not.toContain("supersecret");
       expect(JSON.stringify(body)).not.toContain("status-token");
       // The applied revision is reported only through the trusted mount hook.
-      mounted.refreshAppliedSourceRevision();
+      mounted.reportBrowserUpdate();
       await vi.advanceTimersByTimeAsync(0);
       const heartbeats = fetchMock.mock.calls.filter((call) => String(call[0]).endsWith("/heartbeat"));
-      expect(JSON.parse(heartbeats.at(-1)![1]!.body as string).appliedSourceRevision)
+      expect(JSON.parse(heartbeats.at(-1)![1]!.body as string).referencedSourceRevision)
         .toBe("ab".repeat(32));
       // Unmount stops the heartbeats.
       mounted.unmount();
@@ -2896,6 +2908,8 @@ describe("client runtime", () => {
 
   it("supersedes stale source revision responses so they cannot regress the applied revision", async () => {
     vi.useFakeTimers();
+    const transport = new MemoryTaskTransport();
+    const initial = await transport.read();
     let first = true;
     let resolveFirst!: (value: Response) => void;
     const fetchMock = vi.fn<typeof fetch>((input: RequestInfo | URL) => {
@@ -2905,7 +2919,12 @@ describe("client runtime", () => {
           return new Promise((resolve) => { resolveFirst = resolve; });
         }
         return Promise.resolve(
-          new Response(JSON.stringify({ sourceRevision: "cd".repeat(32) }), { status: 200 })
+          new Response(JSON.stringify({
+            taskId: initial.taskId,
+            taskRevision: initial.taskRevision,
+            sourceRevision: "cd".repeat(32),
+            sourceFiles: ["src/pages/settings.tsx"],
+          }), { status: 200 })
         );
       }
       return Promise.resolve(new Response("{}", { status: 200 }));
@@ -2914,21 +2933,26 @@ describe("client runtime", () => {
     let mounted: Awaited<ReturnType<typeof mountAgentAnnotations>> | null = null;
     try {
       mounted = await mountAgentAnnotations({
-        transport: new MemoryTaskTransport(),
+        transport,
         browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
       });
       await vi.advanceTimersByTimeAsync(0);
       // The first refresh is pending; the second supersedes it.
-      mounted.refreshAppliedSourceRevision();
-      mounted.refreshAppliedSourceRevision();
+      mounted.reportBrowserUpdate();
+      mounted.reportBrowserUpdate();
       await vi.advanceTimersByTimeAsync(0);
       const heartbeats = () => fetchMock.mock.calls.filter((call) => String(call[0]).endsWith("/heartbeat"));
-      expect(JSON.parse(heartbeats().at(-1)![1]!.body as string).appliedSourceRevision)
+      expect(JSON.parse(heartbeats().at(-1)![1]!.body as string).referencedSourceRevision)
         .toBe("cd".repeat(32));
       // The superseded response arrives late: it must never overwrite.
-      resolveFirst(new Response(JSON.stringify({ sourceRevision: "ab".repeat(32) }), { status: 200 }));
+      resolveFirst(new Response(JSON.stringify({
+        taskId: initial.taskId,
+        taskRevision: initial.taskRevision,
+        sourceRevision: "ab".repeat(32),
+        sourceFiles: ["src/pages/settings.tsx"],
+      }), { status: 200 }));
       await vi.advanceTimersByTimeAsync(0);
-      expect(JSON.parse(heartbeats().at(-1)![1]!.body as string).appliedSourceRevision)
+      expect(JSON.parse(heartbeats().at(-1)![1]!.body as string).referencedSourceRevision)
         .toBe("cd".repeat(32));
       mounted.unmount();
     } finally {
@@ -5490,7 +5514,7 @@ describe("client runtime", () => {
     }
   });
 
-  it("clears the applied baseline while a refresh is pending or fails", async () => {
+  it("preserves the applied baseline across task-only updates and clears it for a failed browser report", async () => {
     vi.useFakeTimers();
     let revisionResponse: Promise<Response> | null = null;
     const fetchMock = vi.fn<typeof fetch>((input: RequestInfo | URL) => {
@@ -5523,40 +5547,70 @@ describe("client runtime", () => {
       };
       // A baseline is reported through the trusted hook.
       revisionResponse = Promise.resolve(
-        new Response(JSON.stringify({ sourceRevision: "ab".repeat(32) }), { status: 200 })
+        new Response(JSON.stringify({
+          taskId: initial.taskId,
+          taskRevision: initial.taskRevision,
+          sourceRevision: "ab".repeat(32),
+          sourceFiles: [],
+        }), { status: 200 })
       );
-      mounted.refreshAppliedSourceRevision();
+      mounted.reportBrowserUpdate();
       await vi.advanceTimersByTimeAsync(0);
       await mounted.api.commands.annotations.copyOpen();
       await vi.advanceTimersByTimeAsync(0);
       expect(fallbackValue()).toContain(`- source revision baseline: ${"ab".repeat(32)}`);
-      // An accepted task change starts a refresh whose request stays
-      // PENDING: the stale baseline is hidden immediately, while the fetch
-      // is still unresolved, and no wait command is emitted.
-      let resolvePending!: (value: Response) => void;
-      revisionResponse = new Promise((resolve) => { resolvePending = resolve; });
+      const heartbeats = () => fetchMock.mock.calls.filter((call) => String(call[0]).endsWith("/heartbeat"));
+      const generation = JSON.parse(heartbeats().at(-1)![1]!.body as string).browserUpdateRevision;
+      const revisionFetches = () => fetchMock.mock.calls.filter((call) => String(call[0]).endsWith("/revision"));
+      expect(revisionFetches()).toHaveLength(1);
+      // A same-source task update cannot advance the browser generation or
+      // replace the trusted source snapshot.
       publish({ ...initial, taskRevision: 1 });
       await vi.advanceTimersByTimeAsync(0);
       await mounted.api.commands.annotations.copyOpen();
       await vi.advanceTimersByTimeAsync(0);
-      expect(fallbackValue()).toContain("- source revision baseline: source revision unavailable");
-      expect(fallbackValue()).not.toContain("wait --browser-source-revision");
-      // The pending request resolves as a non-ok response that still carries
-      // a valid hex body: a failed response must never install a baseline.
-      resolvePending(new Response(
-        JSON.stringify({ sourceRevision: "ef".repeat(32) }),
-        { status: 500 }
+      expect(fallbackValue()).toContain(`- source revision baseline: ${"ab".repeat(32)}`);
+      expect(JSON.parse(heartbeats().at(-1)![1]!.body as string).browserUpdateRevision).toBe(generation);
+      expect(revisionFetches()).toHaveLength(1);
+      // A trusted browser update advances the generation, but a response for
+      // another task revision cannot install its source snapshot.
+      revisionResponse = Promise.resolve(new Response(
+        JSON.stringify({
+          taskId: initial.taskId,
+          taskRevision: 99,
+          sourceRevision: "ef".repeat(32),
+          sourceFiles: [],
+        }),
+        { status: 200 }
       ));
+      mounted.reportBrowserUpdate();
       await vi.advanceTimersByTimeAsync(0);
       await mounted.api.commands.annotations.copyOpen();
       await vi.advanceTimersByTimeAsync(0);
       expect(fallbackValue()).toContain("- source revision baseline: source revision unavailable");
       expect(fallbackValue()).not.toContain("wait --browser-source-revision");
+      // A task update racing an in-flight trusted report invalidates the
+      // response, so the newer task cannot inherit a disk hash it never ran.
+      let resolveStale!: (value: Response) => void;
+      revisionResponse = new Promise((resolve) => { resolveStale = resolve; });
+      mounted.reportBrowserUpdate();
+      publish({ ...initial, taskRevision: 2 });
+      resolveStale(new Response(JSON.stringify({
+        sourceRevision: "ef".repeat(32),
+        sourceFiles: [],
+      }), { status: 200 }));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(JSON.parse(heartbeats().at(-1)![1]!.body as string).referencedSourceRevision).toBeNull();
       // A later successful refresh restores the new baseline.
       revisionResponse = Promise.resolve(
-        new Response(JSON.stringify({ sourceRevision: "cd".repeat(32) }), { status: 200 })
+        new Response(JSON.stringify({
+          taskId: initial.taskId,
+          taskRevision: 2,
+          sourceRevision: "cd".repeat(32),
+          sourceFiles: ["src/pages/settings.tsx"],
+        }), { status: 200 })
       );
-      mounted.refreshAppliedSourceRevision();
+      mounted.reportBrowserUpdate();
       await vi.advanceTimersByTimeAsync(0);
       await mounted.api.commands.annotations.copyOpen();
       await vi.advanceTimersByTimeAsync(0);

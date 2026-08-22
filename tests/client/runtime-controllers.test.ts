@@ -12,17 +12,40 @@ import { RevisionConflictError } from "../../src/core/index.js";
 import type { AgentAnnotationsRect, StudioPublicSnapshot } from "../../src/types/index.js";
 type StudioPublicShortcut = StudioPublicSnapshot["shortcuts"][number];
 import { taskFixture } from "../core/test-data.js";
+import { MemoryTaskTransport } from "../../src/testing/index.js";
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
 describe("runtime controllers (focused factory contracts)", () => {
+  it("handles update, complete, reopen, and addEvidence without a browser update binding", async () => {
+    const state = { task: taskFixture() };
+    const transport = new MemoryTaskTransport(state.task);
+    const controller = createTaskController({
+      task: () => state.task,
+      setTask: (next) => { state.task = next; },
+      transport: () => transport,
+      guardedRedactors: () => [],
+      render: () => undefined,
+      emit: () => undefined,
+      destroyed: () => false,
+    });
+    await controller.mutate([{ op: "update", annotationId: "ann-1", comment: "Updated" }]);
+    await controller.mutate([{ op: "complete", annotationId: "ann-1" }]);
+    await controller.mutate([{ op: "reopen", annotationId: "ann-1" }]);
+    await controller.mutate([{
+      op: "addEvidence",
+      annotationId: "ann-1",
+      evidence: { kind: "screenshot", ref: "memory:1", mediaType: "image/png", width: 1, height: 1, capturedAt: "2026-08-12T12:00:00.000Z" },
+    }]);
+    expect(state.task.taskRevision).toBe(4);
+  });
+
   it("task controller adopts a conflict task and retries exactly once", async () => {
     const state = { task: taskFixture() };
     const render = vi.fn();
     const emit = vi.fn();
-    const refresh = vi.fn();
     let attempts = 0;
     const expectedRevisions: number[] = [];
     const transport = {
@@ -43,7 +66,6 @@ describe("runtime controllers (focused factory contracts)", () => {
       setTask: (next) => { state.task = next; },
       transport: () => transport,
       guardedRedactors: () => [],
-      refreshAppliedSourceRevision: refresh,
       render,
       emit,
       destroyed: () => false,
@@ -53,7 +75,6 @@ describe("runtime controllers (focused factory contracts)", () => {
     // The first attempt used the original revision, the retry the adopted one.
     expect(expectedRevisions).toEqual([0, 1]);
     expect(state.task.taskRevision).toBe(1);
-    expect(refresh).toHaveBeenCalled();
   });
 
   it("host controller disposes the system theme listener and clears route capture state", async () => {

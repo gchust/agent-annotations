@@ -40,8 +40,9 @@ describe("serve-only Vite plugin", () => {
     expect(String(loaded)).toContain(`from ${JSON.stringify(`${pkg.name}/vite/client`)}`);
     expect(String(loaded)).toContain("mountAgentAnnotations");
     expect(String(loaded)).toContain("mountAgentAnnotations({ transport, extensions, screenshotEvidence: config.screenshotEvidence, browserStatus: { endpoint: config.endpoint, token: config.token }, handoff: config.handoff, builtins: config.builtins, initialState: config.initialState, diagnostics: config.diagnostics })");
-    expect(String(loaded)).toContain("mounted.refreshAppliedSourceRevision()");
+    expect(String(loaded)).toContain("mounted.reportBrowserUpdate()");
     expect(String(loaded)).toContain("vite:afterUpdate");
+    expect(String(loaded)).toContain("responses.every((response) => response.ok)");
     expect(String(loaded)).toContain("window[key]?.()");
     expect(String(loaded)).toContain("import.meta.hot.accept()");
     expect(String(loaded)).toContain("import.meta.hot.dispose");
@@ -317,13 +318,15 @@ describe("serve-only Vite plugin", () => {
     const { root } = fixture();
     const statePath = path.join(root, ".agent-annotations", "browser-state.json");
     const state = {
-      schema: "agent-annotations.browser-state.v1",
+      schema: "agent-annotations.browser-state.v2",
       runtimeId: "runtime-1",
       clientVersion: "0.1.0-alpha.0",
       routeKey: "/",
       taskId: "task-1",
       taskRevision: 0,
-      appliedSourceRevision: null,
+      browserUpdateRevision: 1,
+      referencedSourceRevision: null,
+      referencedSourceFiles: [],
       mountedAt: "2026-08-12T12:00:00.000Z",
       lastHeartbeatAt: "2026-08-12T12:00:05.000Z",
     };

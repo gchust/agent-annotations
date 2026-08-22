@@ -108,14 +108,10 @@ test("keyboard-only Pick, Multi, Copy, List, and Collapse flows with visual evid
   expect(clipboard).toContain("agent-annotations validate-task --json");
   expect(clipboard).toContain("agent-annotations complete ");
   expect(clipboard).toContain("--verified --summary");
-  // The real copied handoff carries the browser-applied revision baseline
-  // and the exact browser-source wait command.
-  const baseline = clipboard.match(/- source revision baseline: ([0-9a-f]{64})/)?.[1];
-  expect(baseline).toBeTruthy();
-  expect(clipboard).not.toContain("source revision unavailable");
-  expect(clipboard).toContain(
-    `agent-annotations wait --browser-source-revision ${baseline} --json`
-  );
+  // Adding the first referenced source is task-only work. It invalidates the
+  // old empty-task snapshot and cannot claim that the browser applied it.
+  expect(clipboard).toContain("- source revision baseline: source revision unavailable");
+  expect(clipboard).not.toContain("wait --browser-source-revision");
   await expect.poll(() => annotations()).toBe(2);
   await expect(shadow(page, '[aria-label^="Pick"]')).toHaveAttribute("aria-pressed", "false");
   await expect(shadow(page, '[aria-label^="Multi"]')).toHaveAttribute("aria-pressed", "true");

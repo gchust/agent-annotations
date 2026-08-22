@@ -4,7 +4,7 @@ import path from "node:path";
 import { AGENT_ANNOTATIONS_ID_PATTERN } from "../core/index.js";
 import { atomicWriteJson } from "./store.js";
 
-export const BROWSER_STATE_SCHEMA = "agent-annotations.browser-state.v1";
+export const BROWSER_STATE_SCHEMA = "agent-annotations.browser-state.v2";
 export const BROWSER_STATE_FILE = "browser-state.json";
 // Fixed, documented staleness threshold: a heartbeat older than this never
 // reports the browser as connected.
@@ -13,16 +13,20 @@ export const BROWSER_HEARTBEAT_STALE_MS = 15_000;
 const MAX_ROUTE_KEY = 500;
 const MAX_RUNTIME_ID = 64;
 const MAX_CLIENT_VERSION = 128;
+const MAX_REFERENCED_SOURCE_FILES = 256;
+const MAX_SOURCE_FILE = 2_048;
 const SHA256 = /^[0-9a-f]{64}$/;
 
 export type AgentAnnotationsBrowserState = {
-  schema: "agent-annotations.browser-state.v1";
+  schema: "agent-annotations.browser-state.v2";
   runtimeId: string;
   clientVersion: string;
   routeKey: string;
   taskId: string;
   taskRevision: number;
-  appliedSourceRevision: string | null;
+  browserUpdateRevision: number;
+  referencedSourceRevision: string | null;
+  referencedSourceFiles: string[];
   mountedAt: string;
   lastHeartbeatAt: string;
 };
@@ -48,7 +52,7 @@ const timestampIssue = (value: unknown, path: string): string | null => {
   return null;
 };
 
-// Strict v1 parser: unknown fields are rejected, every string is bounded, and
+// Strict v2 parser: unknown fields are rejected, every string is bounded, and
 // revisions/timestamps must be exact. The file never contains a token.
 export const parseAgentAnnotationsBrowserState = (
   input: unknown
@@ -61,7 +65,9 @@ export const parseAgentAnnotationsBrowserState = (
     "routeKey",
     "taskId",
     "taskRevision",
-    "appliedSourceRevision",
+    "browserUpdateRevision",
+    "referencedSourceRevision",
+    "referencedSourceFiles",
     "mountedAt",
     "lastHeartbeatAt",
   ]);
@@ -97,11 +103,28 @@ export const parseAgentAnnotationsBrowserState = (
     throw new TypeError("taskRevision must be a non-negative integer");
   }
   if (
-    input.appliedSourceRevision !== null &&
-    (typeof input.appliedSourceRevision !== "string" ||
-      !SHA256.test(input.appliedSourceRevision))
+    typeof input.browserUpdateRevision !== "number" ||
+    !Number.isSafeInteger(input.browserUpdateRevision) ||
+    input.browserUpdateRevision < 0
   ) {
-    throw new TypeError("appliedSourceRevision must be a 64-character hex sha256 or null");
+    throw new TypeError("browserUpdateRevision must be a non-negative safe integer");
+  }
+  if (
+    input.referencedSourceRevision !== null &&
+    (typeof input.referencedSourceRevision !== "string" ||
+      !SHA256.test(input.referencedSourceRevision))
+  ) {
+    throw new TypeError("referencedSourceRevision must be a 64-character hex sha256 or null");
+  }
+  if (
+    !Array.isArray(input.referencedSourceFiles) ||
+    input.referencedSourceFiles.length > MAX_REFERENCED_SOURCE_FILES
+  ) {
+    throw new TypeError(`referencedSourceFiles must contain at most ${MAX_REFERENCED_SOURCE_FILES} files`);
+  }
+  for (const file of input.referencedSourceFiles) {
+    const issue = boundedString(file, MAX_SOURCE_FILE, "referencedSourceFiles entry");
+    if (issue) throw new TypeError(issue);
   }
   const mountedAt = timestampIssue(input.mountedAt, "mountedAt");
   if (mountedAt) throw new TypeError(mountedAt);

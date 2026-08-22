@@ -228,11 +228,21 @@ export default function agentAnnotations(
         "const transport = new HttpTaskTransport(config);",
         `const mounted = await mountAgentAnnotations({ transport, extensions, screenshotEvidence: config.screenshotEvidence, browserStatus: { endpoint: config.endpoint, token: config.token }, handoff: config.handoff, builtins: config.builtins, initialState: config.initialState, diagnostics: config.diagnostics });`,
         "window[key] = () => { mounted.unmount(); delete window[key]; };",
-        "mounted.refreshAppliedSourceRevision();",
+        "mounted.reportBrowserUpdate();",
         "if (import.meta.hot) {",
+        "  const reportAfterUpdate = async (event) => {",
+        "    try {",
+        "      const responses = await Promise.all(event.updates.map((update) => {",
+        "        const url = new URL(update.acceptedPath, window.location.href);",
+        "        url.searchParams.set('t', String(update.timestamp));",
+        "        return fetch(url);",
+        "      }));",
+        "      if (responses.every((response) => response.ok)) mounted.reportBrowserUpdate();",
+        "    } catch {}",
+        "  };",
         "  import.meta.hot.accept();",
         "  import.meta.hot.dispose(() => window[key]?.());",
-        "  import.meta.hot.on('vite:afterUpdate', () => { mounted.refreshAppliedSourceRevision(); });",
+        "  import.meta.hot.on('vite:afterUpdate', (event) => { void reportAfterUpdate(event); });",
         "}",
       ].filter(Boolean).join("\n");
     },
@@ -330,6 +340,7 @@ export default function agentAnnotations(
           if (url.pathname === `${resolvedEndpoint}/revision` && request.method === "GET") {
             const task = store.read();
             return json(response, 200, {
+              taskId: task?.taskId ?? null,
               taskRevision: task?.taskRevision ?? null,
               sourceRevision: task ? sourcePaths.revision(task) : null,
               sourceFiles: task ? sourcePaths.files(task) : [],
