@@ -18,8 +18,7 @@ export type TaskBindings = {
     id: string;
     redact(data: AgentAnnotationsJsonObject, context: { annotationId: string; extensionId: string }): AgentAnnotationsJsonObject | null;
   }>;
-  render(): void;
-  emit(): void;
+  commit(): void;
   destroyed(): boolean;
 };
 
@@ -49,8 +48,7 @@ export const createTaskController = (b: TaskBindings): TaskController => {
       // accepts it; an older result can never regress the current task.
       if (isTaskIdentityNewer(taskIdentity(next), taskIdentity(b.task()))) {
         b.setTask(next);
-        b.render();
-        b.emit();
+        b.commit();
       }
       return next;
     };
@@ -60,16 +58,14 @@ export const createTaskController = (b: TaskBindings): TaskController => {
       if (b.destroyed() || !(error instanceof RevisionConflictError)) throw error;
       // Adopt the latest task, then retry the rejected mutation exactly once.
       b.setTask(error.latestTask);
-      b.render();
-      b.emit();
+      b.commit();
       try {
         return await attempt(error.latestTask.taskRevision);
       } catch (retryError) {
         // A second conflict also adopts the latest task, then stops.
         if (b.destroyed() || !(retryError instanceof RevisionConflictError)) throw retryError;
         b.setTask(retryError.latestTask);
-        b.render();
-        b.emit();
+        b.commit();
         throw retryError;
       }
     }
@@ -81,8 +77,7 @@ export const createTaskController = (b: TaskBindings): TaskController => {
     if (b.destroyed()) return;
     if (isTaskIdentityNewer(taskIdentity(candidate), taskIdentity(b.task()))) {
       b.setTask(candidate);
-      b.render();
-      b.emit();
+      b.commit();
     }
   };
   return { mutate, adoptTask, mutateCommand };

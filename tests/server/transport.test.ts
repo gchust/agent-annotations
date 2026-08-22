@@ -190,13 +190,14 @@ it("records the evidence result as last-seen so the next poll is not re-delivere
   unsubscribe();
 });
 
-it("aborts in-flight polls and heartbeats on unsubscribe", async () => {
+it("only polls tasks and aborts the in-flight poll on unsubscribe", async () => {
   vi.useFakeTimers();
   const signals: AbortSignal[] = [];
+  const urls: string[] = [];
   let release!: () => void;
-  vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+  vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+    urls.push(url);
     signals.push(init?.signal as AbortSignal);
-    if (init?.method === "POST") return new Response("{}", { status: 200 });
     await new Promise<void>((resolve) => { release = resolve; });
     return stubTaskResponse(taskFixture());
   }));
@@ -204,6 +205,7 @@ it("aborts in-flight polls and heartbeats on unsubscribe", async () => {
   const unsubscribe = transport.subscribe(vi.fn());
   await vi.advanceTimersByTimeAsync(100);
   expect(signals.length).toBeGreaterThan(0);
+  expect(urls.every((url) => url.endsWith("/task"))).toBe(true);
   unsubscribe();
   expect(signals.every((signal) => signal.aborted)).toBe(true);
   release();

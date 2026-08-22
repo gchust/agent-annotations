@@ -20,7 +20,6 @@ export type HttpTaskTransportOptions = {
 };
 
 const TOKEN_HEADER = "x-agent-annotations-token";
-const HEARTBEAT_INTERVAL = 5_000;
 const MIN_POLL_INTERVAL = 100;
 const MAX_POLL_INTERVAL = 10_000;
 const DEFAULT_POLL_INTERVAL = 500;
@@ -150,9 +149,7 @@ export class HttpTaskTransport implements TaskTransport {
     const controller = new AbortController();
     let stopped = false;
     let pollInFlight = false;
-    let heartbeatInFlight = false;
     let pollTimer: number | undefined;
-    let heartbeatTimer: number | undefined;
 
     const poll = async () => {
       if (stopped || pollInFlight) return;
@@ -179,30 +176,11 @@ export class HttpTaskTransport implements TaskTransport {
         if (!stopped) pollTimer = window.setTimeout(() => void poll(), this.pollInterval);
       }
     };
-    const heartbeat = async () => {
-      if (stopped || heartbeatInFlight) return;
-      heartbeatInFlight = true;
-      try {
-        await fetch(`${this.endpoint}/heartbeat`, {
-          method: "POST",
-          headers: { [TOKEN_HEADER]: this.token },
-          signal: controller.signal,
-        });
-      } catch {
-        // The dev server may be restarting (or the subscription was aborted);
-        // the next heartbeat reconnects.
-      } finally {
-        heartbeatInFlight = false;
-        if (!stopped) heartbeatTimer = window.setTimeout(() => void heartbeat(), HEARTBEAT_INTERVAL);
-      }
-    };
-    heartbeatTimer = window.setTimeout(() => void heartbeat(), 0);
     void poll();
     return () => {
       stopped = true;
       controller.abort();
       if (pollTimer !== undefined) window.clearTimeout(pollTimer);
-      if (heartbeatTimer !== undefined) window.clearTimeout(heartbeatTimer);
     };
   }
 }

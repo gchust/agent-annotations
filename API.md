@@ -196,7 +196,7 @@ injection rather than importing it directly.
 subscription push are schema-parsed; synchronization follows the
 `(taskId, taskRevision)` identity rule (a different task id replaces the
 current task even at revision 0; the same task id only advances on a strictly
-larger revision), and unsubscribing aborts in-flight polls and heartbeats.
+larger revision), and unsubscribing aborts in-flight polls.
 `mountAgentAnnotations()` applies the same validation and identity rules
 unconditionally around any custom `TaskTransport`.
 

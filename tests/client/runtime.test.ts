@@ -2128,7 +2128,7 @@ describe("client runtime", () => {
       // A chrome re-render makes the icon throw only on its second render:
       // the boundary catches it, keeps the safe fallback, and records the
       // phase without a second root or SSR preflight.
-      window.dispatchEvent(new Event("resize"));
+      mounted.api.commands.markers.hide();
       await new Promise((resolve) => setTimeout(resolve, 0));
       expect(shadow.querySelector('[data-action-id="late-icon:late"] svg')).not.toBeNull();
       const entry = mounted.api.getSnapshot().diagnostics.find((item) => item.phase === "icon");
@@ -3778,6 +3778,50 @@ describe("client runtime", () => {
       mounted.unmount();
       targetA.remove();
       targetB.remove();
+    }
+  });
+
+  it("commits public state once per mutation, route change, and toolbar action, never for pointer movement", async () => {
+    const target = document.createElement("button");
+    target.getBoundingClientRect = () => new DOMRect(10, 10, 20, 20);
+    document.body.append(target);
+    primitives.getElementAtPoint.mockReturnValue(target);
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(taskFixture()),
+      initialState: { collapsed: false },
+    });
+    const host = document.getElementById("agent-annotations-root")!;
+    const shadow = host.shadowRoot!;
+    const commits = () => Number(host.dataset.publicCommits);
+    const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 30));
+    try {
+      let before = commits();
+      await mounted.api.commands.annotations.complete("ann-1");
+      expect(commits() - before).toBe(1);
+
+      before = commits();
+      history.pushState({}, "", "/commits");
+      await flush();
+      expect(commits() - before).toBe(1);
+
+      before = commits();
+      shadow.querySelector<HTMLButtonElement>('[data-action-id="agent-annotations.builtin:pick"]')!.click();
+      await Promise.resolve();
+      expect(commits() - before).toBe(1);
+
+      before = commits();
+      for (let index = 0; index < 100; index += 1) {
+        document.dispatchEvent(new MouseEvent("pointermove", {
+          bubbles: true,
+          clientX: index,
+          clientY: 5,
+        }));
+      }
+      await flush();
+      expect(commits() - before).toBe(0);
+    } finally {
+      mounted.unmount();
+      target.remove();
     }
   });
 

@@ -54,6 +54,8 @@ describe("architecture audit", () => {
     ["old-schema", `const old = "portal-studio";`],
     ["nocobase", `import "@nocobase/client";`],
     ["builtin-bypass", `switch (action) { case "pick": break; }`],
+    ["legacy-heartbeat", `const heartbeatTimer = setTimeout(send, 5000);`],
+    ["vite-source-endpoint", "if (path === `${resolvedEndpoint}/source`) return ok;"],
   ])("fails an injected %s violation", (check, content) => {
     const result = runArchitectureAudit(fixture(content));
     expect(result.ok).toBe(false);

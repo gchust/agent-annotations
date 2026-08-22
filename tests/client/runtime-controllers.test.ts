@@ -65,8 +65,7 @@ describe("runtime controllers (focused factory contracts)", () => {
       setTask: (next) => { state.task = next; },
       transport: () => transport,
       guardedRedactors: () => [],
-      render: () => undefined,
-      emit: () => undefined,
+      commit: () => undefined,
       destroyed: () => false,
     });
     await controller.mutate([{ op: "update", annotationId: "ann-1", comment: "Updated" }]);
@@ -82,8 +81,7 @@ describe("runtime controllers (focused factory contracts)", () => {
 
   it("task controller adopts a conflict task and retries exactly once", async () => {
     const state = { task: taskFixture() };
-    const render = vi.fn();
-    const emit = vi.fn();
+    const commit = vi.fn();
     let attempts = 0;
     const expectedRevisions: number[] = [];
     const transport = {
@@ -104,8 +102,7 @@ describe("runtime controllers (focused factory contracts)", () => {
       setTask: (next) => { state.task = next; },
       transport: () => transport,
       guardedRedactors: () => [],
-      render,
-      emit,
+      commit,
       destroyed: () => false,
     });
     await controller.mutate([{ op: "complete", annotationId: "ann-1" }]);
@@ -210,7 +207,7 @@ describe("runtime controllers (focused factory contracts)", () => {
       scheduleMarkerRefresh: vi.fn(),
       scheduleFrame: vi.fn(() => 0),
       render,
-      emit,
+      commit: emit,
     });
     controller.applyHostChange();
     expect(removals).not.toHaveBeenCalled();
@@ -235,6 +232,7 @@ describe("runtime controllers (focused factory contracts)", () => {
       transport: () => ({}),
       scheduleFrame: vi.fn(() => 0),
       emit: vi.fn(),
+      refreshChrome: vi.fn(),
       browserStatus: () => null,
       destroyed: () => false,
     });
@@ -394,7 +392,7 @@ describe("runtime controllers (focused factory contracts)", () => {
       root: () => document.createElement("div"),
       scheduleFrame: vi.fn(() => 0),
       render: vi.fn(),
-      emit: vi.fn(),
+      commit: vi.fn(),
       captureListeners: () => listeners,
       appRoot: () => appRoot as unknown as Element,
       captureDocumentOf: () => documentSpy as unknown as Document,

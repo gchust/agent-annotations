@@ -9,6 +9,7 @@ import type {
 import type { ClientExtensionRegistry } from "../../extension/index.js";
 import { safeErrorText } from "./annotated.js";
 import { AnnotationsIcon, FallbackIcon, GripIcon } from "../icons.js";
+import type { UiChromeSnapshot } from "./ui-state.js";
 
 export type RegisteredToolbarContribution = ReturnType<
   ClientExtensionRegistry["getToolbarContributions"]
@@ -239,12 +240,12 @@ export const CollapsedCount = (props: {
 export const StudioChrome = (props: {
     b: ChromeBindings;
     uiSubscribe: (listener: () => void) => () => void;
-    uiGetSnapshot: () => StudioPublicSnapshot;
+    uiGetSnapshot: () => UiChromeSnapshot;
   }): import("react").ReactNode => {
     const { b, uiSubscribe, uiGetSnapshot } = props;
     b.studioRenders += 1;
     b.hostElement.dataset.studioRenders = String(b.studioRenders);
-    const current = useSyncExternalStore(uiSubscribe, uiGetSnapshot);
+    const current = useSyncExternalStore(uiSubscribe, uiGetSnapshot).snapshot;
     const openCount = current.task.annotations.filter((entry) => entry.status === "open").length;
     const dockRef = useRef<HTMLDivElement | null>(null);
     const gripRef = useRef<HTMLButtonElement | null>(null);

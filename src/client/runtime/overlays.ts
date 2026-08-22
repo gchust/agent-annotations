@@ -52,7 +52,6 @@ export type OverlayBindings = {
   composer(): OverlayComposer | null;
   cancelCapture(): void;
   render(): void;
-  emit(): void;
   destroyed(): boolean;
   screenshotMode(): "auto" | "manual" | "off";
   canWriteEvidence(): boolean;
@@ -320,7 +319,6 @@ export const createOverlayController = (b: OverlayBindings): OverlayController =
         }
         b.clearTransientSelection();
         b.render();
-        b.emit();
         b.setStatus(b.localized("Annotation saved"));
         if (evidenceInput) b.scheduleScreenshotEvidence(evidenceInput);
       } catch (error) {

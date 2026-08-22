@@ -21,6 +21,7 @@ export type DiagnosticsBindings = {
   };
   scheduleFrame(callback: () => void): number;
   emit(): void;
+  refreshChrome(): void;
   browserStatus(): { endpoint: string; token: string } | null;
   destroyed(): boolean;
 };
@@ -72,13 +73,14 @@ export const createDiagnosticsController = (b: DiagnosticsBindings): Diagnostics
   const extensionFailureKeys = new Set<string>();
 
   const scheduleDiagnosticsEmit = (): void => {
-    // Contribution guards can run inside React render/lifecycle; the UI emit
-    // is deferred and coalesced so it never synchronously re-enters React.
+    // Public state updates immediately, while the Chrome refresh is deferred
+    // and coalesced so a contribution guard never re-enters React.
+    b.emit();
     if (diagnosticsEmitScheduled) return;
     diagnosticsEmitScheduled = true;
     b.scheduleFrame(() => {
       diagnosticsEmitScheduled = false;
-      if (!b.destroyed()) b.emit();
+      if (!b.destroyed()) b.refreshChrome();
     });
   };
 

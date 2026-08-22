@@ -48,6 +48,8 @@ const CHECKS = [
   ["old-schema", /PortalStudio|portal-studio|\.portal-studio|TASK_SCHEMA_VERSION_V[1-6]|normalizeLegacy|capture_task/],
   ["nocobase", /\x40nocobase|data\x2dnb-|data\x2dai\x2dpage\x2delement|NOCO\x42ASE_/],
   ["builtin-bypass", /switch\s*\([^)]*(?:action|contribution)[^)]*\)|case\s+["'](?:pick|multi|area|copy|visibility|help|list)["']/],
+  ["legacy-heartbeat", /HEARTBEAT_INTERVAL|heartbeatInFlight|heartbeatTimer/],
+  ["vite-source-endpoint", /resolvedEndpoint\}\/source/],
 ] as const;
 
 const walk = (directory: string, base: string, files: string[]): void => {

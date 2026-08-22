@@ -94,7 +94,6 @@ Without Vite, mount the runtime directly with any `TaskTransport`:
 ```ts
 import {
   mountAgentAnnotations,
-  createValidatedTaskTransport,
   type AgentAnnotationsMutationRequest,
   type AgentAnnotationsTask,
 } from "@gchust/agent-annotations";
@@ -107,10 +106,10 @@ declare const persistMutation: (
 ) => Promise<AgentAnnotationsTask>;
 
 const mounted = await mountAgentAnnotations({
-  transport: createValidatedTaskTransport({
+  transport: {
     read: async () => task,
     mutate: persistMutation,
-  }),
+  },
 });
 ```
 

@@ -130,22 +130,37 @@ Commit:
 
 ## Progress
 
-- [ ] 检查实际 HEAD 和工作区。
-- [ ] 建立 AC → 文件 → 测试 → 证据映射。
-- [ ] 实现生产代码。
-- [ ] 增加最小回归测试。
-- [ ] 运行当前 Goal 完整门禁。
-- [ ] 独立 Review。
-- [ ] 更新 Outcomes。
+- [x] 检查实际 HEAD 和工作区：开始于 `d4ff943ca34d4adf04be736c560acfec9ac8a9ca`，工作区仅含本 Goal 变更。
+- [x] 建立 AC → 文件 → 测试 → 证据映射。
+- [x] 实现生产代码：删除空 heartbeat、`/source`，提取 browser-status/UI coordinator，合并 public commit。
+- [x] 增加最小回归测试：transport/Vite strictness、audit、runtime public commit counter。
+- [x] 运行当前 Goal 完整门禁。
+- [x] 独立 Review：复查最终 diff、调用点、协议搜索和计数测试。
+- [x] 更新 Outcomes。
 
 ## Surprises & Discoveries
 
-- 执行时填写。
+- Vite 的 legacy heartbeat 测试在严格协议变更后按 Alpha 合同更新为 400；`/source` 物理删除后新增 404 断言。
+- 诊断必须在 coordinator 初始化前安全记录，因此保留早期 no-op binding，并由 coordinator 初始化时捕获已记录诊断。
 
 ## Decision Log
 
-- 执行时填写实际决策及原因。
+- 使用 `ui-state.ts` 单一 coordinator：`commit()` 负责 overlay + 一次 snapshot/Chrome，`commitPublic()` 负责 diagnostics 等无 overlay 的 public 更新，`refreshChrome()` 只更新 pending/chrome revision。
+- 保持 pointermove 的 `refreshInteractiveOverlays()` 路径，不触发 coordinator commit；toolbar pending 状态只走 `refreshChrome()`。
+- Browser status 责任抽到 `browser-status.ts`，避免在 mount 中保留第二套 heartbeat/revision 逻辑。
+- 删除 `HttpTaskTransport` 空 heartbeat 与 Vite `/source`，不保留兼容别名。
 
 ## Outcomes & Retrospective
 
-- 完成时填写。
+- 完成：一套严格 Browser State v2 heartbeat；无 `/source` route；transport 文档直接传 custom transport；mount 从 1492 行降至 1363 行。
+- 性能证据：新增 runtime 测试验证单次 mutation、route change、toolbar action 各增加 1 个 `data-public-commits`，100 次 pointermove 增量为 0。
+- 相关测试 4 files / 186 tests、完整 `pnpm test` 37 files / 462 tests 均通过；architecture 31 tests、docs、typecheck、build 均通过。
+- `check:package` 通过（publint/ATTW），`check:tarball` 通过（26 files, 116899 bytes）。
+- 首次 packed E2E 暴露动态 iframe resolution 后 List 未刷新；修复为 resolution snapshot 变化时仅刷新 Chrome（不增加 public commit），重跑后 20/20 Playwright 场景通过。
+- G09-001 PASS：transport 只轮询 `/task`，runtime controller 独占完整 heartbeat；focused transport/Vite tests 通过。
+- G09-002 PASS：Vite `/source` route 删除，认证 POST 返回 404，audit 禁止 route literal 回归。
+- G09-003 PASS：README manual transport 直接传入，runtime 仍统一验证边界。
+- G09-004 PASS：单一 coordinator 只 clone/freeze 一次；mutation/route/toolbar 计数均为 +1。
+- G09-005 PASS：100 次 pointermove public commit 增量为 0，packed browser flows 通过。
+- G09-006 PASS：browser status 与 UI commit 职责抽取，`mount.ts` 减少 129 行。
+- G09-007 PASS：空 body/`{}` heartbeat 均为 400，audit/search 无 legacy 分支。

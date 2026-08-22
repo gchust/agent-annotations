@@ -138,7 +138,7 @@ export type HostBindings = {
   scheduleMarkerRefresh(): void;
   scheduleFrame(callback: () => void): number;
   render(): void;
-  emit(): void;
+  commit(): void;
 };
 
 export type HostController = {
@@ -200,8 +200,7 @@ export const createHostController = (b: HostBindings): HostController => {
       b.setEditingId(null);
     }
     b.scheduleFrame(() => {
-      b.render();
-      b.emit();
+      b.commit();
     });
   };
   const applyHostChange = (): void => {
@@ -225,8 +224,7 @@ export const createHostController = (b: HostBindings): HostController => {
       b.setMessages(nextMessages);
       b.root().lang = b.hostLocale();
       b.setShortcuts(b.buildShortcuts());
-      b.render();
-      b.emit();
+      b.commit();
     }
     const nextAppRoot = b.host()?.appRoot?.() ?? document.body;
     if (nextAppRoot !== b.appRoot()) {
@@ -236,10 +234,7 @@ export const createHostController = (b: HostBindings): HostController => {
         b.refreshCaptureDocuments();
       }
       b.scheduleMarkerRefresh();
-      b.scheduleFrame(() => {
-        b.render();
-        b.emit();
-      });
+      b.scheduleFrame(() => b.render());
     }
     applyRouteKey(b.pageContext().routeKey);
   };

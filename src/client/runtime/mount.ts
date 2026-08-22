@@ -1,5 +1,4 @@
 import {
-  createAgentAnnotationsId,
   formatAgentAnnotationsHandoff,
   formatAgentAnnotationsShortcut,
   matchesAgentAnnotationsShortcut,
@@ -11,7 +10,6 @@ import {
 import { ClientExtensionRegistry } from "../../extension/index.js";
 import { createValidatedTaskTransport } from "../validated-transport.js";
 import { isTaskIdentityNewer, taskIdentity } from "../../core/transport.js";
-import { PACKAGE_VERSION } from "../../metadata.js";
 import type {
   AgentAnnotationsCaptureMode,
   AgentAnnotationsHostTheme,
@@ -60,6 +58,8 @@ import { createEvidenceController } from "./evidence.js";
 import { createCaptureController } from "./capture.js";
 import { createGuardedHostIntegration, createHostController, type GuardedHostIntegration } from "./host.js";
 import { createOverlayController } from "./overlays.js";
+import { createBrowserStatusController } from "./browser-status.js";
+import { createUiCommitCoordinator } from "./ui-state.js";
 
 export async function mountAgentAnnotations(
   options: MountAgentAnnotationsOptions
@@ -145,7 +145,6 @@ export async function mountAgentAnnotations(
   let appRoot: Element | Document = document.body;
   const listeners = new Set<(snapshot: StudioPublicSnapshot) => void>();
   const uiListeners = new Set<() => void>();
-  let uiSnapshot: StudioPublicSnapshot;
   const notifyUi = () => {
     for (const listener of uiListeners) listener();
   };
@@ -153,7 +152,8 @@ export async function mountAgentAnnotations(
     uiListeners.add(listener);
     return () => uiListeners.delete(listener);
   };
-  const uiGetSnapshot = (): StudioPublicSnapshot => uiSnapshot;
+  let emit: () => void = () => undefined;
+  let refreshChrome: () => void = () => undefined;
 
   const cleanups: Array<() => void> = [];
   cleanups.push(() => disposeSystemTheme());
@@ -172,19 +172,7 @@ export async function mountAgentAnnotations(
     timers.delete(timer);
   };
 
-  // Browser runtime status: reported through the authenticated /heartbeat
-  // path every 5 seconds and immediately after mount. The state is bounded,
-  // redacted (route key), and never carries the token or sensitive text.
   const browserStatus = options.browserStatus ?? null;
-  const runtimeId = browserStatus?.runtimeId ?? createAgentAnnotationsId();
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(runtimeId)) {
-    throw new TypeError("browserStatus runtimeId must be a valid runtime id");
-  }
-  const clientVersion = PACKAGE_VERSION;
-  const mountedAt = now();
-  let browserUpdateRevision = 0;
-  let referencedSourceRevision: string | null = null;
-  let referencedSourceFiles: string[];
   let annotationHealth = (): Array<{
     annotationId: string;
     resolved: number;
@@ -192,123 +180,24 @@ export async function mountAgentAnnotations(
     reason: "unresolved" | "identity mismatch" | "identity unverifiable" | "iframe unsupported" | null;
   }> => [];
   let resetHeartbeatResolutionSnapshots = (): void => undefined;
-  const taskSourceFiles = (value: AgentAnnotationsTask): string[] => [
-    ...new Set(value.annotations.flatMap((annotation) =>
-      (annotation.targets ?? []).flatMap((target) =>
-        [target.inspection.source, ...target.inspection.sourceStack]
-          .flatMap((source) => source?.filePath ?? [])
-      )
-    )),
-  ].sort();
-  referencedSourceFiles = taskSourceFiles(task);
-  const sendBrowserHeartbeat = (): void => {
-    if (destroyed || !browserStatus) return;
-    const state = {
-      // Protocol literal mirrored with the server parser (browser bundle must
-      // stay free of server/node modules).
-      schema: "agent-annotations.browser-state.v2",
-      runtimeId,
-      clientVersion,
-      // Privacy: never persist a raw URL query; hash routes stay intact (the
-      // server parser rejects only route keys that still contain a query).
-      routeKey,
-      taskId: task.taskId,
-      taskRevision: task.taskRevision,
-      browserUpdateRevision,
-      referencedSourceRevision,
-      referencedSourceFiles,
-      annotationHealth: annotationHealth(),
-      mountedAt,
-      lastHeartbeatAt: now(),
-    };
-    fetch(`${browserStatus.endpoint}/heartbeat`, {
-      method: "POST",
-      headers: {
-        "x-agent-annotations-token": browserStatus.token,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify(state),
-    }).catch(() => {
-      // The dev server may be restarting; the next heartbeat reconnects.
-    });
-  };
-  const removeBrowserState = (): void => {
-    if (!browserStatus) return;
-    fetch(`${browserStatus.endpoint}/heartbeat`, {
-      method: "DELETE",
-      headers: {
-        "x-agent-annotations-token": browserStatus.token,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({ runtimeId }),
-      keepalive: true,
-    }).catch(() => undefined);
-  };
-  const setTask = (next: AgentAnnotationsTask): void => {
-    const nextFiles = taskSourceFiles(next);
-    if (nextFiles.length !== referencedSourceFiles.length ||
-      nextFiles.some((file, index) => file !== referencedSourceFiles[index])) {
-      referencedSourceRevision = null;
-      referencedSourceFiles = nextFiles;
-    }
-    task = next;
-    resetHeartbeatResolutionSnapshots();
-    sendBrowserHeartbeat();
-  };
-  const scheduleBrowserHeartbeat = (): void => {
-    if (destroyed || !browserStatus) return;
-    resetHeartbeatResolutionSnapshots();
-    sendBrowserHeartbeat();
-    scheduleTimer(scheduleBrowserHeartbeat, 5_000);
-  };
-  // The generated Vite client is the only caller: once after mount and after
-  // each successful vite:afterUpdate. Task changes never enter this path.
-  let referencedSourceRevisionRequest = 0;
-  const reportBrowserUpdate = (): void => {
-    if (destroyed || !browserStatus) return;
-    browserUpdateRevision += 1;
-    referencedSourceRevision = null;
-    sendBrowserHeartbeat();
-    const request = ++referencedSourceRevisionRequest;
-    const reportedTaskId = task.taskId;
-    const reportedTaskRevision = task.taskRevision;
-    const run = async (): Promise<void> => {
-      try {
-        const response = await fetch(`${browserStatus.endpoint}/revision`, {
-          headers: { "x-agent-annotations-token": browserStatus.token },
-        });
-        // A non-ok revision response is a failure: never parse or apply it.
-        if (!response.ok) return;
-        const payload = await response.json() as {
-          taskId?: unknown;
-          taskRevision?: unknown;
-          referencedSourceRevision?: unknown;
-          referencedSourceFiles?: unknown;
-        };
-        if (
-          request === referencedSourceRevisionRequest &&
-          task.taskId === reportedTaskId &&
-          task.taskRevision === reportedTaskRevision &&
-          payload.taskId === reportedTaskId &&
-          payload.taskRevision === reportedTaskRevision &&
-          (payload.referencedSourceRevision === null ||
-            (typeof payload.referencedSourceRevision === "string" &&
-              /^[0-9a-f]{64}$/i.test(payload.referencedSourceRevision))) &&
-          Array.isArray(payload.referencedSourceFiles) &&
-          payload.referencedSourceFiles.length <= 256 &&
-          payload.referencedSourceFiles.every((file) => typeof file === "string" && file.length > 0 && file.length <= 2_048) &&
-          (payload.referencedSourceFiles.length > 0 || payload.referencedSourceRevision === null)
-        ) {
-          referencedSourceRevision = payload.referencedSourceRevision?.toLowerCase() ?? null;
-          referencedSourceFiles = [...payload.referencedSourceFiles].sort();
-          sendBrowserHeartbeat();
-        }
-      } catch {
-        // Best-effort; the next refresh reconnects.
-      }
-    };
-    run().catch(() => undefined);
-  };
+  const browserStatusController = createBrowserStatusController({
+    config: browserStatus,
+    task: () => task,
+    setTaskValue: (next) => { task = next; },
+    routeKey: () => routeKey,
+    destroyed: () => destroyed,
+    annotationHealth: () => annotationHealth(),
+    resetResolutionSnapshots: () => resetHeartbeatResolutionSnapshots(),
+    scheduleTimer,
+  });
+  const {
+    runtimeId,
+    setTask,
+    sendHeartbeat: sendBrowserHeartbeat,
+    scheduleHeartbeat: scheduleBrowserHeartbeat,
+    reportBrowserUpdate,
+    removeBrowserState,
+  } = browserStatusController;
   const scheduleFrame = (callback: () => void): number => {
     const frame = window.requestAnimationFrame(() => {
       frames.delete(frame);
@@ -329,10 +218,7 @@ export async function mountAgentAnnotations(
       // revision 0; the same task id only advances on a larger revision.
       if (destroyed || !isTaskIdentityNewer(taskIdentity(next), taskIdentity(task))) return;
       setTask(next);
-      scheduleFrame(() => {
-        render();
-        emit();
-      });
+      scheduleFrame(() => commit());
     }));
   }
 
@@ -400,7 +286,7 @@ export async function mountAgentAnnotations(
     scheduleMarkerRefresh: () => scheduleMarkerRefresh(),
     scheduleFrame,
     render: () => render(),
-    emit: () => emit(),
+    commit: () => commit(),
   });
   const {
     applyTheme,
@@ -488,16 +374,7 @@ export async function mountAgentAnnotations(
     // Re-derive every host-derived state (theme/locale/messages/appRoot/route)
     // from the surviving host; a rolled-back failed host leaves the defaults.
     applyHostChange();
-    render();
-    emit();
-  };
-
-  const deepFreeze = <T>(value: T): T => {
-    if (value && typeof value === "object" && !Object.isFrozen(value)) {
-      Object.freeze(value);
-      for (const entry of Object.values(value as object)) deepFreeze(entry);
-    }
-    return value;
+    commit();
   };
 
   const diagnosticsController = createDiagnosticsController({
@@ -505,6 +382,7 @@ export async function mountAgentAnnotations(
     transport: () => transport,
     scheduleFrame: (cb) => scheduleFrame(cb),
     emit: () => emit(),
+    refreshChrome: () => refreshChrome(),
     browserStatus: () => browserStatus,
     destroyed: () => destroyed,
   });
@@ -557,8 +435,7 @@ export async function mountAgentAnnotations(
     setTask,
     transport: () => transport,
     guardedRedactors,
-    render: () => render(),
-    emit: () => emit(),
+    commit: () => commit(),
     destroyed: () => destroyed,
   });
   const { mutate, adoptTask, mutateCommand } = taskController;
@@ -582,9 +459,8 @@ export async function mountAgentAnnotations(
   });
   const { prepareScreenshotEvidence, scheduleScreenshotEvidence, captureEvidence } = evidenceController;
 
-  const snapshot = (): StudioPublicSnapshot => {
-    const payload: StudioPublicSnapshot = {
-      task: structuredClone(task),
+  const publicPayload = (): StudioPublicSnapshot => ({
+      task,
       captureMode,
       collapsed,
       markersVisible,
@@ -593,24 +469,13 @@ export async function mountAgentAnnotations(
       shortcuts,
       exporters: exporters.map(({ id, extensionId }) => ({ id, extensionId })),
       messages: { ...messages },
-    };
-    // Deep clone the complete JSON-safe payload, then deeply freeze the
-    // clone: extension mutation attempts can never touch runtime state or
-    // freeze the extension's own config objects.
-    return deepFreeze(structuredClone(payload));
-  };
-  uiSnapshot = snapshot();
-  const refreshChrome = () => {
-    flushSync(() => {
-      uiSnapshot = snapshot();
-      notifyUi();
     });
-  };
-  const emit = () => {
+  let commitCoordinator: ReturnType<typeof createUiCommitCoordinator> | null = null;
+  const snapshot = (): StudioPublicSnapshot => commitCoordinator!.getSnapshot();
+  refreshChrome = () => commitCoordinator?.refreshChrome();
+  emit = () => {
     if (destroyed) return;
-    refreshChrome();
-    const value = uiSnapshot;
-    for (const listener of listeners) listener(value);
+    commitCoordinator?.commitPublic();
   };
   const renderStatus = () => {
     overlayMount.querySelector(".aa-status")?.remove();
@@ -684,8 +549,8 @@ export async function mountAgentAnnotations(
       command: handoff.command,
       verificationCommands: handoff.verificationCommands,
       includeCompleted: handoff.includeCompleted || filter === "all",
-      browserUpdateRevision,
-      referencedSourceRevision,
+      browserUpdateRevision: browserStatusController.browserUpdateRevision(),
+      referencedSourceRevision: browserStatusController.referencedSourceRevision(),
       runtimeId,
       routeKey,
       generatedAt: now(),
@@ -738,7 +603,7 @@ export async function mountAgentAnnotations(
     positionEditor: () => positionEditor(),
     localized: (value, params) => localized(value, params),
     resolutionChanged: () => {
-      emit();
+      refreshChrome();
       sendBrowserHeartbeat();
     },
   });
@@ -773,7 +638,6 @@ export async function mountAgentAnnotations(
     composer: () => composer,
     cancelCapture: () => cancelCapture(),
     render: () => render(),
-    emit: () => emit(),
     destroyed: () => destroyed,
     screenshotMode: () => screenshotMode,
     canWriteEvidence: () => !!transport.writeEvidence,
@@ -841,7 +705,7 @@ export async function mountAgentAnnotations(
     root: () => root,
     scheduleFrame,
     render: () => render(),
-    emit: () => emit(),
+    commit: () => commit(),
     setStatus: (message) => setStatus(message),
     localized: (value, params) => localized(value, params),
     captureListeners: () => [
@@ -911,16 +775,14 @@ export async function mountAgentAnnotations(
           }
           openPanel = id;
           focusPanel = true;
-          render();
-          emit();
+          commit();
         },
         close: (id) => {
           if (!id || openPanel === id) {
             const returnAction = panelReturnAction;
             openPanel = null;
             panelReturnAction = null;
-            render();
-            emit();
+            commit();
             scheduleFrame(() => {
               if (returnAction) {
                 root
@@ -965,7 +827,7 @@ export async function mountAgentAnnotations(
     const execute = async () => {
       if (pendingActions.has(contribution.id)) return; // No re-entry for the same action.
       pendingActions.add(contribution.id);
-      render();
+      refreshChrome();
       try {
         await contribution.execute?.({
           studio: api,
@@ -978,7 +840,7 @@ export async function mountAgentAnnotations(
       } finally {
         if (destroyed) return;
         pendingActions.delete(contribution.id); // Only this action is released.
-        render();
+        refreshChrome();
       }
     };
     // All action failures are caught inside execute's own try/catch/finally.
@@ -1083,8 +945,16 @@ export async function mountAgentAnnotations(
   const render = () => {
     if (destroyed) return;
     refreshOverlays();
-    refreshChrome();
   };
+  const commit = () => commitCoordinator?.commit();
+  commitCoordinator = createUiCommitCoordinator({
+    payload: publicPayload,
+    refreshOverlays,
+    notifyChrome: notifyUi,
+    listeners,
+    destroyed: () => destroyed,
+    committed: (count) => { hostElement.dataset.publicCommits = String(count); },
+  });
 
   const isHostEvent = (event: Event): boolean =>
     event.composedPath().includes(hostElement);
@@ -1383,7 +1253,7 @@ export async function mountAgentAnnotations(
   flushSync(() => studioRoot!.render(createElement(StudioChrome, {
     b: chromeBindings,
     uiSubscribe,
-    uiGetSnapshot,
+    uiGetSnapshot: commitCoordinator!.getChromeSnapshot,
   })));
   render();
   const savedDockPosition = readDockPosition();
@@ -1448,6 +1318,7 @@ export async function mountAgentAnnotations(
     studioRoot?.unmount();
     studioRoot = null;
     delete hostElement.dataset.studioRenders;
+    delete hostElement.dataset.publicCommits;
     safeTeardown();
     listeners.clear();
     uiListeners.clear();

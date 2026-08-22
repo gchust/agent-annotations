@@ -360,15 +360,14 @@ describe("serve-only Vite plugin", () => {
       expect(persisted).toMatchObject({ schema: state.schema, runtimeId: "runtime-1", routeKey: "/" });
       expect(persisted.lastHeartbeatAt).not.toBe(state.lastHeartbeatAt);
       expect(JSON.stringify(persisted)).not.toContain(firstSession.token);
-      // The legacy bare transport heartbeat (no body) stays accepted.
+      // Only a complete Browser State v2 heartbeat is accepted.
       const bare = await fetch(`${firstSession.base}/__agent-annotations/heartbeat`, {
         method: "POST",
         headers: { "x-agent-annotations-token": firstSession.token },
       });
-      expect(bare.status).toBe(200);
+      expect(bare.status).toBe(400);
       expect(JSON.parse(readFileSync(statePath, "utf8")).runtimeId).toBe("runtime-1");
-      // A bare transport liveness heartbeat never overwrites the state.
-      await firstSession.heartbeat({});
+      expect((await firstSession.heartbeat({})).status).toBe(400);
       expect(JSON.parse(readFileSync(statePath, "utf8")).runtimeId).toBe("runtime-1");
       // Malformed claimed browser-state payloads are strictly rejected.
       const wrongSchema = await firstSession.heartbeat({ ...state, schema: "other.v1" });
@@ -398,6 +397,15 @@ describe("serve-only Vite plugin", () => {
         body: JSON.stringify(state),
       });
       expect(denied.status).toBe(404);
+      const removedSource = await fetch(`${firstSession.base}/__agent-annotations/source`, {
+        method: "POST",
+        headers: {
+          "x-agent-annotations-token": firstSession.token,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ filePath: "src/App.tsx" }),
+      });
+      expect(removedSource.status).toBe(404);
     } finally {
       await first.close();
     }

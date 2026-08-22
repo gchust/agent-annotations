@@ -119,18 +119,6 @@ const body = async (request: IncomingMessage, limit = MAX_BODY_BYTES): Promise<u
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 };
 
-const rawBody = async (request: IncomingMessage, limit = MAX_BODY_BYTES): Promise<string> => {
-  const chunks: Buffer[] = [];
-  let bytes = 0;
-  for await (const chunk of request) {
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    bytes += buffer.length;
-    if (bytes > limit) throw new Error("payload_too_large");
-    chunks.push(buffer);
-  }
-  return Buffer.concat(chunks).toString("utf8");
-};
-
 export default function agentAnnotations(
   options: AgentAnnotationsPluginOptions = {}
 ): Plugin {
@@ -351,34 +339,12 @@ export default function agentAnnotations(
             return json(response, 200, { entries: await appendDiagnostics(runtimeRoot, input.entries) });
           }
           if (url.pathname === `${resolvedEndpoint}/heartbeat` && request.method === "POST") {
-            // Only an actually empty body or the exact empty JSON object is the
-            // legacy transport liveness heartbeat. Invalid JSON and non-empty
-            // unknown shapes are rejected; a claimed browser-state payload
-            // (with a schema field) is parsed strictly.
-            const raw = await rawBody(request, 16 * 1024);
-            const trimmed = raw.trim();
-            let parsed: unknown = null;
-            if (trimmed !== "") {
-              try {
-                parsed = JSON.parse(trimmed);
-              } catch {
-                return json(response, 400, { error: "invalid_json" });
-              }
-              if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-                return json(response, 400, { error: "invalid_heartbeat_payload" });
-              }
-              const claimed = parsed as Record<string, unknown>;
-              if (claimed.schema !== undefined) {
-                const state = parseAgentAnnotationsBrowserState(claimed);
-                writeAgentAnnotationsBrowserState(runtimeRoot, {
-                  ...state,
-                  lastHeartbeatAt: new Date().toISOString(),
-                });
-                browserRuntimeIds.add(state.runtimeId);
-              } else if (Object.keys(claimed).length > 0) {
-                return json(response, 400, { error: "invalid_heartbeat_payload" });
-              }
-            }
+            const state = parseAgentAnnotationsBrowserState(await body(request, 16 * 1024));
+            writeAgentAnnotationsBrowserState(runtimeRoot, {
+              ...state,
+              lastHeartbeatAt: new Date().toISOString(),
+            });
+            browserRuntimeIds.add(state.runtimeId);
             return json(response, 200, { ok: true, receivedAt: new Date().toISOString() });
           }
           if (url.pathname === `${resolvedEndpoint}/heartbeat` && request.method === "DELETE") {
@@ -392,14 +358,6 @@ export default function agentAnnotations(
               removeAgentAnnotationsBrowserState(runtimeRoot, runtimeId);
             }
             return json(response, 200, { ok: true });
-          }
-          if (url.pathname === `${resolvedEndpoint}/source` && request.method === "POST") {
-            const input = await body(request) as { filePath?: unknown };
-            return json(response, 200, {
-              filePath: typeof input.filePath === "string"
-                ? sourcePaths.canonicalize(input.filePath)
-                : null,
-            });
           }
           if (url.pathname === `${resolvedEndpoint}/evidence` && request.method === "POST") {
             const input = await body(request, MAX_EVIDENCE_BODY_BYTES) as {

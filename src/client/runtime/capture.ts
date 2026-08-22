@@ -39,7 +39,7 @@ export type CaptureBindings = {
   root(): HTMLElement;
   scheduleFrame(callback: () => void): number;
   render(): void;
-  emit(): void;
+  commit(): void;
   // Capture document binding: the controller owns the document map and the
   // iframe load binding; the mount provides the pointer/click listeners, the
   // app root, and the origin document resolution.
@@ -111,8 +111,7 @@ export const createCaptureController = (b: CaptureBindings): CaptureController =
 
   const setMarkersVisible = (visible: boolean) => {
     b.setMarkersVisibleValue(visible);
-    b.render();
-    b.emit();
+    b.commit();
   };
   const setCollapsed = (next: boolean) => {
     if (b.collapsed() === next) return;
@@ -130,8 +129,7 @@ export const createCaptureController = (b: CaptureBindings): CaptureController =
       b.setAreaStartValue(null);
       b.setAreaRectValue(null);
     }
-    b.render();
-    b.emit();
+    b.commit();
   };
   const toggleCollapsed = () => setCollapsed(!b.collapsed());
 
@@ -147,8 +145,7 @@ export const createCaptureController = (b: CaptureBindings): CaptureController =
     clearCaptureDocuments();
     b.setCaptureModeValue("idle");
     clearTransientSelection();
-    b.render();
-    b.emit();
+    b.commit();
   };
   const startCapture = (mode: Exclude<AgentAnnotationsCaptureMode, "idle">) => {
     b.setCaptureModeValue(mode);
@@ -157,8 +154,7 @@ export const createCaptureController = (b: CaptureBindings): CaptureController =
     b.setEditingIdValue(null);
     b.setOpenPanelValue(null);
     refreshCaptureDocuments();
-    b.render();
-    b.emit();
+    b.commit();
   };
 
   // Editor anchoring: a trigger list item rect (captured before the panel
@@ -212,7 +208,7 @@ export const createCaptureController = (b: CaptureBindings): CaptureController =
     b.setEditingIdValue(id);
     b.setMarkerHighlight(id);
     b.setOpenPanelValue(null);
-    b.render();
+    b.commit();
     b.scheduleFrame(() => b.overlayMount().querySelector<HTMLElement>(".aa-editor textarea")?.focus());
   };
 

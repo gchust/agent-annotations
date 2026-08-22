@@ -29,9 +29,12 @@ flowchart TD
   targets (identity-validated, no fuzzy matching), samples regions, and
   exposes capture freezing.
 - `Runtime Controllers` (`src/client/runtime/`) own disjoint concerns —
-  task/conflict synchronization, host route/locale/theme, capture modes and
-  document binding, markers and observers, evidence, diagnostics, and the
-  chrome/overlays. The dependency graph is a DAG: helpers/controllers →
+  task/conflict synchronization, browser-status heartbeat state, host
+  route/locale/theme, capture modes and document binding, markers and
+  observers, evidence, diagnostics, and the chrome/overlays. A shared UI
+  commit coordinator builds one deeply frozen public snapshot and refreshes
+  Chrome once per logical state update; pointer movement only refreshes
+  interactive overlays. The dependency graph is a DAG: helpers/controllers →
   chrome/overlays → mount orchestration. Only `mount.ts` may import
   `chrome`/`overlays`, and no controller may import `mount`. One stable React
   root exists in `mount.ts`; the architecture audit enforces all of this.
@@ -50,6 +53,9 @@ flowchart TD
   `diagnostics` boundary, and handoff output; the CLI is the Code agent's
   read/write authority (`validate-task`, `wait --browser-update-revision`,
   `complete`, `reopen`, `evidence`, `revision`).
+- The Vite API accepts only complete Browser State v2 payloads at
+  `/heartbeat`. Source paths are canonicalized at the task mutation boundary;
+  there is no separate source-normalization endpoint.
 
 ## Runtime module graph
 
@@ -61,11 +67,13 @@ flowchart TB
     end
     subgraph Controllers
         diagnostics
+        browser-status
         markers
         task
         evidence
         capture
         host
+        ui-state
     end
     subgraph UI layer
         chrome
