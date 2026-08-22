@@ -18,6 +18,7 @@ export type AgentAnnotationsHandoffOptions = AgentAnnotationsHandoffConfig & {
   referencedSourceRevision?: string | null;
   runtimeId?: string | null;
   routeKey?: string | null;
+  generatedAt?: string | null;
 };
 
 export type NormalizedAgentAnnotationsHandoffConfig = {
@@ -125,22 +126,18 @@ const formatSource = (source: NonNullable<AgentAnnotationsTarget["inspection"]["
     source.componentName ? ` (${singleLine(source.componentName)})` : ""
   }`;
 
-// Single-line shell-safe summary for the completion command; never emits
-// newlines or control characters that could forge instructions.
-// POSIX single-quote escaping: every control character is replaced globally
-// and embedded single quotes become the standard `'"'"'` sequence, so the
-// completion command stays runnable with no shell expansion and cannot forge
-// instructions.
-const completionSummary = (comment: string): string =>
-  `'${singleLine(comment).replace(/'/g, `'"'"'`)}'`;
+// Plain filename placeholders stay runnable across shells without quoting.
+const summaryFile = (annotationId: string): string => `agent-annotations-summary-${annotationId}.txt`;
 
-const completionCommand = (command: string, annotationId: string, comment: string): string =>
-  `${command} complete ${annotationId} --verified --summary ${completionSummary(comment)}`;
+const completionCommand = (command: string, annotationId: string): string =>
+  `${command} complete ${annotationId} --verified --summary-file ${summaryFile(annotationId)}`;
 
 const formatAnnotation = (
   task: AgentAnnotationsTask,
   command: string,
-  annotation: AgentAnnotation
+  annotation: AgentAnnotation,
+  runtimeId: string | null,
+  generatedAt: string | null
 ): string[] => {
   const displayNumber =
     agentAnnotationsAnnotationDisplayNumber(task.annotations, annotation.annotationId) ?? 1;
@@ -189,7 +186,12 @@ const formatAnnotation = (
       ])
     );
   }
-  lines.push(`- completion: ${completionCommand(command, annotation.annotationId, annotation.comment)}`);
+  lines.push(
+    `- diagnostics baseline: ${generatedAt ?? "diagnostics baseline unavailable"}`,
+    `- status: ${command} status${runtimeId ? ` --runtime ${runtimeId}` : ""} --annotation ${annotation.annotationId}${generatedAt ? ` --fail-on-diagnostics --diagnostics-since ${generatedAt}` : ""} --check --json`,
+    `- summary file: ${summaryFile(annotation.annotationId)}`,
+    `- completion: ${completionCommand(command, annotation.annotationId)}`
+  );
   return [...lines, ""];
 };
 
@@ -223,6 +225,10 @@ export function formatAgentAnnotationsHandoff(
     options.routeKey.length <= 500 && !options.routeKey.includes("?") && !CONTROL.test(options.routeKey)
     ? options.routeKey
     : null;
+  const generatedAt = typeof options.generatedAt === "string" && !Number.isNaN(Date.parse(options.generatedAt)) &&
+    new Date(options.generatedAt).toISOString() === options.generatedAt
+    ? options.generatedAt
+    : null;
   const annotations = selectAgentAnnotations(
     task.annotations,
     config.includeCompleted ? "all" : "open"
@@ -231,6 +237,7 @@ export function formatAgentAnnotationsHandoff(
     `# Agent Annotations Handoff ${task.taskId}`,
     "",
     `- task revision: ${task.taskRevision}`,
+    `- generated at: ${generatedAt ?? "generation time unavailable"}`,
     `- schema: ${task.schema}`,
     `- browser update revision baseline: ${browserUpdateRevision ?? "browser update revision unavailable"}`,
     `- browser runtime: ${runtimeId ?? "browser runtime unavailable"}`,
@@ -241,21 +248,22 @@ export function formatAgentAnnotationsHandoff(
     "## Instructions",
     "",
     "- Modify the real application source code; editing active-task.json is not a solution.",
-    "- Run the project-relevant typecheck and tests.",
-    ...config.verificationCommands.map((verification) => `- Run: ${verification}`),
     ...(browserUpdateRevision !== null
       ? [`- Run ${command} wait --browser-update-revision ${browserUpdateRevision}${runtimeId ? ` --runtime ${runtimeId}` : ""} --json and wait until the browser reports a newer applied update.`]
       : []),
-    `- Run ${command} status --check${runtimeId ? ` --runtime ${runtimeId}` : ""} --json; task validity, browser connection, task synchronization, and available referenced-source synchronization must pass.`,
+    "- Run the project-relevant typecheck and tests.",
+    ...config.verificationCommands.map((verification) => `- Run: ${verification}`),
     `- Run ${command} validate-task --json to confirm the task file itself is valid.`,
-    `- Only after every verification passes, complete each affected annotation with ${command} complete <annotation-id> --verified --summary "<text>".`,
+    "- For each annotation, run its exact status command below; route, target health, synchronization, and diagnostics since generation must pass.",
+    "- Write a UTF-8 summary file describing both the implementation and the verification performed; do not copy the original comment as completion evidence.",
+    `- Only after every verification passes, run the exact ${command} complete command below.`,
     "- If verification fails, do not mark anything complete; keep the error and report it.",
     "",
     `## Annotations (${annotations.length})`,
     "",
   ];
   for (const annotation of annotations) {
-    lines.push(...formatAnnotation(task, command, annotation));
+    lines.push(...formatAnnotation(task, command, annotation, runtimeId, generatedAt));
   }
   return lines.join("\n");
 }

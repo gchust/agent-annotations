@@ -327,6 +327,7 @@ describe("serve-only Vite plugin", () => {
       browserUpdateRevision: 1,
       referencedSourceRevision: null,
       referencedSourceFiles: [],
+      annotationHealth: [],
       mountedAt: "2026-08-12T12:00:00.000Z",
       lastHeartbeatAt: "2026-08-12T12:00:05.000Z",
     };

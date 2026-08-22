@@ -109,10 +109,12 @@ test("keyboard-only Pick, Multi, Copy, List, and Collapse flows with visual evid
   expect(clipboard).toContain("Keyboard pick");
   expect(clipboard).toContain("Keyboard multi");
   expect(clipboard).toContain("# Agent Annotations Handoff");
-  expect(clipboard).toContain("agent-annotations status --check --runtime ");
+  expect(clipboard).toContain("agent-annotations status --runtime ");
+  expect(clipboard).toContain(" --annotation ");
+  expect(clipboard).toContain(" --fail-on-diagnostics --diagnostics-since ");
   expect(clipboard).toContain("agent-annotations validate-task --json");
   expect(clipboard).toContain("agent-annotations complete ");
-  expect(clipboard).toContain("--verified --summary");
+  expect(clipboard).toContain("--verified --summary-file");
   // Adding the first referenced source is task-only work. It invalidates the
   // old empty-task snapshot and cannot claim that the browser applied it.
   expect(clipboard).toContain("- browser update revision baseline: 1");

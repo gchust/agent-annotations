@@ -52,6 +52,7 @@ try {
       browserUpdateRevision: 1,
       referencedSourceRevision: null,
       referencedSourceFiles: [],
+      annotationHealth: [],
       mountedAt: new Date().toISOString(),
       lastHeartbeatAt: new Date().toISOString(),
     }),

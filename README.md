@@ -84,7 +84,8 @@ the task file.
 5. **Hand off**: the browser runtime stays in sync; a code agent edits the
    source, then runs `agent-annotations wait --browser-update-revision <generation>` —
    the browser waits for the applied update, then
-   `agent-annotations complete <id> --verified --summary <text>`.
+   verifies the exact annotation health and new diagnostics, then completes
+   with `agent-annotations complete <id> --verified --summary-file <path>`.
 
 ## Manual runtime and custom transports
 
@@ -199,10 +200,11 @@ The CLI reads `active-task.json` from the resolved runtime data directory
 agent-annotations --root <path> --dir <path> <command> [options]
 agent-annotations list [--json]
 agent-annotations complete <annotation-id> --verified --summary <text>
+agent-annotations complete <annotation-id> --verified --summary-file <path>
 agent-annotations reopen <annotation-id>
 agent-annotations print [--json|--markdown]
 agent-annotations validate-task [--json]
-agent-annotations status [--json] [--check] [--runtime <runtime-id>|--route <route-key>]
+agent-annotations status [--json] [--check] [--runtime <runtime-id>|--route <route-key>] [--annotation <id>] [--fail-on-diagnostics --diagnostics-since <ISO>]
 agent-annotations revision [--json]
 agent-annotations wait --browser-update-revision <integer> [--runtime <runtime-id>|--route <route-key>] [--timeout-ms <n>] [--json]
 agent-annotations wait --referenced-source-revision <sha256> [--timeout-ms <n>] [--json]
@@ -230,21 +232,30 @@ fresh browser generation above the baseline, while `wait
 --referenced-source-revision <sha256>` watches known referenced files and
 returns an explicit unavailable result when none are known.
 
+`--annotation <id>` additionally checks that the task annotation belongs to
+the selected browser route and that every persisted target resolves in the
+current-route heartbeat. Diagnostics stay informational unless
+`--fail-on-diagnostics` is paired with an exact `--diagnostics-since <ISO>`
+baseline; then `--check` also fails for newer entries.
+
 The default `Copy` action emits a Code-Agent handoff instead of a data dump:
 instructions, the browser update generation baseline and supplementary
 referenced-source revision (or explicit unavailable values — a SHA is never invented), and an exact
-`complete --verified --summary` command per annotation. The loop is:
+runtime, route, annotation, generation time, and diagnostics baseline. Each
+completion command uses a UTF-8 `--summary-file` placeholder and never copies
+the user's comment into completion evidence. The loop is:
 
 ```text
 # 1. the agent edits real source files (never active-task.json)
 # 2. wait until the browser actually applied the change
 agent-annotations wait --browser-update-revision <generation> --json
 # 3. the full runtime is synchronized and healthy
-agent-annotations status --check --json
+agent-annotations status --runtime <runtime-id> --annotation <annotation-id> --fail-on-diagnostics --diagnostics-since <ISO> --check --json
 # 4. the task file itself is valid
 agent-annotations validate-task --json
 # 5. only after verification passes, complete the annotation
-agent-annotations complete <annotation-id> --verified --summary "<text>"
+# write implementation + verification evidence to the generated summary path
+agent-annotations complete <annotation-id> --verified --summary-file <path>
 ```
 
 The handoff is configurable and strictly bounded (`handoff: { command,

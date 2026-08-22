@@ -133,22 +133,42 @@ Commit:
 
 ## Progress
 
-- [ ] 检查实际 HEAD 和工作区。
-- [ ] 建立 AC → 文件 → 测试 → 证据映射。
-- [ ] 实现生产代码。
-- [ ] 增加最小回归测试。
-- [ ] 运行当前 Goal 完整门禁。
-- [ ] 独立 Review。
-- [ ] 更新 Outcomes。
+- [x] 检查实际 HEAD `9cc09873585fb9c011f9ac22fa041e2326d5d34f` 和干净工作区，并复核 Shared Contract、Goal 07、Browser State、Marker Snapshot、CLI、Diagnostics 与 Handoff 调用链。
+- [x] 建立 AC → 文件 → 测试 → 证据映射：G07-001～003 由 Browser State/CLI/packed vertical 覆盖，G07-004～007 由 Handoff/summary-file/packed completion 覆盖。
+- [x] 实现生产代码：当前 Route 的 Open Annotation Health Heartbeat、精确 Status/Diagnostics 检查、严格 UTF-8 Summary File、固定 Baseline 的 Handoff。
+- [x] 增加 Parser、CLI、Runtime、Handoff 与 packed Chromium 回归测试。
+- [x] 运行当前 Goal 完整门禁；最终全部通过。
+- [x] 独立 Review 最终 Diff，修复 Summary Redaction 扩张越过 2000 字符、Heartbeat 缓存陈旧、Health 最大合法集合超过字节上限，以及 Handoff 指令顺序问题。
+- [x] 更新 Outcomes；未开始 Goal 08。
 
 ## Surprises & Discoveries
 
-- 执行时填写。
+- `redactAgentAnnotationsText()` 可能把接近 2000 字符的输入扩张到 Schema 上限之外；CLI 现在先完整脱敏，再以带截断标记的 2000 字符结果进入 Mutation。
+- Marker 可见时 Goal 06 的 Observer 会主动刷新 Snapshot，但 Marker 隐藏时仍需要周期 Heartbeat 重新解析，否则 Health 可能永久保留旧值；最终 packed test 显式隐藏 Marker 验证此路径。
+- 6 KiB 无法容纳 50 条全部合法且使用最长 ID/Reason 的 Health；改为仍然严格有界的 8 KiB，覆盖 Task Schema 允许的 50 条最坏合法集合。
+- 首次并行执行 `check:package` 与 `build` 时，Build 清理 `dist` 导致 Publint 报导出文件缺失；完成 Build 后串行重跑通过。该失败是门禁互相干扰，不是产品缺陷。
+- packed E2E 的两个中间失败来自测试编排：恢复轮询误用会在首个非零退出时抛错的 CLI helper；隐藏 Marker 后未恢复可见性影响后续既有断言。两处均收紧为真实状态轮询并隔离测试状态，最终完整 packed gate 通过。
 
 ## Decision Log
 
-- 执行时填写实际决策及原因。
+- 复用 Goal 06 唯一 `resolutionSnapshot()`，Heartbeat 不建立第二套 Selector/Identity 解析；Task、Route、DOM 变化会重置 Snapshot，5 秒 Heartbeat 也会重置以覆盖 Marker 隐藏状态。
+- Browser State 继续使用严格 v2 Parser；`annotationHealth` 限 50 条、8 KiB、唯一合法 ID、0～50 计数及 Reason/Resolved 一致性，不保留旧格式兼容路径。
+- `status --annotation` 只在选中 Runtime 上核对 Task Annotation Route 与 Heartbeat Health；Diagnostics 默认只报告，只有同时指定 `--fail-on-diagnostics` 与规范 ISO Baseline 时才参与 `--check`。
+- Handoff 使用调用时的单一 `generatedAt` 同时作为展示时间和 Diagnostics Baseline，并固定 Runtime、Route、Browser Update Baseline 与每条 Annotation；命令只使用无空格文件名占位符，不引入 Shell Quote 抽象。
+- 保留已有直接 `--summary` 能力；新增 `--summary-file` 与其严格互斥，不增加别名或兼容层。Summary File 使用 Node 标准库严格 UTF-8 解码、非空/大小限制及既有通用脱敏。
+- 不清空 Diagnostics，不加入 MCP、NocoBase 或 Module Graph Hashing，也未开始 Goal 08。
 
 ## Outcomes & Retrospective
 
-- 完成时填写。
+- 行为结果：Browser State Heartbeat 现在携带当前 Route 最多 50 条 Open Annotation Health；`status --annotation --check` 会对 Runtime、Route、Target Summary 与同步状态给出单值 JSON 和稳定退出码；可选 Diagnostics Baseline 只阻塞新错误。
+- Handoff 现在按 `source edit → browser update wait → project verification → exact annotation status → implementation+verification summary file → complete` 输出，固定生成时间、Runtime、Route、Annotation 与 Diagnostics Baseline，Completion 命令不再复制用户评论。
+- `complete --summary-file` 对不可读、非法 UTF-8、空白、超过 2000 字符及与 `--summary` 同时出现均退出 2；合法内容经过既有 Redaction 后持久化。
+- G07-001 PASS：CLI 单测覆盖 found/missing、route match/mismatch、resolved/unresolved；packed Chromium 在 Marker 隐藏时移除精确 Target 后失败、恢复相同节点后通过。
+- G07-002 PASS：CLI 与 packed Chromium 均证明 Baseline 后新 fetch 500 仅在 opt-in 时使 `status --check` 退出 1。
+- G07-003 PASS：旧 Diagnostic 在 Handoff `generatedAt` 之前不阻塞；新 Handoff 生成新 Baseline 后恢复通过，Diagnostics 未被清空。
+- G07-004 PASS：Handoff 单测和 packed Copy 文本均包含精确 Runtime、Route、Browser Update Baseline、Annotation ID 与 Diagnostics Baseline。
+- G07-005 PASS：Completion 命令仅引用 Summary File；packed completion evidence 等于实现+验证摘要，且不等于原始评论。
+- G07-006 PASS：CLI 覆盖严格 UTF-8、互斥、空/过大/不可读、Secret Redaction 及脱敏扩张边界；Handoff 使用跨平台无空格相对文件名。
+- G07-007 PASS：fresh packed consumer 使用生成的 Status 与 Completion 参数完成真实 Browser→CLI→Browser 闭环。
+- 最终门禁：`pnpm exec vitest run tests/cli/arguments.test.ts tests/cli/cli.test.ts tests/core/handoff.test.ts tests/server/browser-state.test.ts tests/client/runtime.test.ts` = 5 files / 202 tests PASS；`pnpm typecheck` PASS；`pnpm test` = 37 files / 456 tests PASS；`pnpm check:docs` PASS；`pnpm check:architecture` = 1 file / 29 tests PASS；`pnpm build` PASS；`pnpm check:package` = Publint/ATTW PASS；`pnpm check:tarball` = 26 files / 116371 bytes PASS；`pnpm test:e2e` = 19 Playwright tests plus SIGTERM cleanup PASS；`git diff --check` PASS。
+- 剩余风险：Diagnostics Baseline 使用调用端生成时钟与服务端记录时钟；本地开发态通常同机，但跨机器时钟漂移仍可能改变边界归属。Goal 07 未引入时钟同步协议。

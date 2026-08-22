@@ -23,8 +23,17 @@ const MAX_ROUTE_KEY = 500;
 const MAX_CLIENT_VERSION = 128;
 const MAX_REFERENCED_SOURCE_FILES = 256;
 const MAX_SOURCE_FILE = 2_048;
+export const MAX_ANNOTATION_HEALTH = 50;
+export const MAX_ANNOTATION_HEALTH_BYTES = 8 * 1024;
 const SHA256 = /^[0-9a-f]{64}$/;
 const CONTROL = /[\u0000-\u001f\u007f]/;
+
+export type AgentAnnotationsAnnotationHealth = {
+  annotationId: string;
+  resolved: number;
+  total: number;
+  reason: "unresolved" | "identity mismatch" | "identity unverifiable" | "iframe unsupported" | null;
+};
 
 export type AgentAnnotationsBrowserState = {
   schema: "agent-annotations.browser-state.v2";
@@ -36,6 +45,7 @@ export type AgentAnnotationsBrowserState = {
   browserUpdateRevision: number;
   referencedSourceRevision: string | null;
   referencedSourceFiles: string[];
+  annotationHealth: AgentAnnotationsAnnotationHealth[];
   mountedAt: string;
   lastHeartbeatAt: string;
 };
@@ -103,6 +113,7 @@ export const parseAgentAnnotationsBrowserState = (
     "browserUpdateRevision",
     "referencedSourceRevision",
     "referencedSourceFiles",
+    "annotationHealth",
     "mountedAt",
     "lastHeartbeatAt",
   ]);
@@ -155,6 +166,40 @@ export const parseAgentAnnotationsBrowserState = (
   }
   if (input.referencedSourceFiles.length === 0 && input.referencedSourceRevision !== null) {
     throw new TypeError("referencedSourceRevision must be null when referencedSourceFiles is empty");
+  }
+  if (!Array.isArray(input.annotationHealth) || input.annotationHealth.length > MAX_ANNOTATION_HEALTH) {
+    throw new TypeError(`annotationHealth must contain at most ${MAX_ANNOTATION_HEALTH} entries`);
+  }
+  if (Buffer.byteLength(JSON.stringify(input.annotationHealth), "utf8") > MAX_ANNOTATION_HEALTH_BYTES) {
+    throw new TypeError(`annotationHealth must be at most ${MAX_ANNOTATION_HEALTH_BYTES} bytes`);
+  }
+  const annotationIds = new Set<string>();
+  for (const entry of input.annotationHealth) {
+    if (!isRecord(entry)) throw new TypeError("annotationHealth entry must be an object");
+    for (const key of Object.keys(entry)) {
+      if (!["annotationId", "resolved", "total", "reason"].includes(key)) {
+        throw new TypeError(`unknown annotationHealth field: ${key}`);
+      }
+    }
+    if (typeof entry.annotationId !== "string" || !AGENT_ANNOTATIONS_ID_PATTERN.test(entry.annotationId)) {
+      throw new TypeError("annotationHealth annotationId must be valid");
+    }
+    if (annotationIds.has(entry.annotationId)) {
+      throw new TypeError("annotationHealth annotationId must be unique");
+    }
+    annotationIds.add(entry.annotationId);
+    if (!Number.isSafeInteger(entry.resolved) || !Number.isSafeInteger(entry.total) ||
+      (entry.resolved as number) < 0 || (entry.total as number) < 0 ||
+      (entry.resolved as number) > (entry.total as number) || (entry.total as number) > 50) {
+      throw new TypeError("annotationHealth counts are invalid");
+    }
+    const reasons = [null, "unresolved", "identity mismatch", "identity unverifiable", "iframe unsupported"];
+    if (!reasons.includes(entry.reason as string | null)) {
+      throw new TypeError("annotationHealth reason is invalid");
+    }
+    if (((entry.resolved as number) === (entry.total as number)) !== (entry.reason === null)) {
+      throw new TypeError("annotationHealth reason must be null exactly when all targets resolve");
+    }
   }
   const mountedAt = timestampIssue(input.mountedAt, "mountedAt");
   if (mountedAt) throw new TypeError(mountedAt);

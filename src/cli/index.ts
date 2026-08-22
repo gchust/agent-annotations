@@ -1,10 +1,11 @@
 #!/usr/bin/env node
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import path from "node:path";
 
 import {
   formatAgentAnnotationsTask,
   parseAgentAnnotationsTask,
+  redactAgentAnnotationsText,
 } from "../core/index.js";
 import {
   parseAgentAnnotationsRouteKey,
@@ -32,11 +33,11 @@ Global options:
 
 Commands:
   list [--json]
-  complete <annotation-id> --verified --summary <text>
+  complete <annotation-id> --verified (--summary <text>|--summary-file <path>)
   reopen <annotation-id>
   print [--json|--markdown]
   validate-task [--json]
-  status [--json] [--check] [--runtime <runtime-id>|--route <route-key>]
+  status [--json] [--check] [--runtime <runtime-id>|--route <route-key>] [--annotation <id>] [--fail-on-diagnostics --diagnostics-since <ISO>]
   revision [--json]
   wait --browser-update-revision <integer> [--runtime <runtime-id>|--route <route-key>] [--timeout-ms <n>] [--json]
   wait --referenced-source-revision <sha256> [--timeout-ms <n>] [--json]
@@ -114,22 +115,53 @@ const parseMutationArgs = (command: "complete" | "reopen", args: string[]): {
     return { annotationId, operation: { op: "reopen", annotationId } };
   }
   let verified = false;
-  let summary = "";
+  let summary: string | null = null;
+  let summaryFile: string | null = null;
   while (args.length) {
     const option = args.shift();
     if (option === "--verified") verified = true;
-    else if (option === "--summary") summary = args.shift() ?? "";
+    else if (option === "--summary") {
+      if (summary !== null) fail("duplicate --summary", 2);
+      summary = args.shift() ?? "";
+    } else if (option === "--summary-file") {
+      if (summaryFile !== null) fail("duplicate --summary-file", 2);
+      summaryFile = args.shift() ?? "";
+    }
     else return fail(`unknown option: ${option}`, 2);
   }
   if (!verified) fail("complete requires --verified", 2);
-  if (!summary.trim()) fail("complete requires a non-empty --summary", 2);
-  if (summary.length > 2_000) fail("--summary must be at most 2000 characters", 2);
+  if (summary !== null && summaryFile !== null) fail("--summary and --summary-file are mutually exclusive", 2);
+  if (summaryFile !== null) {
+    if (!summaryFile) fail("--summary-file requires a path", 2);
+    let size = 0;
+    try {
+      size = statSync(summaryFile).size;
+    } catch {
+      fail("--summary-file must be a readable UTF-8 file", 2);
+    }
+    if (size > 8_000) fail("completion summary must be at most 2000 characters", 2);
+    try {
+      summary = new TextDecoder("utf-8", { fatal: true }).decode(readFileSync(summaryFile));
+    } catch {
+      fail("--summary-file must be a readable UTF-8 file", 2);
+    }
+  }
+  const completionSummary = summary ?? fail("complete requires a non-empty summary", 2);
+  if (!completionSummary.trim()) fail("complete requires a non-empty summary", 2);
+  if (completionSummary.length > 2_000) fail("completion summary must be at most 2000 characters", 2);
+  const redactedSummary = redactAgentAnnotationsText(completionSummary, { maxLength: Number.POSITIVE_INFINITY });
   return {
     annotationId,
     operation: {
       op: "complete",
       annotationId,
-      evidence: { verified: true, summary, source: "cli" },
+      evidence: {
+        verified: true,
+        summary: redactedSummary.length > 2_000
+          ? `${redactedSummary.slice(0, 1_988)}…[truncated]`
+          : redactedSummary,
+        source: "cli",
+      },
     },
   };
 };
@@ -221,10 +253,35 @@ const main = async (): Promise<void> => {
   }
   if (command === "status") {
     const { selector, rest } = parseBrowserSelector(args);
-    const json = rest.includes("--json");
-    const check = rest.includes("--check");
-    const unknown = rest.filter((arg) => arg !== "--json" && arg !== "--check");
-    if (unknown.length) return fail(`unknown option: ${unknown[0]}`, 2);
+    let json = false;
+    let check = false;
+    let failOnDiagnostics = false;
+    let annotationId: string | null = null;
+    let diagnosticsSince: string | null = null;
+    for (let index = 0; index < rest.length; index += 1) {
+      const option = rest[index]!;
+      if (option === "--json") json = true;
+      else if (option === "--check") check = true;
+      else if (option === "--fail-on-diagnostics") failOnDiagnostics = true;
+      else if (option === "--annotation" || option === "--diagnostics-since") {
+        const value = rest[++index];
+        if (value === undefined) fail(`${option} requires a value`, 2);
+        if (option === "--annotation") {
+          if (annotationId !== null) fail("duplicate --annotation", 2);
+          if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(value)) fail("--annotation must be a valid annotation id", 2);
+          annotationId = value;
+        } else {
+          if (diagnosticsSince !== null) fail("duplicate --diagnostics-since", 2);
+          if (Number.isNaN(Date.parse(value)) || new Date(value).toISOString() !== value) {
+            fail("--diagnostics-since must be an ISO-8601 timestamp", 2);
+          }
+          diagnosticsSince = value;
+        }
+      } else fail(`unknown option: ${option}`, 2);
+    }
+    if (failOnDiagnostics && diagnosticsSince === null) {
+      fail("--fail-on-diagnostics requires --diagnostics-since", 2);
+    }
     const store = new FileTaskStore(runtimeRoot);
     let current: AgentAnnotationsTask | null = null;
     try {
@@ -248,6 +305,21 @@ const main = async (): Promise<void> => {
     const referencedSourceSynchronized = referencedSourceRevision === null
       ? null
       : browserConnected && browser.referencedSourceRevision === referencedSourceRevision;
+    const annotation = current?.annotations.find((entry) => entry.annotationId === annotationId) ?? null;
+    const annotationRouteMatches = annotationId === null
+      ? null
+      : browserConnected && annotation !== null && annotation.pageContext.routeKey === browser.routeKey;
+    const selectedAnnotationHealth = annotationId === null || !browser
+      ? null
+      : browser.annotationHealth.find((entry) => entry.annotationId === annotationId) ?? null;
+    const annotationResolved = annotationId === null
+      ? null
+      : annotationRouteMatches === true && selectedAnnotationHealth !== null &&
+        selectedAnnotationHealth.resolved === selectedAnnotationHealth.total;
+    const diagnostics = await readDiagnostics(runtimeRoot);
+    const diagnosticsAfterBaseline = diagnosticsSince === null
+      ? []
+      : diagnostics.filter((entry) => entry.timestamp > diagnosticsSince);
     const report = {
       taskValid,
       // The resolved, shape-validated session (canonical roots, token, pid).
@@ -277,7 +349,16 @@ const main = async (): Promise<void> => {
       browserReferencedSourceFiles: browser?.referencedSourceFiles ?? [],
       routeKey: browser?.routeKey ?? null,
       lastHeartbeatAt: browser?.lastHeartbeatAt ?? null,
-      diagnosticCount: (await readDiagnostics(runtimeRoot)).length,
+      selectedAnnotationId: annotationId,
+      annotationFound: annotationId === null ? null : annotation !== null,
+      annotationRouteKey: annotation?.pageContext.routeKey ?? null,
+      annotationRouteMatches,
+      annotationHealth: selectedAnnotationHealth,
+      annotationResolved,
+      diagnosticsSince,
+      failOnDiagnostics,
+      diagnosticCount: diagnostics.length,
+      diagnosticsAfterBaseline: diagnosticsAfterBaseline.length,
     };
     if (json) {
       process.stdout.write(`${JSON.stringify(report)}\n`);
@@ -291,7 +372,9 @@ const main = async (): Promise<void> => {
       report.runtimeSelectionError === null &&
       report.browserConnected &&
       report.taskSynchronized &&
-      report.referencedSourceSynchronized !== false
+      report.referencedSourceSynchronized !== false &&
+      report.annotationResolved !== false &&
+      (!report.failOnDiagnostics || report.diagnosticsAfterBaseline === 0)
     )) {
       return fail("status check failed", 1);
     }

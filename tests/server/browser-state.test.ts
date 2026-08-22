@@ -37,6 +37,7 @@ const state: AgentAnnotationsBrowserState = {
   browserUpdateRevision: 1,
   referencedSourceRevision: null,
   referencedSourceFiles: ["src/settings.tsx"],
+  annotationHealth: [],
   mountedAt: "2026-08-12T12:00:00.000Z",
   lastHeartbeatAt: "2026-08-12T12:00:05.000Z",
 };
@@ -95,6 +96,56 @@ describe("browser state v2", () => {
     });
     expect(() => parseAgentAnnotationsBrowserState({ ...state, routeKey: "/settings\nadmin" }))
       .toThrow(/routeKey/);
+  });
+
+  it("strictly bounds annotation health entries and validates their summaries", () => {
+    expect(() => parseAgentAnnotationsBrowserState({
+      ...state,
+      annotationHealth: Array.from({ length: 51 }, (_, index) => ({
+        annotationId: `ann-${index}`, resolved: 1, total: 1, reason: null,
+      })),
+    })).toThrow(/at most 50/);
+    expect(parseAgentAnnotationsBrowserState({
+      ...state,
+      annotationHealth: Array.from({ length: 50 }, (_, index) => ({
+        annotationId: `a${String(index).padStart(2, "0")}${"x".repeat(61)}`,
+        resolved: 0,
+        total: 50,
+        reason: "identity unverifiable",
+      })),
+    }).annotationHealth).toHaveLength(50);
+    expect(() => parseAgentAnnotationsBrowserState({
+      ...state,
+      annotationHealth: Array.from({ length: 50 }, (_, index) => ({
+        annotationId: `ann-${index}-${"x".repeat(200)}`,
+        resolved: 0,
+        total: 50,
+        reason: "identity unverifiable",
+      })),
+    })).toThrow(/bytes/);
+    expect(() => parseAgentAnnotationsBrowserState({
+      ...state,
+      annotationHealth: [{ annotationId: "ann-1", resolved: 0, total: 1, reason: "bad" }],
+    })).toThrow(/reason/);
+    expect(() => parseAgentAnnotationsBrowserState({
+      ...state,
+      annotationHealth: [{ annotationId: "ann-1", resolved: 1, total: 1, reason: "unresolved" }],
+    })).toThrow(/reason must be null/);
+    expect(() => parseAgentAnnotationsBrowserState({
+      ...state,
+      annotationHealth: [{ annotationId: "ann-1", resolved: 2, total: 1, reason: null }],
+    })).toThrow(/counts/);
+    expect(() => parseAgentAnnotationsBrowserState({
+      ...state,
+      annotationHealth: [
+        { annotationId: "ann-1", resolved: 1, total: 1, reason: null },
+        { annotationId: "ann-1", resolved: 1, total: 1, reason: null },
+      ],
+    })).toThrow(/unique/);
+    expect(() => parseAgentAnnotationsBrowserState({
+      ...state,
+      annotationHealth: [{ annotationId: "ann-1", resolved: 0, total: 1, reason: "unresolved", extra: true }],
+    })).toThrow(/unknown annotationHealth field/);
   });
 
   it("writes parallel runtime states atomically with private mode", () => {

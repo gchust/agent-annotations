@@ -174,6 +174,40 @@ describe("public CLI processes", () => {
     expect(persisted).toContain("[REDACTED]");
   });
 
+  it("reads UTF-8 completion summaries from files with strict validation", () => {
+    const completeFrom = (contents: string | Uint8Array, name = "summary.txt") => {
+      const root = fixture();
+      const file = path.join(root, name);
+      writeFileSync(file, contents);
+      return { root, file };
+    };
+    const valid = completeFrom("Implemented the fix and ran pnpm test. Bearer UNIQUE_SECRET_FILE");
+    expect(run(valid.root, ["complete", "ann-1", "--verified", "--summary-file", valid.file]))
+      .toContain("taskRevision 1");
+    const completed = JSON.parse(readFileSync(path.join(valid.root, "tasks/active-task.json"), "utf8"));
+    expect(completed.annotations[0].completionEvidence.summary).toContain("Implemented the fix");
+    expect(JSON.stringify(completed)).not.toContain("UNIQUE_SECRET_FILE");
+
+    for (const contents of ["", "   ", "x".repeat(2_001)]) {
+      const sample = completeFrom(contents);
+      expect(runExpectingFailure(sample.root, ["complete", "ann-1", "--verified", "--summary-file", sample.file]).status).toBe(2);
+    }
+    const invalid = completeFrom(Uint8Array.from([0xc3, 0x28]));
+    expect(runExpectingFailure(invalid.root, ["complete", "ann-1", "--verified", "--summary-file", invalid.file]))
+      .toMatchObject({ status: 2, stderr: expect.stringContaining("readable UTF-8") });
+    const missing = fixture();
+    expect(runExpectingFailure(missing, ["complete", "ann-1", "--verified", "--summary-file", path.join(missing, "missing")]).status).toBe(2);
+    expect(runExpectingFailure(missing, ["complete", "ann-1", "--verified", "--summary", "text", "--summary-file", "x"]).status).toBe(2);
+
+    const expanding = completeFrom(`${"x".repeat(1_985)} Bearer a`);
+    expect(run(expanding.root, ["complete", "ann-1", "--verified", "--summary-file", expanding.file]))
+      .toContain("taskRevision 1");
+    const expanded = JSON.parse(readFileSync(path.join(expanding.root, "tasks/active-task.json"), "utf8"));
+    expect(expanded.annotations[0].completionEvidence.summary).toHaveLength(2_000);
+    expect(expanded.annotations[0].completionEvidence.summary).toMatch(/…\[truncated\]$/);
+    expect(expanded.annotations[0].completionEvidence.summary).not.toContain("Bearer a");
+  });
+
   it("prints and clears persisted diagnostics without touching the task", async () => {
     const root = fixture();
     await appendDiagnostics(root, [{
@@ -491,6 +525,7 @@ describe("public CLI processes", () => {
       browserUpdateRevision: 1,
       referencedSourceRevision: null,
       referencedSourceFiles: [],
+      annotationHealth: [],
       mountedAt: "2026-08-12T12:00:00.000Z",
       lastHeartbeatAt: new Date().toISOString(),
       ...state,
@@ -679,6 +714,66 @@ describe("public CLI processes", () => {
     expect(runExpectingFailure(root, ["status", "--runtime", "../escape"]).status).toBe(2);
     expect(runExpectingFailure(root, ["status", "--route", "/x?secret=y"]).status).toBe(2);
     expect(runExpectingFailure(root, ["status", "--runtime", "runtime-customers", "--route", "/customers"]).status).toBe(2);
+  });
+
+  it("checks an exact annotation route, target health, and diagnostics baseline", async () => {
+    const root = fixture();
+    const health = { annotationId: "ann-1", resolved: 1, total: 1, reason: null };
+    writeBrowserState(root, {
+      taskId: "task-cli",
+      routeKey: "/settings",
+      annotationHealth: [health],
+    }, "runtime-settings");
+    await appendDiagnostics(root, [{
+      source: "console",
+      message: "old failure",
+      timestamp: "2026-08-12T12:00:00.000Z",
+    }]);
+    const baseline = "2026-08-12T12:01:00.000Z";
+    const healthy = JSON.parse(run(root, [
+      "status", "--runtime", "runtime-settings", "--annotation", "ann-1",
+      "--fail-on-diagnostics", "--diagnostics-since", baseline, "--check", "--json",
+    ]));
+    expect(healthy).toMatchObject({
+      selectedAnnotationId: "ann-1",
+      annotationFound: true,
+      annotationRouteMatches: true,
+      annotationHealth: health,
+      annotationResolved: true,
+      diagnosticsAfterBaseline: 0,
+    });
+    await appendDiagnostics(root, [{
+      source: "network",
+      message: "fetch failed",
+      timestamp: "2026-08-12T12:02:00.000Z",
+      method: "GET",
+      url: "https://example.test/fail",
+      status: 500,
+      transport: "fetch",
+    }]);
+    const blocked = runExpectingFailure(root, [
+      "status", "--runtime", "runtime-settings", "--annotation", "ann-1",
+      "--fail-on-diagnostics", "--diagnostics-since", baseline, "--check", "--json",
+    ]);
+    expect(blocked.status).toBe(1);
+    expect(JSON.parse(blocked.stdout).diagnosticsAfterBaseline).toBe(1);
+    expect(JSON.parse(run(root, [
+      "status", "--runtime", "runtime-settings", "--annotation", "ann-1",
+      "--diagnostics-since", baseline, "--check", "--json",
+    ])).diagnosticsAfterBaseline).toBe(1);
+
+    writeBrowserState(root, {
+      taskId: "task-cli",
+      routeKey: "/settings",
+      annotationHealth: [{ ...health, resolved: 0, reason: "unresolved" }],
+    }, "runtime-settings");
+    expect(runExpectingFailure(root, ["status", "--runtime", "runtime-settings", "--annotation", "ann-1", "--check", "--json"]).status).toBe(1);
+    writeBrowserState(root, { taskId: "task-cli", routeKey: "/other", annotationHealth: [] }, "runtime-settings");
+    const wrongRoute = JSON.parse(runExpectingFailure(root, ["status", "--runtime", "runtime-settings", "--annotation", "ann-1", "--check", "--json"]).stdout);
+    expect(wrongRoute).toMatchObject({ annotationRouteMatches: false, annotationResolved: false });
+    expect(runExpectingFailure(root, ["status", "--annotation", "missing", "--check", "--json"]).status).toBe(1);
+    expect(runExpectingFailure(root, ["status", "--fail-on-diagnostics", "--check"]).status).toBe(2);
+    expect(runExpectingFailure(root, ["status", "--diagnostics-since", "not-iso"]).status).toBe(2);
   });
 
   it("returns an explicit unavailable referenced-source wait result", () => {

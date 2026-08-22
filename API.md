@@ -44,8 +44,9 @@
   `validateAgentAnnotationsTask`, and `isAgentAnnotationsTask` own schema v1.
 - `formatAgentAnnotationsHandoff(task, options)` is the default Copy output:
   a pure Code-Agent execution contract (instructions, browser-applied source
-  revision baseline or exactly `source revision unavailable`, evidence refs, and exact
-  `complete --verified --summary` commands per annotation).
+  revision baseline or exactly `source revision unavailable`, evidence refs,
+  pinned runtime/route/annotation/diagnostics baselines, and exact
+  `complete --verified --summary-file` commands per annotation).
   `validateAgentAnnotationsHandoffConfig(input)` strictly bounds the
   JSON-safe `handoff` option (`command`, `verificationCommands`,
   `includeCompleted`) and rejects unknown keys, control characters, and
@@ -219,17 +220,21 @@ value to stdout, the default writes stable human-readable text, and errors go
 to stderr with exit code 1 (runtime) or 2 (usage). The removed `verify` command
 has no alias.
 
-`status [--json] [--check] [--runtime <runtime-id>|--route <route-key>]` reads
+`status [--json] [--check] [--runtime <runtime-id>|--route <route-key>]
+[--annotation <id>] [--fail-on-diagnostics --diagnostics-since <ISO>]` reads
 the per-runtime browser states persisted by the authenticated dev client
 (`.agent-annotations/browser-states/<runtimeId>.json`, strict v2 schema, mode
 0600, no token or sensitive text) and reports task validity,
 session presence, browser connection (fresh heartbeat within 15 seconds), task
 and source synchronization, deterministic runtime summaries/selection,
-ids/revisions, route, last heartbeat, and diagnostic count. With multiple fresh
+ids/revisions, route, bounded current-route annotation health, last heartbeat,
+and diagnostic counts. With multiple fresh
 runtimes, callers must select an exact runtime or route; otherwise the result is
 `ambiguous_browser_runtime`. `--check` exits 1 unless `taskValid`, `browserConnected`,
-`taskSynchronized`, and available referenced-source synchronization are
-healthy; without `--check`
+`taskSynchronized`, available referenced-source synchronization, requested
+annotation route/target health, and opted-in post-baseline diagnostics are
+healthy. Diagnostics are informational unless `--fail-on-diagnostics` is
+paired with `--diagnostics-since`; without `--check`
 the command is informational and exits 0. `wait --browser-update-revision
 <integer>` accepts the same runtime selectors and waits for that fresh browser
 generation above the baseline; `wait

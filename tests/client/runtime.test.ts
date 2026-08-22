@@ -3017,6 +3017,7 @@ describe("client runtime", () => {
         browserUpdateRevision: 0,
         referencedSourceRevision: null,
         referencedSourceFiles: [],
+        annotationHealth: [],
       });
       // The hash route is preserved; the secret query is stripped.
       expect(body.routeKey).toBe("/#/settings");
@@ -5613,11 +5614,12 @@ describe("client runtime", () => {
       expect(output).toContain("- browser update revision baseline: 0");
       expect(output).toContain("- referenced source revision: referenced source revision unavailable");
       expect(output).toContain("wait --browser-update-revision 0 --runtime ");
-      expect(output).toContain("agent-annotations status --check --runtime ");
+      expect(output).toMatch(/agent-annotations status --runtime [^ ]+ --annotation ann-1 --fail-on-diagnostics --diagnostics-since [^ ]+ --check --json/);
       expect(output).toContain("agent-annotations validate-task --json");
       expect(output).toContain(
-        "agent-annotations complete ann-1 --verified --summary 'Make the button purple'"
+        "agent-annotations complete ann-1 --verified --summary-file agent-annotations-summary-ann-1.txt"
       );
+      expect(output).not.toContain("--summary 'Make the button purple'");
       expect(output).toContain("- evidence: evidence/ann-1.png");
       expect(output).not.toContain("data:image");
       expect(mounted.api.getSnapshot().task.taskRevision).toBe(4);
@@ -5759,7 +5761,7 @@ describe("client runtime", () => {
     }
   });
 
-  it("never truncates a long completion command during the final redaction", async () => {
+  it("keeps completion commands bounded and redacts handoff instructions", async () => {
     const task = taskFixture({
       annotations: [annotationFixture({
         comment: `Fix and 'quote' ` + "x".repeat(2500),
@@ -5777,15 +5779,11 @@ describe("client runtime", () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
       const fallback = shadow.querySelector<HTMLTextAreaElement>(".aa-copy-fallback textarea")!;
       const output = fallback.value;
-      // The config-derived secret is replaced by the final pass, the long
-      // (task-bounded) comment keeps the completion line beyond 2000
-      // characters, and the line still closes with its POSIX quote instead
-      // of being truncated mid-command.
       expect(output).not.toContain("Bearer ab");
       expect(output).toContain("echo Bearer [REDACTED]");
       const completionLine = output.split("\n").find((line) => line.startsWith("- completion:"))!;
-      expect(completionLine.length).toBeGreaterThan(2000);
-      expect(completionLine.endsWith("'")).toBe(true);
+      expect(completionLine).toBe("- completion: agent-annotations complete ann-1 --verified --summary-file agent-annotations-summary-ann-1.txt");
+      expect(completionLine).not.toContain("quote");
     } finally {
       mounted.unmount();
     }
@@ -5845,7 +5843,8 @@ describe("client runtime", () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
       const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
       const fallback = shadow.querySelector<HTMLTextAreaElement>(".aa-copy-fallback textarea")!;
-      expect(fallback.value).toBe(written);
+      expect(fallback.value.replaceAll(/2026-[^ ]+/g, "TIMESTAMP"))
+        .toBe(written.replaceAll(/2026-[^ ]+/g, "TIMESTAMP"));
     } finally {
       mounted.unmount();
       delete (navigator as { clipboard?: unknown }).clipboard;

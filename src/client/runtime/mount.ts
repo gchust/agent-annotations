@@ -185,6 +185,13 @@ export async function mountAgentAnnotations(
   let browserUpdateRevision = 0;
   let referencedSourceRevision: string | null = null;
   let referencedSourceFiles: string[];
+  let annotationHealth = (): Array<{
+    annotationId: string;
+    resolved: number;
+    total: number;
+    reason: "unresolved" | "identity mismatch" | "identity unverifiable" | "iframe unsupported" | null;
+  }> => [];
+  let resetHeartbeatResolutionSnapshots = (): void => undefined;
   const taskSourceFiles = (value: AgentAnnotationsTask): string[] => [
     ...new Set(value.annotations.flatMap((annotation) =>
       (annotation.targets ?? []).flatMap((target) =>
@@ -210,6 +217,7 @@ export async function mountAgentAnnotations(
       browserUpdateRevision,
       referencedSourceRevision,
       referencedSourceFiles,
+      annotationHealth: annotationHealth(),
       mountedAt,
       lastHeartbeatAt: now(),
     };
@@ -244,10 +252,12 @@ export async function mountAgentAnnotations(
       referencedSourceFiles = nextFiles;
     }
     task = next;
+    resetHeartbeatResolutionSnapshots();
     sendBrowserHeartbeat();
   };
   const scheduleBrowserHeartbeat = (): void => {
     if (destroyed || !browserStatus) return;
+    resetHeartbeatResolutionSnapshots();
     sendBrowserHeartbeat();
     scheduleTimer(scheduleBrowserHeartbeat, 5_000);
   };
@@ -353,7 +363,11 @@ export async function mountAgentAnnotations(
     appRoot: () => appRoot,
     setAppRoot: (value) => { appRoot = value; },
     routeKey: () => routeKey,
-    setRouteKey: (value) => { routeKey = value; },
+    setRouteKey: (value) => {
+      routeKey = value;
+      resetHeartbeatResolutionSnapshots();
+      sendBrowserHeartbeat();
+    },
     pageContext: () => safePageContext(),
     shortcuts: () => shortcuts,
     setShortcuts: (value) => { shortcuts = value as typeof shortcuts; },
@@ -673,6 +687,7 @@ export async function mountAgentAnnotations(
       referencedSourceRevision,
       runtimeId,
       routeKey,
+      generatedAt: now(),
     });
     // Final generic text redaction over the complete output. The task and the
     // bounded handoff config already bound the output, so this second pass
@@ -699,10 +714,7 @@ export async function mountAgentAnnotations(
     }
   };
   const copyOpen = () => copyOutput();
-
-
   let editorAnchorRect: AgentAnnotationsRect | null = null;
-  // Lazy wrappers: positionComposer/positionEditor/isInAppRoot and
   // Lazy wrappers: positionComposer/positionEditor/isInAppRoot are declared
   // later in the mount closure, so bindings must not evaluate them at creation.
   const markers = createMarkerController({
@@ -724,7 +736,10 @@ export async function mountAgentAnnotations(
     positionComposer: () => positionComposer(),
     positionEditor: () => positionEditor(),
     localized: (value, params) => localized(value, params),
-    resolutionChanged: () => emit(),
+    resolutionChanged: () => {
+      emit();
+      sendBrowserHeartbeat();
+    },
   });
   const {
     resolutionSnapshot,
@@ -736,6 +751,10 @@ export async function mountAgentAnnotations(
     scheduleMarkerRefresh,
     syncMarkerTracking,
   } = markers;
+  resetHeartbeatResolutionSnapshots = resetResolutionSnapshots;
+  annotationHealth = () => task.annotations
+    .filter((annotation) => annotation.status === "open" && annotation.pageContext.routeKey === routeKey)
+    .map((annotation) => ({ annotationId: annotation.annotationId, ...resolutionSnapshot(annotation).summary }));
 
   const overlays = createOverlayController({
     localized: (value, params) => localized(value, params),
