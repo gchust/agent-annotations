@@ -71,6 +71,22 @@ test("packed browser to file to CLI to browser loop, HMR and session security", 
   expect(browserState).not.toContain(privacySentinel);
   cli("diagnostics", "--clear");
   expect(JSON.parse(cli("diagnostics", "--json"))).toEqual([]);
+  // A host identity adapter can fail for one NocoBase-style record without
+  // disabling capture, markers, or Copy. The fault is persisted once.
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.evaluate(() => { window.__AGENT_ANNOTATIONS_IDENTITY_FAULT = true; });
+  await page.keyboard.press("Control+Alt+P");
+  await page.locator("#target").click();
+  await shadow(page, '[aria-label="Annotation comment"]').fill("Identity fallback remains usable");
+  await shadow(page, 'button[aria-label="Save annotation"]').click();
+  await expect.poll(() => (JSON.parse(cli("diagnostics", "--json")) as Array<{ contributionId?: string }>)
+    .filter((entry) => entry.contributionId === "identity").length).toBe(1);
+  expect((JSON.parse(cli("diagnostics", "--json")) as Array<{ contributionId?: string }>)
+    .filter((entry) => entry.contributionId === "identity")).toHaveLength(1);
+  await expect(shadow(page, ".aa-marker")).toHaveCount(2);
+  await page.keyboard.press("Control+Alt+C");
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toContain("Identity fallback remains usable");
+  await page.evaluate(() => { window.__AGENT_ANNOTATIONS_IDENTITY_FAULT = false; });
   // Revision and wait commands report and poll exact referenced sources.
   const revision = JSON.parse(cli("revision", "--json"));
   expect(revision).toMatchObject({ taskRevision: expect.any(Number), referencedSourceFiles: ["src/main.tsx"] });
@@ -83,7 +99,6 @@ test("packed browser to file to CLI to browser loop, HMR and session security", 
     taskRevision: expect.any(Number),
   });
   expect(JSON.parse(cli("validate-task", "--json"))).toMatchObject({ ok: true, taskId: task.taskId });
-  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await page.keyboard.press("Control+Alt+C");
   const handoff = await page.evaluate(() => navigator.clipboard.readText());
   expect(handoff).toContain("- route: /#/customers");

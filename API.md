@@ -67,8 +67,12 @@
   must call it (or an exactly equivalent boundary) before writing.
 - `createValidatedTaskTransport(transport)` wraps any `TaskTransport` so every
   task entering the runtime (read/mutate/writeEvidence/subscribe, including
-  conflict payloads) is schema-parsed; writeEvidence metadata is validated
-  while PNG bytes pass through unredacted.
+  conflict payloads) is schema-parsed. Successful `mutate` and `writeEvidence`
+  results must preserve the requested task ID and advance beyond the expected
+  revision; `writeEvidence` must also retain its target annotation. Violations
+  throw `TaskTransportProtocolError`. `read` and `subscribe` may replace the
+  task identity. Write-evidence metadata is validated while PNG bytes pass
+  through unredacted.
 - `RevisionConflictError` is thrown by stores and transports on stale writes; it
   carries the parsed latest task plus expected/actual revisions and is
   `instanceof`-recognizable in the browser.
@@ -120,6 +124,11 @@ controlled Node integrations.
   are rejected.
 - `HostIntegration` may expose `pageContext()`, `routeKey()`, `locale()`, `theme()`, `appRoot()`,
   `navigate(routeKey)`, and a single unified `subscribe(listener)` notification.
+  The registry retains the host extension ID, and the runtime guards every host
+  callback, message access, and subscription disposer. Faults record one
+  bounded, redacted diagnostic and use safe defaults without disabling Pick,
+  Marker, List, or Copy; an `identity()` fault yields no host identity for that
+  element.
   `pageContext()` may return bounded `url`, `routeKey`, and `title` overrides;
   URLs must be absolute HTTP(S) values without credentials, query, or fragment,
   and route keys must be query-free. Use an allowlisted business key when tenant

@@ -6,6 +6,7 @@ import { defineClientExtension } from "@gchust/agent-annotations/extension";
 declare global {
   interface Window {
     __AGENT_ANNOTATIONS_LOCALE?: string;
+    __AGENT_ANNOTATIONS_IDENTITY_FAULT?: boolean;
   }
 }
 
@@ -18,6 +19,13 @@ export default defineClientExtension({
     }),
     locale: () => window.__AGENT_ANNOTATIONS_LOCALE ?? "en-US",
     theme: () => "system",
+    identity(element) {
+      if (window.__AGENT_ANNOTATIONS_IDENTITY_FAULT && element.id === "target") {
+        throw new Error("nocobase record identity failed");
+      }
+      const recordId = element.getAttribute("data-record-id");
+      return recordId ? { recordId } : {};
+    },
     navigate(routeKey) {
       history.pushState({}, "", routeKey);
       window.dispatchEvent(new PopStateEvent("popstate"));

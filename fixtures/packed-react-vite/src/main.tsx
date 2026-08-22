@@ -77,7 +77,7 @@ function Home() {
   const [portal, setPortal] = useState(false);
   return <main>
     <h1>Packed fixture</h1>
-    <button id="target" data-demo-kind="packed">Target button</button>
+    <button id="target" data-demo-kind="packed" data-record-id="record-1">Target button</button>
     <DuplicateA />
     <DuplicateB />
     <MemoCard />

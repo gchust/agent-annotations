@@ -17,6 +17,10 @@ type RegisteredPanelContribution = Registered<PanelContribution>;
 type RegisteredTargetEnricher = Registered<TargetEnricher>;
 type RegisteredAnnotationExporter = Registered<AnnotationExporter>;
 type RegisteredAnnotationRedactor = Registered<AnnotationRedactor>;
+export type RegisteredHostIntegration = {
+  readonly extensionId: string;
+  readonly value: HostIntegration;
+};
 
 const canonical = (extensionId: string, localId: string): string =>
   `${extensionId}:${localId}`;
@@ -52,6 +56,15 @@ const isText = (value: unknown): boolean =>
       Object.values(value).every(
         (message) => typeof message === "string" && message.length > 0
       );
+
+const configuredHostMessages = (host: HostIntegration | undefined): unknown => {
+  if (!host) return undefined;
+  const descriptor = Object.getOwnPropertyDescriptor(host, "messages");
+  return descriptor && "value" in descriptor ? descriptor.value : undefined;
+};
+
+const staticHostMessages = (host: HostIntegration | undefined): AgentAnnotationsLocaleMessages =>
+  (configuredHostMessages(host) ?? {}) as AgentAnnotationsLocaleMessages;
 
 const shortcutKeys = (
   shortcut: ToolbarContribution["shortcut"],
@@ -184,24 +197,12 @@ const validateExtension = (extension: AgentAnnotationsClientExtension): void => 
         throw new TypeError(`Invalid host ${callback}: ${extension.id}`);
       }
     }
-    const theme = extension.host.theme?.();
-    if (theme !== undefined && theme !== "light" && theme !== "dark" && theme !== "system") {
-      throw new TypeError(`Invalid host theme: ${extension.id}`);
-    }
-    const appRoot = extension.host.appRoot?.();
     if (
-      appRoot !== undefined &&
-      (typeof appRoot !== "object" ||
-        appRoot === null ||
-        (appRoot.nodeType !== 1 && appRoot.nodeType !== 9))
-    ) {
-      throw new TypeError(`Invalid host appRoot: ${extension.id}`);
-    }
-    if (
-      extension.host.messages !== undefined &&
-      (typeof extension.host.messages !== "object" ||
-        Array.isArray(extension.host.messages) ||
-        !Object.values(extension.host.messages).every(
+      configuredHostMessages(extension.host) !== undefined &&
+      (typeof configuredHostMessages(extension.host) !== "object" ||
+        configuredHostMessages(extension.host) === null ||
+        Array.isArray(configuredHostMessages(extension.host)) ||
+        !Object.values(staticHostMessages(extension.host)).every(
           (message) => typeof message === "string"
         ))
     ) {
@@ -221,7 +222,7 @@ export class ClientExtensionRegistry {
   readonly #exporters = new Map<string, RegisteredAnnotationExporter>();
   readonly #redactors = new Map<string, RegisteredAnnotationRedactor>();
   readonly #shortcuts = new Map<string, string>();
-  #host: { extensionId: string; value: HostIntegration } | undefined;
+  #host: RegisteredHostIntegration | undefined;
 
   register(extension: AgentAnnotationsClientExtension): () => void {
     validateExtension(extension);
@@ -233,9 +234,9 @@ export class ClientExtensionRegistry {
         `Duplicate host integration: ${extension.id} conflicts with ${this.#host.extensionId}`
       );
     }
-    if (extension.messages || extension.host?.messages) {
+    if (extension.messages || configuredHostMessages(extension.host) !== undefined) {
       const ownKeys = new Set<string>();
-      for (const source of [extension.messages ?? {}, extension.host?.messages ?? {}]) {
+      for (const source of [extension.messages ?? {}, staticHostMessages(extension.host)]) {
         for (const key of Object.keys(source)) {
           if (ownKeys.has(key)) {
             throw new TypeError(
@@ -249,7 +250,7 @@ export class ClientExtensionRegistry {
         const existing = [...this.#extensions.values()].find(
           (registered) =>
             registered.messages?.[key] !== undefined ||
-            registered.host?.messages?.[key] !== undefined
+            staticHostMessages(registered.host)[key] !== undefined
         );
         if (existing) {
           throw new TypeError(
@@ -392,7 +393,7 @@ export class ClientExtensionRegistry {
   getMessages(): AgentAnnotationsLocaleMessages {
     const messages: AgentAnnotationsLocaleMessages = {};
     for (const extension of this.getExtensions()) {
-      for (const source of [extension.messages ?? {}, extension.host?.messages ?? {}]) {
+      for (const source of [extension.messages ?? {}, staticHostMessages(extension.host)]) {
         for (const [key, value] of Object.entries(source)) {
           if (key in messages) {
             throw new TypeError(`Duplicate locale message key: ${key}`);
@@ -402,6 +403,18 @@ export class ClientExtensionRegistry {
       }
     }
     return messages;
+  }
+
+  getExtensionMessages(): AgentAnnotationsLocaleMessages {
+    const messages: AgentAnnotationsLocaleMessages = {};
+    for (const extension of this.getExtensions()) {
+      Object.assign(messages, extension.messages);
+    }
+    return messages;
+  }
+
+  getHostRegistration(): RegisteredHostIntegration | undefined {
+    return this.#host;
   }
 
   getHostIntegration(): HostIntegration | undefined {

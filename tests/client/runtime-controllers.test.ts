@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createTaskController } from "../../src/client/runtime/task.js";
-import { createHostController } from "../../src/client/runtime/host.js";
+import { createGuardedHostIntegration, createHostController } from "../../src/client/runtime/host.js";
 import { createDiagnosticsController } from "../../src/client/runtime/diagnostics.js";
 import { createMarkerController } from "../../src/client/runtime/markers.js";
 import { createEvidenceController } from "../../src/client/runtime/evidence.js";
@@ -19,6 +19,44 @@ afterEach(() => {
 });
 
 describe("runtime controllers (focused factory contracts)", () => {
+  it("isolates every host callback and disposer with safe fallbacks", () => {
+    const fault = (name: string) => () => { throw new Error(`${name} secret=hidden`); };
+    let subscriptions = 0;
+    const source = {
+      locale: fault("locale"),
+      theme: fault("theme"),
+      appRoot: fault("appRoot"),
+      pageContext: fault("pageContext"),
+      routeKey: fault("routeKey"),
+      navigate: fault("navigate"),
+      identity: fault("identity"),
+      subscribe: () => {
+        subscriptions += 1;
+        if (subscriptions === 1) throw new Error("subscribe secret=hidden");
+        return fault("subscribe.dispose");
+      },
+    };
+    Object.defineProperty(source, "messages", { get: fault("messages") });
+    const failures: string[] = [];
+    const host = createGuardedHostIntegration("faulty.host", source, (method) => failures.push(method));
+    expect(host.locale?.()).toBe(document.documentElement.lang || "en-US");
+    expect(host.theme?.()).toBe("light");
+    expect(host.appRoot?.()).toBe(document.body);
+    expect(host.pageContext?.()).toEqual({});
+    expect(host.routeKey?.()).toBeUndefined();
+    expect(host.identity?.(document.body)).toEqual({});
+    expect(host.messages).toEqual({});
+    expect(host.navigateRoute("/next")).toBe(false);
+    expect(host.subscribeChanges(() => undefined)).toBeNull();
+    const dispose = host.subscribeChanges(() => undefined);
+    expect(dispose).toBeTypeOf("function");
+    expect(() => dispose?.()).not.toThrow();
+    expect(failures).toEqual([
+      "locale", "theme", "appRoot", "pageContext", "routeKey", "identity",
+      "messages", "navigate", "subscribe", "subscribe.dispose",
+    ]);
+  });
+
   it("handles update, complete, reopen, and addEvidence without a browser update binding", async () => {
     const state = { task: taskFixture() };
     const transport = new MemoryTaskTransport(state.task);
@@ -159,7 +197,7 @@ describe("runtime controllers (focused factory contracts)", () => {
       setEditingId: (value) => { state.editingId = value; },
       editorAnchorRect: () => state.editorAnchorRect,
       setEditorAnchorRect: (value) => { state.editorAnchorRect = value; },
-      registry: () => ({ getMessages: () => ({}) }) as never,
+      registry: () => ({ getExtensionMessages: () => ({}) }) as never,
       hostElement: () => document.createElement("div"),
       root: () => document.createElement("div"),
       destroyed: () => state.destroyed,

@@ -357,7 +357,7 @@ that surface before throwing cannot be rolled back.
 - `isVisible` throwing hides the contribution, `isEnabled` throwing disables
   it, `isPressed` throwing leaves it unpressed, a throwing `icon` renders a
   safe fallback, a throwing `panel` render shows the closable error panel,
-  and `pageContext`/`execute`/`enrich`/`export`/`redact` failures are caught with the
+  and all host callbacks plus `execute`/`enrich`/`export`/`redact` failures are caught with the
   existing per-phase semantics.
 - `dispose` throwing never blocks the remaining cleanup, and the structured
   dispose diagnostic still reaches the diagnostics boundary.
@@ -392,6 +392,12 @@ redactors run on the client and are composed deterministically in stable
 them, and a faulty redactor fails closed for its own namespace. Screenshot PNG
 bytes are never string-redacted; the capture sanitizer and the server-side PNG
 boundary handle screenshot privacy.
+
+After strict response parsing, the validated transport boundary requires
+successful `mutate` and `writeEvidence` responses to keep the requested task
+ID and advance the expected revision; `writeEvidence` must also retain its
+target annotation. Violations throw `TaskTransportProtocolError`; `read` and
+`subscribe` remain task-replacement paths.
 
 Custom persistent transports must call `prepareAgentAnnotationsTaskForPersistence()`
 (or an exactly equivalent boundary) before writing to a database, object

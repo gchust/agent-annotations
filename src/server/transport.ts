@@ -3,6 +3,7 @@ import {
   isTaskIdentityNewer,
   parseValidatedTask,
   taskIdentity,
+  validateTransportResult,
   type TaskIdentity,
 } from "../core/transport.js";
 import type {
@@ -83,12 +84,16 @@ export class HttpTaskTransport implements TaskTransport {
   }
 
   async mutate(request: AgentAnnotationsMutationRequest): Promise<AgentAnnotationsTask> {
-    const task = parseValidatedTask(
-      await this.#request(
-        { method: "POST", body: JSON.stringify(request) },
-        request.expectedRevision
+    const task = validateTransportResult(
+      "mutate",
+      parseValidatedTask(
+        await this.#request(
+          { method: "POST", body: JSON.stringify(request) },
+          request.expectedRevision
+        ),
+        "mutate"
       ),
-      "mutate"
+      { taskId: request.taskId, taskRevision: request.expectedRevision }
     );
     this.#lastSeen = taskIdentity(task);
     return task;
@@ -122,7 +127,12 @@ export class HttpTaskTransport implements TaskTransport {
     if (!response.ok || payload.task === undefined) {
       throw new Error(payload.error ?? "request_failed");
     }
-    const task = parseValidatedTask(payload.task, "evidence");
+    const task = validateTransportResult(
+      "writeEvidence",
+      parseValidatedTask(payload.task, "evidence"),
+      { taskId: input.taskId, taskRevision: input.expectedRevision },
+      input.annotationId
+    );
     this.#lastSeen = taskIdentity(task);
     return task;
   }

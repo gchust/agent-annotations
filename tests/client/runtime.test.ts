@@ -934,7 +934,7 @@ describe("client runtime", () => {
     mounted.unmount();
     expect(vi.getTimerCount()).toBe(0);
     resolveMutation(task);
-    await pending;
+    await expect(pending).rejects.toMatchObject({ name: "TaskTransportProtocolError" });
     expect(listener).not.toHaveBeenCalled();
     expect(document.getElementById("agent-annotations-root")).toBeNull();
   });

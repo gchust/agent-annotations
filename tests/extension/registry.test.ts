@@ -316,7 +316,6 @@ describe("ClientExtensionRegistry", () => {
       { host: { subscribe: "bad" as never } },
       { host: { theme: "bad" as never } },
       { host: { appRoot: "bad" as never } },
-      { host: { theme: () => "blue" as never } },
       { setup: "bad" as never },
     ];
     for (const [index, values] of invalid.entries()) {
@@ -325,6 +324,16 @@ describe("ClientExtensionRegistry", () => {
       expect(registry.getExtensions()).toEqual([]);
       expect(registry.getToolbarContributions()).toEqual([]);
     }
+  });
+
+  it("does not invoke host callbacks during registration", () => {
+    const registry = new ClientExtensionRegistry();
+    const theme = vi.fn(() => { throw new Error("theme fault"); });
+    const appRoot = vi.fn(() => { throw new Error("root fault"); });
+    expect(() => registry.register(extension("deferred-host", { host: { theme, appRoot } }))).not.toThrow();
+    expect(theme).not.toHaveBeenCalled();
+    expect(appRoot).not.toHaveBeenCalled();
+    expect(registry.getHostRegistration()).toMatchObject({ extensionId: "deferred-host" });
   });
 
   it("accepts host page context, navigate, and subscribe callbacks", () => {

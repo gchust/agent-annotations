@@ -96,3 +96,7 @@ narrow per-module bindings (lazy getters, no module-level mutable globals);
 - Evidence files are confined to `<runtimeRoot>/evidence`; refs and pruning
   never follow symlinks or traverse outside.
 - Task mutation payloads are redacted at the boundary before any transport.
+- Mutation and evidence successes are strictly parsed, preserve task identity,
+  and move revision forward; evidence also retains its target annotation.
+- Third-party host callbacks are guarded under their registered extension ID;
+  faults use safe defaults and one redacted structured diagnostic.

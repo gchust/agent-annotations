@@ -1,4 +1,5 @@
-import type { AgentAnnotationsCaptureMode, AgentAnnotationsRect, AgentAnnotationsTask, HostIntegration } from "../../types/index.js";
+import type { AgentAnnotationsCaptureMode, AgentAnnotationsRect, AgentAnnotationsTask } from "../../types/index.js";
+import type { GuardedHostIntegration } from "./host.js";
 
 type ComposerState =
   | { kind: "element" | "multi"; elements: Element[] }
@@ -33,7 +34,7 @@ export type CaptureBindings = {
   task(): AgentAnnotationsTask;
   destroyed(): boolean;
   routeKey(): string;
-  host(): HostIntegration | undefined;
+  host(): GuardedHostIntegration | undefined;
   overlayMount(): HTMLElement;
   root(): HTMLElement;
   scheduleFrame(callback: () => void): number;
@@ -187,8 +188,11 @@ export const createCaptureController = (b: CaptureBindings): CaptureController =
     if (!annotation) return;
     if (annotation.pageContext.routeKey !== b.routeKey()) {
       if (b.host()?.navigate) {
-        b.host()!.navigate!(annotation.pageContext.routeKey);
-        b.setStatus(b.localized("Navigating to annotation route"));
+        b.setStatus(b.localized(
+          b.host()!.navigateRoute(annotation.pageContext.routeKey)
+            ? "Navigating to annotation route"
+            : "Annotation is on another route"
+        ));
       } else {
         b.setStatus(b.localized("Annotation is on another route"));
       }

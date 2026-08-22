@@ -59,7 +59,7 @@ import { createDiagnosticsController } from "./diagnostics.js";
 import { createTaskController } from "./task.js";
 import { createEvidenceController } from "./evidence.js";
 import { createCaptureController } from "./capture.js";
-import { createHostController } from "./host.js";
+import { createGuardedHostIntegration, createHostController, type GuardedHostIntegration } from "./host.js";
 import { createOverlayController } from "./overlays.js";
 
 export async function mountAgentAnnotations(
@@ -90,7 +90,7 @@ export async function mountAgentAnnotations(
     for (const unregister of registrations.reverse()) unregister();
     throw error;
   }
-  let host = registry.getHostIntegration();
+  let host: GuardedHostIntegration | undefined;
 
   // Unconditional transport boundary: every task entering the runtime is
   // schema-parsed, including third-party custom TaskTransport implementations.
@@ -141,9 +141,9 @@ export async function mountAgentAnnotations(
   let studioRenders = 0;
   let destroyed = false;
   let routeKey = createSafePageContext().routeKey;
-  let hostLocale = host?.locale?.() ?? (document.documentElement.lang || "en-US");
-  let hostTheme: AgentAnnotationsHostTheme = host?.theme?.() ?? "light";
-  let appRoot: Element | Document = host?.appRoot?.() ?? document.body;
+  let hostLocale = document.documentElement.lang || "en-US";
+  let hostTheme: AgentAnnotationsHostTheme = "light";
+  let appRoot: Element | Document = document.body;
   const listeners = new Set<(snapshot: StudioPublicSnapshot) => void>();
   const uiListeners = new Set<() => void>();
   let uiSnapshot: StudioPublicSnapshot;
@@ -403,7 +403,7 @@ export async function mountAgentAnnotations(
   // dictionary: the host is always the last layer.
   let messages = {
     ...localeMessages(hostLocale),
-    ...registry.getMessages(),
+    ...registry.getExtensionMessages(),
     ...host?.messages,
   };
   root.lang = hostLocale;
@@ -455,7 +455,11 @@ export async function mountAgentAnnotations(
   // so no contribution, shortcut, host, panel, or message of the failed
   // extension survives in the running chrome.
   const refreshRegistryViews = (): void => {
-    host = registry.getHostIntegration();
+    const registeredHost = registry.getHostRegistration();
+    host = registeredHost
+      ? createGuardedHostIntegration(registeredHost.extensionId, registeredHost.value, (method, error) =>
+          recordExtensionFailure(registeredHost.extensionId, method === "pageContext" || method === "routeKey" ? "pageContext" : "host", method, error))
+      : undefined;
     toolbar = registry.getToolbarContributions();
     collapseAction = toolbar.find(
       (contribution) => contribution.id === "agent-annotations.builtin:toggle"
@@ -465,7 +469,7 @@ export async function mountAgentAnnotations(
     exporters = registry.getExporters();
     messages = {
       ...localeMessages(hostLocale),
-      ...registry.getMessages(),
+      ...registry.getExtensionMessages(),
       ...host?.messages,
     };
     // Re-derive every host-derived state (theme/locale/messages/appRoot/route)
@@ -503,11 +507,27 @@ export async function mountAgentAnnotations(
     installNetworkDiagnostics,
   } = diagnosticsController;
   const safePageContext = () => createSafePageContext(host, (error) => recordExtensionFailure(
-    registry.getExtensions().find((extension) => extension.host === host)?.id ?? "host",
+    host?.extensionId ?? "host",
     "pageContext",
     undefined,
     error
   ));
+  const registeredHost = registry.getHostRegistration();
+  host = registeredHost
+    ? createGuardedHostIntegration(registeredHost.extensionId, registeredHost.value, (method, error) =>
+        recordExtensionFailure(registeredHost.extensionId, method === "pageContext" || method === "routeKey" ? "pageContext" : "host", method, error))
+    : undefined;
+  hostLocale = host?.locale?.() ?? hostLocale;
+  hostTheme = host?.theme?.() ?? hostTheme;
+  appRoot = host?.appRoot?.() ?? appRoot;
+  messages = {
+    ...localeMessages(hostLocale),
+    ...registry.getExtensionMessages(),
+    ...host?.messages,
+  };
+  root.lang = hostLocale;
+  applyTheme();
+  refreshSystemThemeListener();
   routeKey = safePageContext().routeKey;
   if (diagnosticsConfig.console !== false) {
     cleanups.push(installConsoleLogging());
@@ -1419,8 +1439,9 @@ export async function mountAgentAnnotations(
   // Host subscriptions and the default history listeners are bound only
   // after every setup attempt has settled, so a rolled-back failed host can
   // never leak a subscription or intercept route/history behavior.
-  if (host?.subscribe) {
-    cleanups.push(host.subscribe(() => applyHostChange()));
+  const hostSubscription = host?.subscribeChanges(() => applyHostChange()) ?? null;
+  if (hostSubscription) {
+    cleanups.push(hostSubscription);
   } else {
     const onRouteEvent = () => refreshRoute();
     window.addEventListener("popstate", onRouteEvent);

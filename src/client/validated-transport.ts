@@ -1,6 +1,7 @@
 import { AGENT_ANNOTATIONS_ID_PATTERN } from "../core/index.js";
 import {
   parseValidatedTask,
+  validateTransportResult,
   validateConflictTask,
 } from "../core/transport.js";
 import type { TaskTransport } from "../types/index.js";
@@ -15,7 +16,11 @@ export const createValidatedTaskTransport = (transport: TaskTransport): TaskTran
     read: async () => parseValidatedTask(await transport.read(), "read"),
     mutate: async (request) => {
       try {
-        return parseValidatedTask(await transport.mutate(request), "mutate");
+        return validateTransportResult(
+          "mutate",
+          parseValidatedTask(await transport.mutate(request), "mutate"),
+          { taskId: request.taskId, taskRevision: request.expectedRevision }
+        );
       } catch (error) {
         throw validateConflictTask(error);
       }
@@ -24,7 +29,12 @@ export const createValidatedTaskTransport = (transport: TaskTransport): TaskTran
       ? async (input) => {
           validateWriteEvidenceMetadata(input);
           try {
-            return parseValidatedTask(await transport.writeEvidence!(input), "writeEvidence");
+            return validateTransportResult(
+              "writeEvidence",
+              parseValidatedTask(await transport.writeEvidence!(input), "writeEvidence"),
+              { taskId: input.taskId, taskRevision: input.expectedRevision },
+              input.annotationId
+            );
           } catch (error) {
             throw validateConflictTask(error);
           }

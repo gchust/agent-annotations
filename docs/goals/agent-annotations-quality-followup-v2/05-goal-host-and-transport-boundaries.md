@@ -133,22 +133,43 @@ Commit:
 
 ## Progress
 
-- [ ] 检查实际 HEAD 和工作区。
-- [ ] 建立 AC → 文件 → 测试 → 证据映射。
-- [ ] 实现生产代码。
-- [ ] 增加最小回归测试。
-- [ ] 运行当前 Goal 完整门禁。
-- [ ] 独立 Review。
-- [ ] 更新 Outcomes。
+- [x] 检查实际 HEAD 和工作区：从 `0a59894ff74136d5b6ec4f4429f6652507caee78`、clean tree 开始。
+- [x] 建立 AC → 文件 → 测试 → 证据映射：registry/runtime host paths、inspection identity、validated/server transports、packed fixture。
+- [x] 实现生产代码：registered host source IDs, one guarded host proxy, method-level transport protocol checks。
+- [x] 增加最小回归测试：host callback fault/disposer isolation; mutate ID/revision and evidence target invariants; read/subscribe replacement.
+- [x] 运行当前 Goal 完整门禁。
+- [x] 独立 Review：final diff reviewed after focused and full gates; `git diff --check` clean.
+- [x] 更新 Outcomes。
+
+Gate evidence (final working tree):
+
+- `pnpm exec vitest run tests/extension/registry.test.ts tests/client/runtime.test.ts tests/client/runtime-controllers.test.ts tests/client/validated-transport.test.ts tests/server/transport.test.ts` — PASS, 5 files / 202 tests.
+- `pnpm typecheck` — PASS.
+- `pnpm test` — PASS, 37 files / 451 tests.
+- `pnpm check:architecture` — PASS, 1 file / 29 tests.
+- `pnpm check:docs` — PASS.
+- `pnpm build` — PASS.
+- `pnpm check:package` — PASS (`publint` and `attw`).
+- `pnpm check:tarball` — PASS, 26 files / 113609 bytes.
+- `pnpm test:e2e` — PASS, 18 Playwright tests plus shutdown coverage from a freshly packed consumer; the vertical flow injected a NocoBase-style `identity()` fault, saved the annotation, rendered two markers, copied the task, and persisted exactly one deduplicated `identity` diagnostic.
+- `git diff --check` — PASS.
 
 ## Surprises & Discoveries
 
-- 执行时填写。
+- Registry validation was invoking `theme()` and `appRoot()` during registration; removing those calls was required for registration fault isolation.
+- The existing diagnostics server allowlist did not yet include `pageContext`; adding the already-used runtime phases to the server validator was required for persistence.
+- Packed fault injection produced two markers (the original and the new annotation), confirming identity fallback did not suppress normal marker behavior.
 
 ## Decision Log
 
-- 执行时填写实际决策及原因。
+- Keep `getHostIntegration()` as the existing raw inspection/test API, and add `getHostRegistration()` for the runtime guard so the extension ID is never inferred from object identity.
+- Use the existing diagnostics controller and deduplication key with a `host` phase and callback method as contribution ID; caught callback error text is replaced with a stable generic message before diagnostics redaction.
+- Enforce transport invariants in the shared core helper after strict schema parsing. `mutate` requires the requested task identity and a forward revision; `writeEvidence` additionally requires the requested annotation to remain present. `read`/`subscribe` retain task replacement semantics.
+- Keep the runtime's existing mutation Parse → Generic Redaction → Parse sequence unchanged; the validated transport remains the only transport passed to controllers.
 
 ## Outcomes & Retrospective
 
-- 完成时填写。
+- Goal 05 implementation is complete and ready for its local commit. Host faults now fall back per callback and preserve core Pick/Marker/Copy flows; transport successes cannot silently replace task identity, reuse a revision, or drop the requested annotation/evidence target.
+- Acceptance: G05-001 PASS (single guarded host proxy covers every callback and disposer); G05-002 PASS (focused fault tests and packed browser annotation flow remained mounted); G05-003 PASS (shared strict result validators cover custom and HTTP transports); G05-004 PASS (`TaskTransportProtocolError` is exported and asserted); G05-005 PASS (focused conflict-retry test and full suite); G05-006 PASS (API, README, and architecture docs checks).
+- No Goal 06 work was started. No push, publish, or tag was performed.
+- Residual risk: direct custom transports outside `createValidatedTaskTransport` remain caller-controlled; the runtime always wraps them before use.

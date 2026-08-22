@@ -1,8 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { RevisionConflictError } from "../../src/core/index.js";
+import { RevisionConflictError, TaskTransportProtocolError } from "../../src/core/index.js";
 import { createValidatedTaskTransport } from "../../src/client/validated-transport.js";
-import type { TaskTransport } from "../../src/types/index.js";
+import type { AgentAnnotationsTask, TaskTransport } from "../../src/types/index.js";
 import { taskFixture } from "../core/test-data.js";
 
 const valid = taskFixture({ taskRevision: 4 });
@@ -28,6 +28,21 @@ describe("createValidatedTaskTransport", () => {
     })).rejects.toThrow(/invalid task from transport \(mutate\)/);
   });
 
+  it.each([
+    ["different task", taskFixture({ taskId: "task-2", taskRevision: 2 })],
+    ["same revision", taskFixture({ taskRevision: 1 })],
+    ["smaller revision", taskFixture({ taskRevision: 0 })],
+  ])("rejects a mutate result with %s", async (_case, result) => {
+    const validated = createValidatedTaskTransport(rawTransport({ mutate: async () => result }));
+    const error = await validated.mutate({
+      taskId: "task-1",
+      expectedRevision: 1,
+      operations: [{ op: "update", annotationId: "ann-1", comment: "Updated" }],
+    }).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(TaskTransportProtocolError);
+    expect(error).toMatchObject({ method: "mutate", expectedTaskId: "task-1", expectedRevision: 1 });
+  });
+
   it("parses every writeEvidence result", async () => {
     const validated = createValidatedTaskTransport(rawTransport({
       writeEvidence: async () => ({ broken: true }) as never,
@@ -40,6 +55,34 @@ describe("createValidatedTaskTransport", () => {
       width: 10,
       height: 10,
     })).rejects.toThrow(/invalid task from transport \(writeEvidence\)/);
+  });
+
+  it("rejects writeEvidence results for the wrong task or without the target annotation", async () => {
+    const input = {
+      taskId: "task-1", expectedRevision: 1, annotationId: "ann-1",
+      png: "fake", width: 10, height: 10,
+    };
+    for (const result of [
+      taskFixture({ taskId: "task-2", taskRevision: 2 }),
+      taskFixture({ taskRevision: 2, annotations: [] }),
+    ]) {
+      const validated = createValidatedTaskTransport(rawTransport({ writeEvidence: async () => result }));
+      await expect(validated.writeEvidence?.(input)).rejects.toBeInstanceOf(TaskTransportProtocolError);
+    }
+  });
+
+  it("allows read and subscribe to replace the task identity", async () => {
+    const replacement = taskFixture({ taskId: "task-2", taskRevision: 0 });
+    let publish!: (task: AgentAnnotationsTask) => void;
+    const listener = vi.fn();
+    const validated = createValidatedTaskTransport(rawTransport({
+      read: async () => replacement,
+      subscribe(callback) { publish = callback; return () => undefined; },
+    }));
+    await expect(validated.read()).resolves.toMatchObject({ taskId: "task-2", taskRevision: 0 });
+    validated.subscribe?.(listener);
+    publish(replacement);
+    expect(listener).toHaveBeenCalledWith(replacement);
   });
 
   it("parses every subscribed push before the listener sees it", async () => {

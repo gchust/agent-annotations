@@ -10,6 +10,7 @@ export * from "./redaction.js";
 export * from "./schema.js";
 export * from "./selection.js";
 export * from "./selectors.js";
+export { TaskTransportProtocolError, TaskTransportValidationError } from "./transport.js";
 
 // The pure type surface of /core: only the task-schema and core-API types
 // are re-exported here (never `export type *`, which would pull browser and

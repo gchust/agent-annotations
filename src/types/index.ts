@@ -288,6 +288,7 @@ export type AgentAnnotationsDiagnosticPhase =
   | "panel"
   | "execute"
   | "pageContext"
+  | "host"
   | "enrich"
   | "export"
   | "redact"

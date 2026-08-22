@@ -9,6 +9,85 @@ import type {
 } from "../../types/index.js";
 import type { ClientExtensionRegistry } from "../../extension/index.js";
 
+export type GuardedHostIntegration = HostIntegration & {
+  readonly extensionId: string;
+  navigateRoute(routeKey: string): boolean;
+  subscribeChanges(listener: () => void): (() => void) | null;
+};
+
+export const createGuardedHostIntegration = (
+  extensionId: string,
+  source: HostIntegration,
+  reportFailure: (method: string, error: unknown) => void
+): GuardedHostIntegration => {
+  const call = <T>(method: string, fallback: T, invoke: () => T): T => {
+    try {
+      return invoke();
+    } catch {
+      reportFailure(method, new Error("host callback failed"));
+      return fallback;
+    }
+  };
+  const messages = (): Record<string, string> => call("messages", {}, () => {
+    const value = source.messages;
+    if (value === undefined) return {};
+    if (!value || typeof value !== "object" || Array.isArray(value) ||
+      !Object.values(value).every((message) => typeof message === "string")) {
+      throw new TypeError("host messages must contain only strings");
+    }
+    return value;
+  });
+  const guarded: GuardedHostIntegration = {
+    extensionId,
+    locale: source.locale ? () => call("locale", document.documentElement.lang || "en-US", () => {
+      const value = source.locale!();
+      if (typeof value !== "string" || value.length === 0) throw new TypeError("host locale must be a non-empty string");
+      return value;
+    }) : undefined,
+    routeKey: source.routeKey ? () => call("routeKey", undefined, () => source.routeKey!()) as string : undefined,
+    pageContext: source.pageContext ? () => call("pageContext", {}, () => source.pageContext!()) : undefined,
+    theme: source.theme ? () => call("theme", "light", () => {
+      const value = source.theme!();
+      if (value !== "light" && value !== "dark" && value !== "system") throw new TypeError("invalid host theme");
+      return value;
+    }) : undefined,
+    appRoot: source.appRoot ? () => call("appRoot", document.body, () => {
+      const value = source.appRoot!();
+      if (!value || typeof value !== "object" || (value.nodeType !== 1 && value.nodeType !== 9)) {
+        throw new TypeError("invalid host appRoot");
+      }
+      return value;
+    }) : undefined,
+    identity: source.identity ? (element) => call("identity", {}, () => {
+      const value = source.identity!(element);
+      if (!value || typeof value !== "object" || Array.isArray(value) ||
+        !Object.entries(value).every(([key, entry]) => typeof key === "string" && typeof entry === "string")) {
+        throw new TypeError("invalid host identity");
+      }
+      return value;
+    }) : undefined,
+    get messages() { return messages(); },
+    navigate: source.navigate ? (routeKey) => { guarded.navigateRoute(routeKey); } : undefined,
+    subscribe: source.subscribe ? (listener) => guarded.subscribeChanges(listener) ?? (() => undefined) : undefined,
+    navigateRoute: (routeKey) => {
+      if (!source.navigate) return false;
+      return call("navigate", false, () => {
+        source.navigate!(routeKey);
+        return true;
+      });
+    },
+    subscribeChanges: (listener) => {
+      if (!source.subscribe) return null;
+      return call("subscribe", null, () => {
+        const dispose = source.subscribe!(listener);
+        if (typeof dispose !== "function") throw new TypeError("host subscribe must return a disposer");
+        return () => call("subscribe.dispose", undefined, dispose);
+      });
+    },
+  };
+  return guarded;
+};
+
 type ComposerState =
   | { kind: "element" | "multi"; elements: Element[] }
   | { kind: "region"; rect: AgentAnnotationsRect; sampled: number; elements: Element[] };
@@ -138,7 +217,7 @@ export const createHostController = (b: HostBindings): HostController => {
     const nextLocale = b.host()?.locale?.() ?? (document.documentElement.lang || "en-US");
     const nextMessages = {
       ...localeMessages(nextLocale),
-      ...b.registry().getMessages(),
+      ...b.registry().getExtensionMessages(),
       ...b.host()?.messages,
     };
     if (nextLocale !== b.hostLocale() || JSON.stringify(nextMessages) !== JSON.stringify(b.messages())) {

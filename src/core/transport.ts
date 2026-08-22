@@ -2,8 +2,8 @@ import { parseAgentAnnotationsTask } from "./schema.js";
 import { RevisionConflictError } from "./conflict.js";
 import type { AgentAnnotationsTask } from "../types/index.js";
 
-// Shared TaskTransport synchronization rules (internal module; not part of the
-// public package surface).
+// Shared TaskTransport synchronization and validation rules. Stable transport
+// error classes are exported from /core; the helpers remain internal.
 
 export type TaskIdentity = {
   taskId: string;
@@ -41,6 +41,52 @@ export class TaskTransportValidationError extends Error {
     this.cause = cause;
   }
 }
+
+export class TaskTransportProtocolError extends Error {
+  readonly method: "mutate" | "writeEvidence";
+  readonly expectedTaskId: string;
+  readonly expectedRevision: number;
+  readonly actualTaskId: string;
+  readonly actualRevision: number;
+  readonly reason: "task_id" | "revision" | "annotation";
+
+  constructor(
+    method: "mutate" | "writeEvidence",
+    expected: TaskIdentity,
+    actual: TaskIdentity,
+    reason: TaskTransportProtocolError["reason"]
+  ) {
+    super(
+      `invalid ${method} result (${reason}): expected task ${expected.taskId} after revision ${expected.taskRevision}, ` +
+      `received task ${actual.taskId} at revision ${actual.taskRevision}`
+    );
+    this.name = "TaskTransportProtocolError";
+    this.method = method;
+    this.expectedTaskId = expected.taskId;
+    this.expectedRevision = expected.taskRevision;
+    this.actualTaskId = actual.taskId;
+    this.actualRevision = actual.taskRevision;
+    this.reason = reason;
+  }
+}
+
+export const validateTransportResult = (
+  method: "mutate" | "writeEvidence",
+  task: AgentAnnotationsTask,
+  expected: TaskIdentity,
+  annotationId?: string
+): AgentAnnotationsTask => {
+  const actual = taskIdentity(task);
+  const reason = actual.taskId !== expected.taskId
+    ? "task_id"
+    : actual.taskRevision <= expected.taskRevision
+      ? "revision"
+      : annotationId && !task.annotations.some((annotation) => annotation.annotationId === annotationId)
+        ? "annotation"
+        : null;
+  if (reason) throw new TaskTransportProtocolError(method, expected, actual, reason);
+  return task;
+};
 
 export const parseValidatedTask = (value: unknown, source: string): AgentAnnotationsTask => {
   try {

@@ -21,6 +21,8 @@ const PHASES = new Set([
   "icon",
   "panel",
   "execute",
+  "pageContext",
+  "host",
   "enrich",
   "export",
   "redact",
