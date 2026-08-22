@@ -96,13 +96,25 @@ test("packed browser to file to CLI to browser loop, HMR and session security", 
   const source = extensionSource;
   const before = readFileSync(source, "utf8");
   try {
-    writeFileSync(source, `${before}\n`);
-    await expect.poll(() => page.evaluate(() => ({
-      setup: window.__demoExtension?.setupCount,
-      dispose: window.__demoExtension?.disposeCount,
+    // Vite may coalesce or split one source edit into more than one legitimate
+    // invalidation; the runtime must stay balanced and singleton, so only the
+    // relative setup/dispose deltas and the single toolbar button are asserted.
+    const baseline = await page.evaluate(() => ({
+      setup: window.__demoExtension?.setupCount ?? 0,
+      dispose: window.__demoExtension?.disposeCount ?? 0,
       buttons: document.getElementById("agent-annotations-root")?.shadowRoot
         ?.querySelectorAll('[data-action-id="demo.extension:demo-copy-json"]').length,
-    }))).toEqual({ setup: 2, dispose: 1, buttons: 1 });
+    }));
+    writeFileSync(source, `${before}\n`);
+    await expect.poll(() => page.evaluate(({ setup: baseSetup, dispose: baseDispose }) => {
+      const setup = window.__demoExtension?.setupCount ?? 0;
+      const dispose = window.__demoExtension?.disposeCount ?? 0;
+      const buttons = document.getElementById("agent-annotations-root")?.shadowRoot
+        ?.querySelectorAll('[data-action-id="demo.extension:demo-copy-json"]').length;
+      return setup >= baseSetup + 1
+        && setup - baseSetup === dispose - baseDispose
+        && buttons === 1;
+    }, { setup: baseline.setup, dispose: baseline.dispose })).toBe(true);
     const beforeAction = await page.evaluate(() => window.__demoExtension?.actionCount);
     await page.keyboard.press("Control+Alt+KeyJ");
     await expect.poll(() => page.evaluate(() => window.__demoExtension?.actionCount))
