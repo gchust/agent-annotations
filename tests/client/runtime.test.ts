@@ -44,6 +44,7 @@ vi.mock("../../src/client/screenshot.js", () => ({
 }));
 
 import { mountAgentAnnotations, RevisionConflictError } from "../../src/client/index.js";
+import { createSafePageContext } from "../../src/client/runtime/annotated.js";
 import { defineClientExtension } from "../../src/extension/index.js";
 import { FileTaskStore } from "../../src/server/store.js";
 import { MemoryTaskTransport } from "../../src/testing/index.js";
@@ -72,6 +73,69 @@ afterEach(() => {
 });
 
 describe("client runtime", () => {
+  it("creates one query-free page context while preserving hash routing and safe host overrides", () => {
+    history.pushState({}, "", "/callback?code=oauth-secret#/customers");
+    expect(createSafePageContext()).toMatchObject({
+      url: `${location.origin}/callback`,
+      routeKey: "/callback#/customers",
+    });
+    expect(createSafePageContext({
+      pageContext: () => ({
+        url: "https://tenant.example.test/customers",
+        routeKey: "/tenant/acme/customers",
+        title: "Acme customers",
+      }),
+    })).toMatchObject({
+      url: "https://tenant.example.test/customers",
+      routeKey: "/tenant/acme/customers",
+      title: "Acme customers",
+    });
+    for (const pageContext of [
+      { url: "https://example.test/callback?code=secret" },
+      { url: "https://user:pass@example.test/customers" },
+      { url: "https://example.test/#/customers" },
+      { routeKey: "/customers?tenant=secret" },
+      { routeKey: "/customers\nadmin" },
+      { title: "x".repeat(501) },
+      { routeKey: "/customers", extra: "secret" },
+    ]) {
+      const report = vi.fn();
+      expect(createSafePageContext({ pageContext: () => pageContext }, report)).toMatchObject({
+        url: `${location.origin}/callback`,
+        routeKey: "/callback#/customers",
+      });
+      expect(report).toHaveBeenCalledOnce();
+    }
+  });
+
+  it("isolates an invalid host page context, records one diagnostic, and keeps Studio usable", async () => {
+    history.pushState({}, "", "/safe?reset=secret#/customers");
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(),
+      extensions: [defineClientExtension({
+        id: "unsafe-host",
+        apiVersion: 1,
+        host: {
+          pageContext: () => { throw new Error("host leaked reset=secret"); },
+        },
+      })],
+    });
+    try {
+      const failures = mounted.api.getSnapshot().diagnostics.filter(
+        (entry) => entry.extensionId === "unsafe-host" && entry.phase === "pageContext"
+      );
+      expect(failures).toHaveLength(1);
+      expect(JSON.stringify(failures)).not.toContain("reset=secret");
+      mounted.api.commands.capture.startPick();
+      expect(mounted.api.getSnapshot().captureMode).toBe("pick");
+      mounted.api.commands.capture.cancel();
+      expect(createSafePageContext({ pageContext: () => ({ routeKey: "/customers?tenant=secret" }) }).routeKey)
+        .toBe("/safe#/customers");
+    } finally {
+      mounted.unmount();
+    }
+  });
+
   it("marks the shadow host ignored before mounting and cleans it up", async () => {
     const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport() });
     const host = document.getElementById("agent-annotations-root");

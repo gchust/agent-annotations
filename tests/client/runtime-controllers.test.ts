@@ -134,6 +134,13 @@ describe("runtime controllers (focused factory contracts)", () => {
       setAppRoot: (value) => { state.appRoot = value; },
       routeKey: () => state.routeKey,
       setRouteKey: (value) => { state.routeKey = value; },
+      pageContext: () => ({
+        url: "https://example.test",
+        routeKey: state.routeKey,
+        title: "Example",
+        viewport: { width: 100, height: 100 },
+        scroll: { x: 0, y: 0 },
+      }),
       shortcuts: () => state.shortcuts,
       setShortcuts: (value) => { state.shortcuts = value; },
       captureMode: () => state.captureMode,

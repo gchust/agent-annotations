@@ -15,7 +15,8 @@ const shadow = (page: import("@playwright/test").Page, selector: string) =>
   page.locator(`#agent-annotations-root >> ${selector}`);
 
 test("packed browser to file to CLI to browser loop, HMR and session security", async ({ page, context }) => {
-  await page.goto("/");
+  const privacySentinel = "G03_OAUTH_RESET_SIGNED_URL_SENTINEL";
+  await page.goto(`/?code=${privacySentinel}&reset=${privacySentinel}&signedUrl=${privacySentinel}#/customers`);
   await expect(page.locator("#agent-annotations-root")).toHaveCount(1);
   await expect(shadow(page, ".aa-dock")).toBeVisible();
   await expect(shadow(page, '[data-action-id="demo.extension:demo-copy-json"]')).toHaveCount(1);
@@ -40,6 +41,11 @@ test("packed browser to file to CLI to browser loop, HMR and session security", 
   ).toBe(1);
   const task = JSON.parse(readFileSync(taskPath, "utf8"));
   const id = task.annotations[0].annotationId;
+  expect(task.annotations[0].pageContext).toMatchObject({
+    url: "http://127.0.0.1:4179/",
+    routeKey: "/#/customers",
+  });
+  expect(JSON.stringify(task)).not.toContain(privacySentinel);
   expect(task.annotations[0].extensions).toEqual({
     "demo.extension": {
       "demo.extension:target-context": { demoKind: "packed", kept: "visible" },
@@ -54,6 +60,14 @@ test("packed browser to file to CLI to browser loop, HMR and session security", 
   // Browser diagnostics persist and clear through the CLI.
   await page.evaluate(() => { console.error("e2e-diagnostic-sentinel"); });
   await expect.poll(() => cli("diagnostics", "--json")).toContain("e2e-diagnostic-sentinel");
+  await page.evaluate(async (sentinel) => {
+    await fetch(`http://127.0.0.1:1/privacy-probe?code=${sentinel}`).catch(() => undefined);
+  }, privacySentinel);
+  await expect.poll(() => cli("diagnostics", "--json")).toContain("privacy-probe");
+  expect(cli("diagnostics", "--json")).not.toContain(privacySentinel);
+  const browserState = readFileSync(path.join(runtimeRoot, "browser-state.json"), "utf8");
+  expect(JSON.parse(browserState).routeKey).toBe("/#/customers");
+  expect(browserState).not.toContain(privacySentinel);
   cli("diagnostics", "--clear");
   expect(JSON.parse(cli("diagnostics", "--json"))).toEqual([]);
   // Revision and wait commands report and poll exact referenced sources.
@@ -69,6 +83,10 @@ test("packed browser to file to CLI to browser loop, HMR and session security", 
   });
   expect(JSON.parse(cli("validate-task", "--json"))).toMatchObject({ ok: true, taskId: task.taskId });
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.keyboard.press("Control+Alt+C");
+  const handoff = await page.evaluate(() => navigator.clipboard.readText());
+  expect(handoff).toContain("- route: /#/customers");
+  expect(handoff).not.toContain(privacySentinel);
   await page.keyboard.press("Control+Alt+KeyJ");
   await expect.poll(() => page.evaluate(() => window.__demoExtension?.actionCount)).toBe(1);
   expect(JSON.parse(await page.evaluate(() => navigator.clipboard.readText())))

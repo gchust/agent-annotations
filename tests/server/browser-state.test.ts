@@ -89,6 +89,8 @@ describe("browser state v2", () => {
     expect(parseAgentAnnotationsBrowserState({ ...state, routeKey: "/settings" })).toMatchObject({
       routeKey: "/settings",
     });
+    expect(() => parseAgentAnnotationsBrowserState({ ...state, routeKey: "/settings\nadmin" }))
+      .toThrow(/routeKey/);
   });
 
   it("writes atomically with session-level mode and reads back", () => {

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Page context now omits query data by default across tasks, browser state,
+  handoff, diagnostics, and evidence metadata. Hosts may provide validated,
+  query-free business route keys through `pageContext()`.
 - **Breaking**: split browser update generation from referenced-source hashes.
   `revision` now returns `referencedSourceRevision`/`referencedSourceFiles`,
   empty source sets return `null`, and the wait modes are now

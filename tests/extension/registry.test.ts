@@ -311,6 +311,7 @@ describe("ClientExtensionRegistry", () => {
       { redactors: [{ ...redactor("bad"), redact: "bad" as never }] },
       { messages: { bad: 1 } as never },
       { host: { locale: "bad" } as never },
+      { host: { pageContext: "bad" } as never },
       { host: { navigate: "bad" } as never },
       { host: { subscribe: "bad" as never } },
       { host: { theme: "bad" as never } },
@@ -326,13 +327,13 @@ describe("ClientExtensionRegistry", () => {
     }
   });
 
-  it("accepts host route navigate and subscribe callbacks", () => {
+  it("accepts host page context, navigate, and subscribe callbacks", () => {
     const registry = new ClientExtensionRegistry();
     const navigate = () => undefined;
     const subscribe = () => () => undefined;
     const appRoot = (() => undefined) as unknown as () => Element | Document;
     expect(() => registry.register(extension("route-host", {
-      host: { routeKey: () => "/a", navigate, subscribe, theme: () => "system", appRoot },
+      host: { pageContext: () => ({ routeKey: "/a" }), navigate, subscribe, theme: () => "system", appRoot },
     }))).not.toThrow();
     expect(registry.getHostIntegration()).toMatchObject({ navigate, subscribe, appRoot });
   });

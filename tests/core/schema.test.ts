@@ -39,6 +39,31 @@ describe("agent-annotations.task.v1 schema", () => {
     expect(parseAgentAnnotationsTask(taskFixture())).toEqual(taskFixture());
   });
 
+  it("rejects unsafe persisted page context and preserves hash routes", () => {
+    const withPageContext = (pageContext: Record<string, unknown>) => taskFixture({
+      annotations: [annotationFixture({
+        pageContext: { ...annotationFixture().pageContext, ...pageContext },
+      })],
+    });
+    for (const url of [
+      "https://example.test/callback?code=secret",
+      "https://example.test/callback?",
+      "https://example.test/#/customers",
+      "https://example.test/#",
+      "https://user:pass@example.test/customers",
+      "javascript:alert(1)",
+    ]) {
+      expect(validateAgentAnnotationsTask(withPageContext({ url }))).toMatchObject({
+        ok: false,
+        issue: { path: "task.annotations[0].pageContext.url" },
+      });
+    }
+    expect(validateAgentAnnotationsTask(withPageContext({ routeKey: "/customers?tenant=secret" })))
+      .toMatchObject({ ok: false, issue: { path: "task.annotations[0].pageContext.routeKey" } });
+    expect(parseAgentAnnotationsTask(withPageContext({ routeKey: "/#/customers" })))
+      .toMatchObject({ annotations: [{ pageContext: { routeKey: "/#/customers" } }] });
+  });
+
   it("rejects unknown top-level fields and any other schema version", () => {
     expect(validateAgentAnnotationsTask({ ...taskFixture(), extra: true })).toMatchObject({
       ok: false,

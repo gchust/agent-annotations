@@ -89,6 +89,9 @@ narrow per-module bindings (lazy getters, no module-level mutable globals);
   session token.
 - Diagnostics are bounded, redacted, and privacy-safe; network capture keeps
   only origin+path, never bodies/headers/auth.
+- Annotation and browser-state page identity comes from one safe page-context
+  resolver: defaults omit queries, host overrides are bounded and validated,
+  and task/browser parsers reject persisted query-bearing values.
 - Evidence files are confined to `<runtimeRoot>/evidence`; refs and pruning
   never follow symlinks or traverse outside.
 - Task mutation payloads are redacted at the boundary before any transport.

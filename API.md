@@ -118,8 +118,15 @@ controlled Node integrations.
   redactors per extension are composed deterministically in stable
   `(extensionId, redactorId)` order; duplicate `(extensionId, redactorId)` pairs
   are rejected.
-- `HostIntegration` may expose `routeKey()`, `locale()`, `theme()`, `appRoot()`,
+- `HostIntegration` may expose `pageContext()`, `routeKey()`, `locale()`, `theme()`, `appRoot()`,
   `navigate(routeKey)`, and a single unified `subscribe(listener)` notification.
+  `pageContext()` may return bounded `url`, `routeKey`, and `title` overrides;
+  URLs must be absolute HTTP(S) values without credentials, query, or fragment,
+  and route keys must be query-free. Use an allowlisted business key when tenant
+  or filter identity matters; never return raw query parameters. Invalid or
+  throwing overrides are diagnosed and fall back to `origin + pathname` and
+  `pathname + hash`. `routeKey()` remains the route-only form when
+  `pageContext()` is absent.
   `theme()` accepts `"light" | "dark" | "system"`; `system` follows
   `prefers-color-scheme` through a media listener that is bound while the system
   theme is active and released on switch or unmount. `appRoot()` accepts an

@@ -307,6 +307,14 @@ with a stable reason key (`unresolved`, `identity mismatch`,
 editor, and the list; the list also shows route, kind, and evidence count with
 the default Open filter preserved.
 
+Page context is query-free by default: annotation URLs store only
+`origin + pathname`, while route keys store `pathname + hash`. A host that
+needs tenant or filter identity can return an explicit, allowlisted business
+key from `pageContext()`; its `url`, `routeKey`, and `title` overrides are
+bounded and validated, and raw query parameters are never accepted. Invalid
+or throwing overrides fall back to the safe defaults and produce a bounded
+extension diagnostic without breaking capture.
+
 ## Runtime diagnostics (console and network)
 
 While mounted, the runtime records `console.error` output and failed network
@@ -345,7 +353,7 @@ that surface before throwing cannot be rolled back.
 - `isVisible` throwing hides the contribution, `isEnabled` throwing disables
   it, `isPressed` throwing leaves it unpressed, a throwing `icon` renders a
   safe fallback, a throwing `panel` render shows the closable error panel,
-  and `execute`/`enrich`/`export`/`redact` failures are caught with the
+  and `pageContext`/`execute`/`enrich`/`export`/`redact` failures are caught with the
   existing per-phase semantics.
 - `dispose` throwing never blocks the remaining cleanup, and the structured
   dispose diagnostic still reaches the diagnostics boundary.

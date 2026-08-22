@@ -129,22 +129,32 @@ Commit:
 
 ## Progress
 
-- [ ] 检查实际 HEAD 和工作区。
-- [ ] 建立 AC → 文件 → 测试 → 证据映射。
-- [ ] 实现生产代码。
-- [ ] 增加最小回归测试。
-- [ ] 运行当前 Goal 完整门禁。
-- [ ] 独立 Review。
-- [ ] 更新 Outcomes。
+- [x] 2026-08-22：确认起始 HEAD 为 `e0654a0357ddd3b64d1e34581feb5293347675b1`，工作区干净，Goal 02 已提交。
+- [x] 2026-08-22：检查全部 Page Context producer/parser，并建立 G03-001～G03-007 到 Runtime、Host、Task Schema、Browser State、Diagnostics、Evidence、Handoff 和 packed E2E 的映射。
+- [x] 2026-08-22：实现唯一 `createSafePageContext()` 规则与 Host `pageContext()` override；Annotation、route state、Browser State 和 Evidence 共享安全 route identity。
+- [x] 2026-08-22：增加默认/Host/Schema/Browser State/Registry 测试及 OAuth/reset/signedUrl sentinel packed-browser 覆盖。
+- [x] 2026-08-22：运行全部 Goal 03 门禁；required focused suite 为 5 files / 180 tests，full unit suite 为 37 files / 441 tests，architecture 为 29 tests，packed E2E 为 17 Playwright tests 加 shutdown cleanup。
+- [x] 2026-08-22：独立检查最终生产、测试和文档 diff，运行 producer/parser 搜索与 `git diff --check`；未发现 Goal 04、默认 query allowlist、NocoBase coupling 或阻断问题。
+- [x] 2026-08-22：更新 Outcomes 并准备单一 Conventional Commit。
 
 ## Surprises & Discoveries
 
-- 执行时填写。
+- 首轮 focused tests 暴露 `redaction.test.ts` 仍用 query-bearing URL 作为合法输入。严格 Task Parser 正确地在 Redaction 前拒绝该 fixture；测试改为用安全 URL 和敏感 title 验证 Redaction，未放宽 parser。
+- URL API 会把尾部空 `?` / `#` 规范化为空；为了执行“不得包含 query/fragment”的字面合同，最终验证同时检查原始字符串分隔符，而非只检查 parsed `search` / `hash`。
+- Host 抛出的 Error message 本身可能包含原始 query。Page Context 隔离诊断因此只持久化固定的 package-owned 错误文本，不复制第三方异常内容。
+- Packed sentinel 场景在同一 evidence-bearing annotation 上证明 Task、Browser State、Handoff、Diagnostics 和 Screenshot Metadata 均不含 sentinel，同时 `/#/customers` 保留。
 
 ## Decision Log
 
-- 执行时填写实际决策及原因。
+- Decision：在现有 `runtime/annotated.ts` 中建立唯一 `createSafePageContext()`，不增加平行协议；原因是 element/region annotation、Host route controller 和 Browser State 都已汇聚到 Runtime mount。
+- Decision：默认 URL 使用 `origin + pathname`，默认 route 使用 `pathname + hash`，并移除 hash 内的 query suffix；原因是保留 Hash Router identity，同时不让 query-like payload 穿过最终 parser。
+- Decision：新增 Host `pageContext()`，当它存在时成为 Host page identity 的唯一来源；旧 `routeKey()` 仅在 `pageContext()` 缺失时作为现有 route-only API 使用，避免两个返回值冲突。
+- Decision：Host override 只接受 `url` / `routeKey` / `title`，完整验证后整体采用；任何 throw、未知字段或非法值均整体回退并记录一次 `pageContext` extension diagnostic。
+- Decision：Task Schema 最终拒绝非 HTTP(S)、credentials、query、fragment、control characters；Browser State Parser 最终拒绝 query/control characters。客户端清理不代替持久化边界验证。
 
 ## Outcomes & Retrospective
 
-- 完成时填写。
+- Outcome：G03-001～G03-007 全部通过。默认 Task URL/Route、Browser State、Handoff、Diagnostics 和 evidence-bearing task 均无 Search Params；Host 可提供有界、安全业务 route key；非法 Host 不影响 Studio；Hash Router 保持 `/#/customers`。
+- Sentinel：fresh packed consumer 访问 `/?code=G03_OAUTH_RESET_SIGNED_URL_SENTINEL&reset=...&signedUrl=...#/customers`，真实创建 annotation 和 screenshot evidence，并断言 Task、Browser State、Copy Handoff、network Diagnostics 及完整 evidence-bearing task 都不含 sentinel。
+- Gates：required focused `pnpm exec vitest run tests/client/runtime.test.ts tests/client/runtime-controllers.test.ts tests/server/browser-state.test.ts tests/core/handoff.test.ts tests/core/redaction.test.ts` PASS（5 files / 180 tests）；扩展 focused suite PASS（7 files / 208 tests）；`pnpm typecheck` PASS；`pnpm test` PASS（37 files / 441 tests）；`pnpm check:architecture` PASS（1 file / 29 tests）；`pnpm check:docs` PASS；`pnpm build` PASS；`pnpm test:e2e` PASS（fresh packed external consumer, 17 Playwright tests + shutdown cleanup）；附加 `pnpm check:package` 与 `pnpm check:tarball` PASS（26 files / 109591 bytes）。
+- Review：最终 producer/parser 搜索只保留 Diagnostics URL parsing 和 Vite HMR URL resolution 对 `location.href` 的非持久化使用；Page Context 不再读取 `location.href` / `location.search`。剩余风险限于 Goal 04 计划处理的 multi-runtime Browser State，不属于 Goal 03。

@@ -48,8 +48,8 @@ import { AGENT_ANNOTATIONS_STYLES } from "../styles.js";
 import {
   HOST_ID,
   IGNORE_ATTRIBUTE,
+  createSafePageContext,
   isEditable,
-  pageContext,
   now,
   type RegisteredToolbarContribution,
 } from "./annotated.js";
@@ -140,7 +140,7 @@ export async function mountAgentAnnotations(
   let studioRoot: Root | null = null;
   let studioRenders = 0;
   let destroyed = false;
-  let routeKey = pageContext(host).routeKey;
+  let routeKey = createSafePageContext().routeKey;
   let hostLocale = host?.locale?.() ?? (document.documentElement.lang || "en-US");
   let hostTheme: AgentAnnotationsHostTheme = host?.theme?.() ?? "light";
   let appRoot: Element | Document = host?.appRoot?.() ?? document.body;
@@ -202,7 +202,7 @@ export async function mountAgentAnnotations(
       clientVersion,
       // Privacy: never persist a raw URL query; hash routes stay intact (the
       // server parser rejects only route keys that still contain a query).
-      routeKey: redactAgentAnnotationsText(routeKey.split("?", 1)[0] ?? routeKey).slice(0, 500),
+      routeKey,
       taskId: task.taskId,
       taskRevision: task.taskRevision,
       browserUpdateRevision,
@@ -340,6 +340,7 @@ export async function mountAgentAnnotations(
     setAppRoot: (value) => { appRoot = value; },
     routeKey: () => routeKey,
     setRouteKey: (value) => { routeKey = value; },
+    pageContext: () => safePageContext(),
     shortcuts: () => shortcuts,
     setShortcuts: (value) => { shortcuts = value as typeof shortcuts; },
     captureMode: () => captureMode,
@@ -486,6 +487,13 @@ export async function mountAgentAnnotations(
     installConsoleLogging,
     installNetworkDiagnostics,
   } = diagnosticsController;
+  const safePageContext = () => createSafePageContext(host, (error) => recordExtensionFailure(
+    registry.getExtensions().find((extension) => extension.host === host)?.id ?? "host",
+    "pageContext",
+    undefined,
+    error
+  ));
+  routeKey = safePageContext().routeKey;
   if (diagnosticsConfig.console !== false) {
     cleanups.push(installConsoleLogging());
   }
@@ -701,6 +709,7 @@ export async function mountAgentAnnotations(
     root: () => root,
     task: () => task,
     routeKey: () => routeKey,
+    pageContext: () => safePageContext(),
     markersVisible: () => markersVisible,
     editingId: () => editingId,
     editorAnchorRect: () => editorAnchorRect,

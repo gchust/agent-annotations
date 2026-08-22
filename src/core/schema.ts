@@ -289,10 +289,41 @@ const pageContextIssue = (
   }
   const scrollExtra = unknownField(value.scroll, ["x", "y"], `${path}.scroll`);
   if (scrollExtra) return scrollExtra;
+  const urlError = stringIssue(value.url, `${path}.url`, MAX_URL_LENGTH);
+  if (urlError) return urlError;
+  if (/[\u0000-\u001f\u007f]/.test(value.url as string)) {
+    return issue(`${path}.url`, "invalid_value", "Expected a URL without control characters");
+  }
+  try {
+    const url = new URL(value.url as string);
+    if (
+      !/^https?:$/.test(url.protocol) || url.username || url.password ||
+      (value.url as string).includes("?") || (value.url as string).includes("#")
+    ) {
+      return issue(
+        `${path}.url`,
+        "invalid_value",
+        "Expected an http(s) URL without credentials, query, or fragment"
+      );
+    }
+  } catch {
+    return issue(`${path}.url`, "invalid_value", "Expected a valid URL");
+  }
+  const routeError = stringIssue(value.routeKey, `${path}.routeKey`, MAX_ROUTE_LENGTH);
+  if (routeError) return routeError;
+  if ((value.routeKey as string).includes("?") || /[\u0000-\u001f\u007f]/.test(value.routeKey as string)) {
+    return issue(
+      `${path}.routeKey`,
+      "invalid_value",
+      "Expected a query-free route key without control characters"
+    );
+  }
+  const titleError = stringIssue(value.title, `${path}.title`, MAX_TITLE_LENGTH, true);
+  if (titleError) return titleError;
+  if (/[\u0000-\u001f\u007f]/.test(value.title as string)) {
+    return issue(`${path}.title`, "invalid_value", "Expected a title without control characters");
+  }
   return (
-    stringIssue(value.url, `${path}.url`, MAX_URL_LENGTH) ??
-    stringIssue(value.routeKey, `${path}.routeKey`, MAX_ROUTE_LENGTH) ??
-    stringIssue(value.title, `${path}.title`, MAX_TITLE_LENGTH, true) ??
     finiteNumberIssue(value.viewport.width, `${path}.viewport.width`, {
       min: 0,
     }) ??

@@ -43,7 +43,8 @@ describe("generic redaction", () => {
           comment: "Bearer comment-secret",
           pageContext: {
             ...annotationFixture().pageContext,
-            url: "https://example.test/?token=url-secret",
+            url: "https://example.test/",
+            title: "Bearer title-secret",
           },
           targets: [
             targetFixture({
@@ -71,7 +72,7 @@ describe("generic redaction", () => {
       },
     ]);
     expect(result.task.annotations[0].comment).not.toContain("comment-secret");
-    expect(result.task.annotations[0].pageContext.url).not.toContain("url-secret");
+    expect(result.task.annotations[0].pageContext.title).not.toContain("title-secret");
     expect(result.task.annotations[0].targets?.[0].inspection.attributes).toEqual({
       title: "safe",
     });

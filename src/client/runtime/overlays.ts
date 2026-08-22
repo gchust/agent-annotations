@@ -14,6 +14,7 @@ import type {
   AgentAnnotation,
   AgentAnnotationsDiagnosticPhase,
   AgentAnnotationsMutationOperation,
+  AgentAnnotationsPageContext,
   AgentAnnotationsRect,
   AgentAnnotationsTask,
   HostIntegration,
@@ -42,6 +43,7 @@ export type OverlayBindings = {
   root(): HTMLElement;
   task(): AgentAnnotationsTask;
   routeKey(): string;
+  pageContext(): AgentAnnotationsPageContext;
   markersVisible(): boolean;
   editingId(): string | null;
   editorAnchorRect(): AgentAnnotationsRect | null;
@@ -263,7 +265,8 @@ export const createOverlayController = (b: OverlayBindings): OverlayController =
       event.preventDefault();
       const comment = textarea.value.trim();
       if (!comment) return textarea.focus();
-      const submittedRouteKey = b.routeKey();
+      const submittedPageContext = b.pageContext();
+      const submittedRouteKey = submittedPageContext.routeKey;
       save.disabled = true;
       try {
         const annotation = composer.kind === "region"
@@ -271,6 +274,7 @@ export const createOverlayController = (b: OverlayBindings): OverlayController =
               composer.rect,
               composer.elements,
               comment,
+              submittedPageContext,
               b.host(),
               b.enrichers(),
               (message, details) => b.recordExtensionFailure(
@@ -284,6 +288,7 @@ export const createOverlayController = (b: OverlayBindings): OverlayController =
               composer.kind,
               composer.elements,
               comment,
+              submittedPageContext,
               b.host(),
               b.enrichers(),
               (message, details) => b.recordExtensionFailure(

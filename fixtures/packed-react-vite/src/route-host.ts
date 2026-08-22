@@ -13,7 +13,9 @@ export default defineClientExtension({
   id: "route.host",
   apiVersion: 1,
   host: {
-    routeKey: () => `${location.pathname}${location.search}${location.hash}`,
+    pageContext: () => ({
+      routeKey: `${location.pathname}${location.hash.split("?", 1)[0]}`,
+    }),
     locale: () => window.__AGENT_ANNOTATIONS_LOCALE ?? "en-US",
     theme: () => "system",
     navigate(routeKey) {

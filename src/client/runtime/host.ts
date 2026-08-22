@@ -1,8 +1,8 @@
 import { localeMessages } from "../messages.js";
-import { pageContext } from "./annotated.js";
 import type {
   AgentAnnotationsCaptureMode,
   AgentAnnotationsHostTheme,
+  AgentAnnotationsPageContext,
   AgentAnnotationsRect,
   HostIntegration,
   StudioPublicSnapshot,
@@ -27,6 +27,7 @@ export type HostBindings = {
   setAppRoot(value: Element | Document): void;
   routeKey(): string;
   setRouteKey(value: string): void;
+  pageContext(): AgentAnnotationsPageContext;
   shortcuts(): StudioPublicSnapshot["shortcuts"];
   setShortcuts(value: StudioPublicSnapshot["shortcuts"]): void;
   captureMode(): AgentAnnotationsCaptureMode;
@@ -161,9 +162,9 @@ export const createHostController = (b: HostBindings): HostController => {
         b.emit();
       });
     }
-    applyRouteKey(pageContext(b.host()).routeKey);
+    applyRouteKey(b.pageContext().routeKey);
   };
-  const refreshRoute = () => applyRouteKey(pageContext(b.host()).routeKey);
+  const refreshRoute = () => applyRouteKey(b.pageContext().routeKey);
 
   return {
     applyTheme,

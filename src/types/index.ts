@@ -54,6 +54,11 @@ export type AgentAnnotationsPageContext = {
   scroll: { x: number; y: number };
 };
 
+export type AgentAnnotationsPageContextOverride = Partial<Pick<
+  AgentAnnotationsPageContext,
+  "url" | "routeKey" | "title"
+>>;
+
 export type AgentAnnotationsEvidenceReference = {
   kind: "screenshot" | "attachment";
   ref: string;
@@ -281,6 +286,7 @@ export type AgentAnnotationsDiagnosticPhase =
   | "icon"
   | "panel"
   | "execute"
+  | "pageContext"
   | "enrich"
   | "export"
   | "redact"
@@ -320,6 +326,7 @@ export type AgentAnnotationsHostTheme = "light" | "dark" | "system";
 export interface HostIntegration {
   locale?(): string;
   routeKey?(): string;
+  pageContext?(): AgentAnnotationsPageContextOverride;
   navigate?(routeKey: string): void;
   appRoot?(): Element | Document;
   theme?(): AgentAnnotationsHostTheme;

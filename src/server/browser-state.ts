@@ -86,8 +86,8 @@ export const parseAgentAnnotationsBrowserState = (
   // Privacy boundary: the route key must never carry a raw URL query; the
   // client strips query portions (keeping hash routes) and the server rejects
   // any route key that still contains one.
-  if ((input.routeKey as string).includes("?")) {
-    throw new TypeError("routeKey must not contain a query");
+  if ((input.routeKey as string).includes("?") || /[\u0000-\u001f\u007f]/.test(input.routeKey as string)) {
+    throw new TypeError("routeKey must not contain a query or control characters");
   }
   if (
     typeof input.taskId !== "string" ||
