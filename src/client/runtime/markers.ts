@@ -1,5 +1,24 @@
-import { resolvePersistedTarget, targetBounds, type TargetResolution } from "../inspection-engine.js";
+import {
+  resolvePersistedTarget,
+  resolveTargetResult,
+  targetBounds,
+  type TargetResolution,
+} from "../inspection-engine.js";
 import type { AgentAnnotation, AgentAnnotationsTask, HostIntegration } from "../../types/index.js";
+
+export type MarkerTargetSummary = {
+  resolved: number;
+  total: number;
+  reason: "unresolved" | "identity mismatch" | "identity unverifiable" | "iframe unsupported" | null;
+};
+
+export type MarkerResolutionSnapshot = {
+  annotationId: string;
+  resolutions: readonly TargetResolution[];
+  resolvedTargets: readonly Element[];
+  anchor: Element | null;
+  summary: MarkerTargetSummary;
+};
 
 // Focused marker-controller bindings: dynamic mount values are read through
 // narrow getters so the controller always sees the current state.
@@ -18,73 +37,68 @@ export type MarkerBindings = {
   isInAppRoot(element: Element): boolean;
   positionComposer(): void;
   positionEditor(): void;
-  resolveTargetInAppRoot(selector: string): Element | null;
+  localized(value: string, params?: Record<string, string | number>): string;
+  resolutionChanged(): void;
 };
 
 export type MarkerController = {
-  firstResolvedTarget(annotation: AgentAnnotation): Element | null;
-  annotationTargetSummary(annotation: AgentAnnotation): {
-    resolved: number;
-    total: number;
-    reason: "unresolved" | "identity mismatch" | "identity unverifiable" | "iframe unsupported" | null;
-  };
+  resolutionSnapshot(annotation: AgentAnnotation): MarkerResolutionSnapshot;
+  resetResolutionSnapshots(): void;
   setMarkerHighlight(id: string | null): void;
   renderMarkerHighlights(): void;
   stopMarkerTracking(): void;
   scheduleMarkerRefresh(): void;
   syncMarkerTracking(targets: Element[]): void;
-  watchMarkerFrames(scope: ParentNode, observeSetup: boolean): void;
-  hasPersistedFrameTarget(): boolean;
   hasUnresolvedFrameTarget(): boolean;
   resetTrackedTargets(): void;
   hasTracking(): boolean;
 };
 
 export const createMarkerController = (b: MarkerBindings): MarkerController => {
-  // The marker's primary anchor is the FIRST RESOLVABLE target (contract):
-  // an earlier unresolved target never hides a marker whose later target
-  // still resolves in the app root.
-  const firstResolvedTarget = (annotation: AgentAnnotation): Element | null => {
-    for (const target of annotation.targets ?? []) {
-      const resolution = resolvePersistedTarget(target, { appRoot: b.appRoot(), host: b.host() });
-      if (resolution.status === "resolved" && b.isInAppRoot(resolution.element)) {
-        return resolution.element;
-      }
-    }
-    return null;
-  };
+  let snapshots = new Map<string, MarkerResolutionSnapshot>();
+  const previousSummaries = new Map<string, string>();
 
-  // Per-annotation resolution summary: resolved/total plus the first
-  // unresolved reason key (a stable message key, never raw resolution text).
-  const annotationTargetSummary = (
-    annotation: AgentAnnotation
-  ): {
-    resolved: number;
-    total: number;
-    reason: "unresolved" | "identity mismatch" | "identity unverifiable" | "iframe unsupported" | null;
-  } => {
+  const resolutionSnapshot = (annotation: AgentAnnotation): MarkerResolutionSnapshot => {
+    const cached = snapshots.get(annotation.annotationId);
+    if (cached) return cached;
     const targets = annotation.targets ?? [];
-    let resolved = 0;
-    let firstUnresolved: TargetResolution | null = null;
-    for (const target of targets) {
-      const resolution = resolvePersistedTarget(target, { appRoot: b.appRoot(), host: b.host() });
-      if (resolution.status === "resolved" && b.isInAppRoot(resolution.element)) {
-        resolved += 1;
-      } else if (!firstUnresolved) {
-        firstUnresolved = resolution;
-      }
-    }
-    let reason: "unresolved" | "identity mismatch" | "identity unverifiable" | "iframe unsupported" | null = null;
-    if (firstUnresolved && resolved < targets.length) {
-      reason = firstUnresolved.status === "identity_mismatch"
+    const resolutions = targets.map((target) =>
+      resolvePersistedTarget(target, { appRoot: b.appRoot(), host: b.host() })
+    );
+    const resolvedTargets = resolutions.flatMap((resolution) =>
+      resolution.status === "resolved" && b.isInAppRoot(resolution.element) ? [resolution.element] : []
+    );
+    const firstUnresolved = resolutions.find((resolution) =>
+      resolution.status !== "resolved" || !b.isInAppRoot(resolution.element)
+    );
+    const reason = firstUnresolved && resolvedTargets.length < targets.length
+      ? firstUnresolved.status === "identity_mismatch"
         ? "identity mismatch"
         : firstUnresolved.status === "identity_unverifiable"
           ? "identity unverifiable"
           : firstUnresolved.status === "unsupported"
             ? "iframe unsupported"
-            : "unresolved";
+            : "unresolved"
+      : null;
+    const snapshot: MarkerResolutionSnapshot = {
+      annotationId: annotation.annotationId,
+      resolutions,
+      resolvedTargets,
+      anchor: resolvedTargets[0] ?? null,
+      summary: { resolved: resolvedTargets.length, total: targets.length, reason },
+    };
+    snapshots.set(annotation.annotationId, snapshot);
+    if (!previousSummaries.has(annotation.annotationId)) {
+      previousSummaries.set(annotation.annotationId, JSON.stringify(snapshot.summary));
     }
-    return { resolved, total: targets.length, reason };
+    return snapshot;
+  };
+  const resetResolutionSnapshots = () => {
+    snapshots = new Map();
+    const current = new Set(b.task().annotations.map(({ annotationId }) => annotationId));
+    for (const annotationId of previousSummaries.keys()) {
+      if (!current.has(annotationId)) previousSummaries.delete(annotationId);
+    }
   };
 
   // Temporary multi-target highlight: DOM-only updates, so high-frequency
@@ -96,10 +110,8 @@ export const createMarkerController = (b: MarkerBindings): MarkerController => {
     if (!id) return;
     const annotation = b.task().annotations.find((entry) => entry.annotationId === id);
     if (!annotation) return;
-    for (const target of annotation.targets ?? []) {
-      const resolution = resolvePersistedTarget(target, { appRoot: b.appRoot(), host: b.host() });
-      if (resolution.status !== "resolved" || !b.isInAppRoot(resolution.element)) continue;
-      const rect = targetBounds(resolution.element);
+    for (const element of resolutionSnapshot(annotation).resolvedTargets) {
+      const rect = targetBounds(element);
       const node = document.createElement("div");
       node.className = "aa-marker-highlight";
       node.dataset.annotationId = annotation.annotationId;
@@ -117,22 +129,25 @@ export const createMarkerController = (b: MarkerBindings): MarkerController => {
 
   let markerObserver: MutationObserver | null = null;
   let markerResizeObserver: ResizeObserver | null = null;
-  let markerFrameCleanups: Array<() => void> = [];
+  let markerRealmCleanups: Array<() => void> = [];
+  let markerRealms = new WeakSet<Node>();
   let markerFrames = new WeakSet<Element>();
-  let markerDocuments = new WeakSet<Document>();
   let trackedMarkerTargets = new WeakSet<Element>();
+  let trackedMarkerTargetList: Element[] = [];
   let markerFrame: number | null = null;
   let markerRefreshes = 0;
   const resetTrackedTargets = (): void => {
     trackedMarkerTargets = new WeakSet<Element>();
+    trackedMarkerTargetList = [];
   };
   const stopMarkerTracking = () => {
     markerObserver?.disconnect();
     markerResizeObserver?.disconnect();
-    for (const cleanup of markerFrameCleanups.splice(0)) cleanup();
+    for (const cleanup of markerRealmCleanups.splice(0)) cleanup();
+    markerRealms = new WeakSet<Node>();
     markerFrames = new WeakSet<Element>();
-    markerDocuments = new WeakSet<Document>();
     trackedMarkerTargets = new WeakSet<Element>();
+    trackedMarkerTargetList = [];
     markerObserver = null;
     markerResizeObserver = null;
     if (markerFrame !== null) {
@@ -140,85 +155,153 @@ export const createMarkerController = (b: MarkerBindings): MarkerController => {
       markerFrame = null;
     }
   };
+
+  const updateSummaryText = (annotation: AgentAnnotation, snapshot: MarkerResolutionSnapshot) => {
+    const marker = Array.from(b.overlayMount().querySelectorAll<HTMLElement>(".aa-marker"))
+      .find((node) => node.dataset.annotationId === annotation.annotationId);
+    if (marker && snapshot.summary.total > 0) {
+      const { resolved, total, reason } = snapshot.summary;
+      marker.dataset.resolved = String(resolved);
+      marker.dataset.total = String(total);
+      const label = marker.getAttribute("aria-label") ?? "";
+      const targets = b.localized("targets", { resolved, total });
+      marker.dataset.tooltip = resolved < total
+        ? `${label} · ${targets} · ${b.localized(reason ?? "unresolved")}`
+        : `${label} · ${targets}`;
+      if (highlightedAnnotation === annotation.annotationId) {
+        const tooltip = b.overlayMount().querySelector<HTMLElement>(".aa-tooltip");
+        if (tooltip) tooltip.textContent = marker.dataset.tooltip;
+      }
+    }
+    const editor = Array.from(b.overlayMount().querySelectorAll<HTMLElement>(".aa-editor"))
+      .find((node) => node.dataset.annotationId === annotation.annotationId)
+      ?.querySelector<HTMLElement>(".aa-targets");
+    if (editor) {
+      const { resolved, total, reason } = snapshot.summary;
+      editor.textContent = resolved < total
+        ? `${b.localized("targets", { resolved, total })} · ${b.localized(reason ?? "unresolved")}`
+        : b.localized("targets", { resolved, total });
+    }
+  };
+
   const scheduleMarkerRefresh = () => {
     if (markerFrame !== null) return;
     markerFrame = b.scheduleFrame(() => {
       markerFrame = null;
+      resetResolutionSnapshots();
       const resolved: Element[] = [];
+      let summaryChanged = false;
       for (const annotation of b.task().annotations) {
-        if (annotation.pageContext.routeKey !== b.routeKey()) continue;
+        if (annotation.status !== "open" || annotation.pageContext.routeKey !== b.routeKey()) continue;
         const marker = Array.from(b.overlayMount().querySelectorAll<HTMLElement>(".aa-marker"))
           .find((node) => node.dataset.annotationId === annotation.annotationId);
-        if (!marker) continue;
-        const targetInRoot = firstResolvedTarget(annotation);
-        if (targetInRoot) resolved.push(targetInRoot);
-        const rect = targetInRoot ? targetBounds(targetInRoot) : null;
+        if (!marker && annotation.annotationId !== b.editingId()) continue;
+        const previousSummary = previousSummaries.get(annotation.annotationId);
+        const snapshot = resolutionSnapshot(annotation);
+        resolved.push(...snapshot.resolvedTargets);
+        const rect = snapshot.anchor ? targetBounds(snapshot.anchor) : null;
         const anchor = rect
           ? { x: rect.x - 8, y: rect.y - 8 }
           : annotation.region
             ? { x: annotation.region.x - scrollX + annotation.region.width - 14, y: annotation.region.y - scrollY + 4 }
             : null;
-        marker.hidden = !anchor;
-        if (anchor) Object.assign(marker.style, { left: `${anchor.x}px`, top: `${anchor.y}px` });
+        if (marker) {
+          marker.hidden = !anchor;
+          if (anchor) Object.assign(marker.style, { left: `${anchor.x}px`, top: `${anchor.y}px` });
+        }
+        updateSummaryText(annotation, snapshot);
+        const summaryKey = JSON.stringify(snapshot.summary);
+        if (previousSummary !== undefined && previousSummary !== summaryKey) {
+          summaryChanged = true;
+          previousSummaries.set(annotation.annotationId, summaryKey);
+        }
       }
+      renderMarkerHighlights();
       b.positionComposer();
       b.positionEditor();
       markerRefreshes += 1;
       b.hostElement().dataset.markerRefreshes = String(markerRefreshes);
-      if (resolved.some((target) => !trackedMarkerTargets.has(target))) {
+      if (resolved.length !== trackedMarkerTargetList.length ||
+          resolved.some((target) => !trackedMarkerTargets.has(target))) {
         syncMarkerTracking(resolved);
+      } else if (needsRealmTracking()) {
+        watchPersistedRealms(hasUnresolvedRealmTarget());
       }
+      if (summaryChanged) b.resolutionChanged();
     });
   };
-  const watchMarkerFrames = (scope: ParentNode, observeSetup: boolean): void => {
-    for (const frame of scope.querySelectorAll("iframe")) {
-      if (markerFrames.has(frame)) continue;
-      markerFrames.add(frame);
-      const refresh = () => {
-        scheduleMarkerRefresh();
-        try {
-          const frameDocument = frame.contentDocument;
-          if (frameDocument) {
-            if (observeSetup && !markerDocuments.has(frameDocument)) {
-              markerDocuments.add(frameDocument);
-              const observer = new MutationObserver(refresh);
-              observer.observe(frameDocument, { childList: true, subtree: true });
-              markerFrameCleanups.push(() => observer.disconnect());
-            }
-            watchMarkerFrames(frameDocument, observeSetup);
-            b.scheduleFrame(scheduleMarkerRefresh);
+
+  const activeAnnotations = () => b.task().annotations.filter((annotation) =>
+    annotation.status === "open" && annotation.pageContext.routeKey === b.routeKey()
+  );
+  const hasUnresolvedFrameTarget = (): boolean => activeAnnotations().some((annotation) => {
+    const snapshot = resolutionSnapshot(annotation);
+    return annotation.targets?.some((target, index) =>
+      target.selector.includes(">>iframe>>") &&
+      (snapshot.resolutions[index]?.status !== "resolved" ||
+        !b.isInAppRoot(snapshot.resolutions[index].element))
+    );
+  });
+  const hasUnresolvedRealmTarget = (): boolean => activeAnnotations().some((annotation) => {
+    const snapshot = resolutionSnapshot(annotation);
+    return annotation.targets?.some((target, index) =>
+      (target.selector.includes(">>iframe>>") || target.selector.includes(">>>")) &&
+      (snapshot.resolutions[index]?.status !== "resolved" ||
+        !b.isInAppRoot(snapshot.resolutions[index].element))
+    );
+  });
+  const needsRealmTracking = () => (b.markersVisible() || !!b.editingId()) &&
+    activeAnnotations().some((annotation) => annotation.targets?.some(({ selector }) =>
+      selector.includes(">>iframe>>") || selector.includes(">>>")
+    ));
+
+  const watchPersistedRealms = (observeSetup: boolean) => {
+    const root = b.appRoot();
+    for (const annotation of activeAnnotations()) {
+      for (const target of annotation.targets ?? []) {
+        const tokens = target.selector.split(/(>>>|>>iframe>>)/).map((value) => value.trim()).filter(Boolean);
+        for (let index = 1; index < tokens.length; index += 2) {
+          const boundary = tokens[index];
+          const prefix = tokens.slice(0, index).join(" ");
+          const result = resolveTargetResult(prefix, root);
+          if (result.status !== "resolved") break;
+          if (boundary === ">>iframe>>" && !markerFrames.has(result.element)) {
+            markerFrames.add(result.element);
+            const refresh = () => scheduleMarkerRefresh();
+            result.element.addEventListener("load", refresh);
+            markerRealmCleanups.push(() => result.element.removeEventListener("load", refresh));
           }
-        } catch {
-          // Cross-origin frames are explicitly unsupported and remain unresolved.
+          let realm: Document | ShadowRoot | null = null;
+          try {
+            realm = boundary === ">>>"
+              ? result.element.shadowRoot
+              : (result.element as HTMLIFrameElement).contentDocument;
+          } catch {
+            // Cross-origin frames stay unsupported and are never observed.
+          }
+          if (!realm || markerRealms.has(realm)) continue;
+          markerRealms.add(realm);
+          if (observeSetup) {
+            // Track mutations inside the exact persisted realm; no global DOM scan.
+            const observer = new MutationObserver(scheduleMarkerRefresh);
+            observer.observe(realm, { childList: true, subtree: true });
+            markerRealmCleanups.push(() => observer.disconnect());
+          }
         }
-      };
-      frame.addEventListener("load", refresh);
-      markerFrameCleanups.push(() => frame.removeEventListener("load", refresh));
-      refresh();
+      }
     }
   };
-  const hasPersistedFrameTarget = (): boolean => b.task().annotations.some((annotation) =>
-    annotation.status === "open" &&
-    annotation.pageContext.routeKey === b.routeKey() &&
-    annotation.targets?.some(({ selector }) => selector.includes(">>iframe>>"))
-  );
-  const hasUnresolvedFrameTarget = (): boolean => b.task().annotations.some((annotation) => {
-    const selector = annotation.status === "open" && annotation.pageContext.routeKey === b.routeKey()
-      ? annotation.targets?.[0]?.selector
-      : undefined;
-    if (!selector?.includes(">>iframe>>")) return false;
-    const target = b.resolveTargetInAppRoot(selector);
-    return !target || !b.isInAppRoot(target);
-  });
+
   function syncMarkerTracking(targets: Element[]): void {
     stopMarkerTracking();
-    const watchFrames = b.markersVisible() && hasPersistedFrameTarget();
+    const watchRealms = needsRealmTracking();
     trackedMarkerTargets = new WeakSet(targets);
+    trackedMarkerTargetList = [...targets];
     const hasElementComposer = b.hasElementComposer();
-    if ((!b.markersVisible() || targets.length === 0) && !b.editingId() && !hasElementComposer && !watchFrames) return;
-    if (watchFrames) watchMarkerFrames(b.appRoot() as ParentNode, hasUnresolvedFrameTarget());
+    const watchMarkers = b.markersVisible() && activeAnnotations().length > 0;
+    if (!watchMarkers && !b.editingId() && !hasElementComposer) return;
+    if (watchRealms) watchPersistedRealms(hasUnresolvedRealmTarget());
     markerObserver = new MutationObserver(() => {
-      if (watchFrames) watchMarkerFrames(b.appRoot() as ParentNode, hasUnresolvedFrameTarget());
       scheduleMarkerRefresh();
     });
     const mutationOptions = { childList: true, subtree: true };
@@ -238,8 +321,8 @@ export const createMarkerController = (b: MarkerBindings): MarkerController => {
     }
   }
   return {
-    firstResolvedTarget,
-    annotationTargetSummary,
+    resolutionSnapshot,
+    resetResolutionSnapshots,
     setMarkerHighlight,
     renderMarkerHighlights,
     stopMarkerTracking,
@@ -247,8 +330,6 @@ export const createMarkerController = (b: MarkerBindings): MarkerController => {
     scheduleMarkerRefresh,
     syncMarkerTracking,
     hasTracking: () => markerObserver !== null,
-    watchMarkerFrames,
-    hasPersistedFrameTarget,
     hasUnresolvedFrameTarget,
   };
 };

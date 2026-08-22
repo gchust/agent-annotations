@@ -240,9 +240,14 @@ describe("client runtime", () => {
     history.pushState({}, "", "/settings");
     const first = document.createElement("button");
     first.id = "multi-a";
+    first.dataset.x = "10";
     const second = document.createElement("button");
     second.id = "multi-b";
+    second.dataset.x = "20";
     document.body.append(first, second);
+    primitives.getElementBounds.mockImplementation(((element: Element) => ({
+      x: Number((element as HTMLElement).dataset.x ?? 0), y: 5, width: 40, height: 20,
+    })) as typeof primitives.getElementBounds);
     const mounted = await mountAgentAnnotations({
       transport: new MemoryTaskTransport(taskFixture({
         annotations: [annotationFixture({
@@ -265,6 +270,17 @@ describe("client runtime", () => {
       expect(highlights().length).toBe(2);
       expect([...highlights()].every((node) =>
         node.dataset.annotationId === "ann-1")).toBe(true);
+      expect([...highlights()].map((node) => node.style.left)).toEqual(["10px", "20px"]);
+      first.dataset.x = "30";
+      second.dataset.x = "40";
+      window.dispatchEvent(new Event("scroll"));
+      await vi.runAllTimersAsync();
+      expect([...highlights()].map((node) => node.style.left)).toEqual(["30px", "40px"]);
+      first.dataset.x = "50";
+      second.dataset.x = "60";
+      window.dispatchEvent(new Event("resize"));
+      await vi.runAllTimersAsync();
+      expect([...highlights()].map((node) => node.style.left)).toEqual(["50px", "60px"]);
       // The tooltip carries the resolved/total text.
       await vi.advanceTimersByTimeAsync(300);
       expect(shadow.querySelector('[role="tooltip"]')?.textContent).toContain("2/2 targets");
@@ -582,18 +598,81 @@ describe("client runtime", () => {
     }
   });
 
-  it("recovers an unresolved nested iframe marker after the outer document is populated", async () => {
+  it("recovers a secondary multi target after nested iframe population and updates one shared snapshot", async () => {
     vi.useFakeTimers();
     history.pushState({}, "", "/settings");
-    document.body.innerHTML = '<div id="root"></div>';
+    document.body.innerHTML = '<div id="root"><button id="main-target">Main</button></div>';
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(taskFixture({
+        annotations: [annotationFixture({
+          kind: "multi",
+          targets: [
+            targetFixture({
+              selector: "#main-target",
+              inspection: { ...targetFixture().inspection, attributes: { id: "main-target" } },
+            }),
+            targetFixture({
+              selector: "#outer >>iframe>> #inner >>iframe>> #target",
+              inspection: { ...targetFixture().inspection, attributes: { id: "target" } },
+            }),
+          ],
+        })],
+      })),
+    });
+    try {
+      const marker = document.getElementById("agent-annotations-root")!
+        .shadowRoot!.querySelector<HTMLButtonElement>(".aa-marker")!;
+      expect(marker.hidden).toBe(false);
+      expect(marker.dataset.resolved).toBe("1");
+      expect(marker.dataset.total).toBe("2");
+      marker.dispatchEvent(new MouseEvent("mouseenter"));
+      await vi.advanceTimersByTimeAsync(300);
+      const tooltip = () => document.getElementById("agent-annotations-root")!.shadowRoot!
+        .querySelector<HTMLElement>("[role=tooltip]")!;
+      expect(tooltip().textContent).toContain("1/2 targets");
+      await vi.runAllTimersAsync();
+
+      const outer = document.createElement("iframe");
+      outer.id = "outer";
+      document.getElementById("root")!.append(outer);
+      await vi.runAllTimersAsync();
+      expect(marker.dataset.resolved).toBe("1");
+
+      outer.contentDocument!.body.innerHTML = '<iframe id="inner"></iframe>';
+      await vi.runAllTimersAsync();
+      expect(marker.dataset.resolved).toBe("1");
+
+      const inner = outer.contentDocument!.querySelector<HTMLIFrameElement>("#inner")!;
+      inner.contentDocument!.body.innerHTML = '<button id="target">Target</button>';
+      inner.dispatchEvent(new Event("load"));
+
+      await vi.runAllTimersAsync();
+      expect(marker.hidden).toBe(false);
+      expect(marker.dataset.resolved).toBe("2");
+      expect(tooltip().textContent).toContain("2/2 targets");
+      expect(document.getElementById("agent-annotations-root")!.shadowRoot!
+        .querySelectorAll(".aa-marker-highlight")).toHaveLength(2);
+    } finally {
+      mounted.unmount();
+      document.body.innerHTML = "";
+    }
+  });
+
+  it("recovers a target added dynamically to an existing open shadow root", async () => {
+    vi.useFakeTimers();
+    history.pushState({}, "", "/settings");
+    const host = document.createElement("div");
+    host.id = "dynamic-shadow-host";
+    const shadowRoot = host.attachShadow({ mode: "open" });
+    document.body.append(host);
     const mounted = await mountAgentAnnotations({
       transport: new MemoryTaskTransport(taskFixture({
         annotations: [annotationFixture({
           targets: [targetFixture({
-            selector: "#outer >>iframe>> #inner >>iframe>> #target",
+            selector: "#dynamic-shadow-host >>> #dynamic-shadow-target",
             inspection: {
               ...targetFixture().inspection,
-              attributes: { id: "target" },
+              attributes: { id: "dynamic-shadow-target" },
             },
           })],
         })],
@@ -603,27 +682,16 @@ describe("client runtime", () => {
       const marker = document.getElementById("agent-annotations-root")!
         .shadowRoot!.querySelector<HTMLButtonElement>(".aa-marker")!;
       expect(marker.hidden).toBe(true);
-      await vi.runAllTimersAsync();
-
-      const outer = document.createElement("iframe");
-      outer.id = "outer";
-      document.getElementById("root")!.append(outer);
-      await vi.runAllTimersAsync();
-      expect(marker.hidden).toBe(true);
-
-      outer.contentDocument!.body.innerHTML = '<iframe id="inner"></iframe>';
-      await vi.runAllTimersAsync();
-      expect(marker.hidden).toBe(true);
-
-      const inner = outer.contentDocument!.querySelector<HTMLIFrameElement>("#inner")!;
-      inner.contentDocument!.body.innerHTML = '<button id="target">Target</button>';
-      inner.dispatchEvent(new Event("load"));
-
+      const target = document.createElement("button");
+      target.id = "dynamic-shadow-target";
+      shadowRoot.append(target);
+      await Promise.resolve();
       await vi.runAllTimersAsync();
       expect(marker.hidden).toBe(false);
+      expect(marker.dataset.resolved).toBe("1");
     } finally {
       mounted.unmount();
-      document.body.innerHTML = "";
+      host.remove();
     }
   });
 

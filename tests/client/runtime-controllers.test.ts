@@ -11,7 +11,7 @@ import * as screenshot from "../../src/client/screenshot.js";
 import { RevisionConflictError } from "../../src/core/index.js";
 import type { AgentAnnotationsRect, StudioPublicSnapshot } from "../../src/types/index.js";
 type StudioPublicShortcut = StudioPublicSnapshot["shortcuts"][number];
-import { taskFixture } from "../core/test-data.js";
+import { annotationFixture, targetFixture, taskFixture } from "../core/test-data.js";
 import { MemoryTaskTransport } from "../../src/testing/index.js";
 
 afterEach(() => {
@@ -272,11 +272,55 @@ describe("runtime controllers (focused factory contracts)", () => {
       isInAppRoot: () => true,
       positionComposer: vi.fn(),
       positionEditor: vi.fn(),
-      resolveTargetInAppRoot: () => null,
+      localized: (value) => value,
+      resolutionChanged: vi.fn(),
     });
     controller.scheduleMarkerRefresh();
     controller.stopMarkerTracking();
     expect(cancelled.length).toBe(1);
+  });
+
+  it("caches one identity-safe resolution per target and checks every iframe target", () => {
+    document.body.innerHTML = '<button id="main-target">Main</button><iframe id="secondary-frame"></iframe>';
+    const identity = vi.fn((element: Element) => ({ id: element.id }));
+    const task = taskFixture({ annotations: [annotationFixture({
+      kind: "multi",
+      targets: [
+        targetFixture({
+          selector: "#main-target",
+          inspection: { ...targetFixture().inspection, attributes: { "host:id": "main-target" } },
+        }),
+        targetFixture({
+          selector: "#secondary-frame >>iframe>> #late-target",
+          inspection: { ...targetFixture().inspection, attributes: { "host:id": "late-target" } },
+        }),
+      ],
+    })] });
+    const controller = createMarkerController({
+      task: () => task,
+      routeKey: () => "/settings",
+      markersVisible: () => true,
+      appRoot: () => document,
+      host: () => ({ identity }),
+      overlayMount: () => document.createElement("div"),
+      hostElement: () => document.createElement("div"),
+      editingId: () => null,
+      hasElementComposer: () => false,
+      scheduleFrame: vi.fn(() => 1),
+      cancelFrame: vi.fn(),
+      isInAppRoot: () => true,
+      positionComposer: vi.fn(),
+      positionEditor: vi.fn(),
+      localized: (value) => value,
+      resolutionChanged: vi.fn(),
+    });
+    const annotation = task.annotations[0]!;
+    expect(controller.resolutionSnapshot(annotation).summary).toMatchObject({ resolved: 1, total: 2 });
+    expect(controller.resolutionSnapshot(annotation).anchor).toBe(document.getElementById("main-target"));
+    expect(identity).toHaveBeenCalledTimes(1);
+    expect(controller.hasUnresolvedFrameTarget()).toBe(true);
+    expect(identity).toHaveBeenCalledTimes(1);
+    document.body.innerHTML = "";
   });
 
   it("capture controller binds the app-root document and nested iframes, and clears them", () => {

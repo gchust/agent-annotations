@@ -10,6 +10,7 @@ import {
 } from "../icons.js";
 import { elementAnnotation, regionAnnotation, type RegisteredTargetEnricher } from "./annotated.js";
 import { targetBounds } from "../inspection-engine.js";
+import type { MarkerResolutionSnapshot } from "./markers.js";
 import type {
   AgentAnnotation,
   AgentAnnotationsDiagnosticPhase,
@@ -70,12 +71,7 @@ export type OverlayBindings = {
   scheduleScreenshotEvidence(input: ScreenshotEvidenceInput & { overlays: readonly ScreenshotRect[] }): void;
   setStatus(message: string): void;
   markers: {
-    firstResolvedTarget(annotation: AgentAnnotation): Element | null;
-    annotationTargetSummary(annotation: AgentAnnotation): {
-      resolved: number;
-      total: number;
-      reason: "unresolved" | "identity mismatch" | "identity unverifiable" | "iframe unsupported" | null;
-    };
+    resolutionSnapshot(annotation: AgentAnnotation): MarkerResolutionSnapshot;
     setMarkerHighlight(id: string | null): void;
   };
 };
@@ -190,8 +186,9 @@ export const createOverlayController = (b: OverlayBindings): OverlayController =
           height: annotation.region.height,
         }, true);
       }
-      const targetInRoot = b.markers.firstResolvedTarget(annotation);
-      if (targetInRoot) resolved.push(targetInRoot);
+      const snapshot = b.markers.resolutionSnapshot(annotation);
+      const targetInRoot = snapshot.anchor;
+      resolved.push(...snapshot.resolvedTargets);
       const rect = targetInRoot ? targetBounds(targetInRoot) : null;
       const anchor = rect
         ? { x: rect.x - 8, y: rect.y - 8 }
@@ -203,7 +200,7 @@ export const createOverlayController = (b: OverlayBindings): OverlayController =
       marker.className = "aa-marker";
       marker.dataset.status = annotation.status;
       marker.dataset.annotationId = annotation.annotationId;
-      const summary = b.markers.annotationTargetSummary(annotation);
+      const summary = snapshot.summary;
       const ariaLabel = `${b.localized("Annotation")} ${index + 1}: ${b.localized("edit")}`;
       marker.setAttribute("aria-label", ariaLabel);
       if (summary.total > 0) {
@@ -402,7 +399,7 @@ export const createOverlayController = (b: OverlayBindings): OverlayController =
     textarea.className = "aa-textarea";
     textarea.setAttribute("aria-label", b.localized("Annotation comment"));
     textarea.value = previousDraft ?? annotation.comment;
-    const summary = b.markers.annotationTargetSummary(annotation);
+    const summary = b.markers.resolutionSnapshot(annotation).summary;
     const actions = document.createElement("div");
     actions.className = "aa-actions";
     const save = submitButton(b.localized("Save comment"), SaveIcon);

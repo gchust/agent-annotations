@@ -29,7 +29,6 @@ import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import {
   disposeInspectionEngine,
-  resolveTargetResult,
   sampleRegionTargets,
   setInspectionFrozen,
   targetFromEvent,
@@ -704,8 +703,8 @@ export async function mountAgentAnnotations(
 
   let editorAnchorRect: AgentAnnotationsRect | null = null;
   // Lazy wrappers: positionComposer/positionEditor/isInAppRoot and
-  // resolveTargetInAppRoot are declared later in the mount closure, so the
-  // bindings must never evaluate them at creation time (TDZ).
+  // Lazy wrappers: positionComposer/positionEditor/isInAppRoot are declared
+  // later in the mount closure, so bindings must not evaluate them at creation.
   const markers = createMarkerController({
     task: () => task,
     routeKey: () => routeKey,
@@ -724,11 +723,12 @@ export async function mountAgentAnnotations(
     isInAppRoot: (element) => isInAppRoot(element),
     positionComposer: () => positionComposer(),
     positionEditor: () => positionEditor(),
-    resolveTargetInAppRoot: (selector) => resolveTargetInAppRoot(selector),
+    localized: (value, params) => localized(value, params),
+    resolutionChanged: () => emit(),
   });
   const {
-    firstResolvedTarget,
-    annotationTargetSummary,
+    resolutionSnapshot,
+    resetResolutionSnapshots,
     setMarkerHighlight,
     renderMarkerHighlights,
     stopMarkerTracking,
@@ -768,8 +768,7 @@ export async function mountAgentAnnotations(
     scheduleScreenshotEvidence: (input) => scheduleScreenshotEvidence(input),
     setStatus: (message) => setStatus(message),
     markers: {
-      firstResolvedTarget,
-      annotationTargetSummary,
+      resolutionSnapshot,
       setMarkerHighlight,
     },
   });
@@ -874,7 +873,7 @@ export async function mountAgentAnnotations(
         targetSummary: (annotationId) => {
           const annotation = task.annotations.find((entry) => entry.annotationId === annotationId);
           return annotation
-            ? annotationTargetSummary(annotation)
+            ? resolutionSnapshot(annotation).summary
             : { resolved: 0, total: 0, reason: null };
         },
       },
@@ -1007,6 +1006,7 @@ export async function mountAgentAnnotations(
   const refreshOverlays = () => {
     if (destroyed) return;
     hideTooltip();
+    resetResolutionSnapshots();
     if (overlayFrame !== null) {
       window.cancelAnimationFrame(overlayFrame);
       frames.delete(overlayFrame);
@@ -1076,18 +1076,16 @@ export async function mountAgentAnnotations(
       } else if (appRoot.contains(current)) {
         return true;
       }
+      const rootNode = current.getRootNode();
+      if (rootNode.nodeType === Node.DOCUMENT_FRAGMENT_NODE && "host" in rootNode) {
+        current = (rootNode as ShadowRoot).host;
+        continue;
+      }
       const frameElement: Element | null = current.ownerDocument.defaultView?.frameElement ?? null;
       if (!frameElement) return false;
       current = frameElement;
     }
     return false;
-  };
-  const resolveTargetInAppRoot = (selector: string): Element | null => {
-    const result = resolveTargetResult(
-      selector,
-      appRoot.nodeType === 9 ? (appRoot as Document) : (appRoot as Element)
-    );
-    return result.status === "resolved" ? result.element : null;
   };
   const captureTargetFrom = (event: MouseEvent | PointerEvent): Element | null => {
     const target = targetFromEvent(event) ?? targetAtPoint(event.clientX, event.clientY);
@@ -1287,7 +1285,6 @@ export async function mountAgentAnnotations(
     clampDockPosition();
     positionPanel();
     positionMultiComplete();
-    renderMarkerHighlights();
     if (markers.hasTracking() || editingId || composer) scheduleMarkerRefresh();
   };
   window.addEventListener("resize", onViewport);

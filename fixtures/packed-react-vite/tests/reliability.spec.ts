@@ -108,6 +108,87 @@ test("nested iframe and iframe open-shadow markers save and recover after reload
   }
 });
 
+test("multi target summary, highlights, and iframe tracking share dynamic refreshes", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+  await expect(page.locator("#same-origin-frame")).toHaveAttribute("data-ready", "true");
+  const frame = page.frameLocator("#same-origin-frame");
+  await page.locator("#same-origin-frame").evaluate((node: HTMLIFrameElement) => {
+    const button = node.contentDocument!.createElement("button");
+    button.id = "late-multi-target";
+    button.textContent = "Late multi target";
+    node.contentDocument!.body.prepend(button);
+  });
+
+  const initial = JSON.parse(readFileSync(taskPath, "utf8")).annotations.length;
+  await page.keyboard.press("Control+Alt+M");
+  await expect(shadow(page, '[aria-label^="Multi"]')).toHaveAttribute("aria-pressed", "true");
+  await page.locator("#target").click();
+  await frame.locator("#late-multi-target").click();
+  await shadow(page, '[aria-label^="Complete selection"]').click();
+  await shadow(page, '[aria-label="Annotation comment"]').fill("Dynamic iframe multi target");
+  await shadow(page, 'button[aria-label="Save annotation"]').click();
+  await expect.poll(() => JSON.parse(readFileSync(taskPath, "utf8")).annotations.length).toBe(initial + 1);
+  const annotation = JSON.parse(readFileSync(taskPath, "utf8")).annotations.at(-1);
+  expect(annotation.kind).toBe("multi");
+  expect(annotation.targets).toHaveLength(2);
+
+  const marker = shadow(page, `.aa-marker[data-annotation-id="${annotation.annotationId}"]`);
+  await expect(marker).toHaveAttribute("data-resolved", "2");
+  await frame.locator("#late-multi-target").evaluate((node) => node.remove());
+  await expect(marker).toHaveAttribute("data-resolved", "1");
+  await expect(marker).toHaveAttribute("data-total", "2");
+  await shadow(page, '[aria-label^="Annotations"]').click();
+  const listItem = shadow(page, `.aa-list-item[data-annotation-id="${annotation.annotationId}"]`);
+  await expect(listItem).toContainText("1/2 targets");
+
+  await page.locator("#same-origin-frame").evaluate((node: HTMLIFrameElement) => {
+    const button = node.contentDocument!.createElement("button");
+    button.id = "late-multi-target";
+    button.textContent = "Late multi target";
+    node.contentDocument!.body.prepend(button);
+  });
+  await expect(marker).toHaveAttribute("data-resolved", "2");
+  await expect(listItem).toContainText("2/2 targets");
+  await page.keyboard.press("Escape");
+
+  await marker.focus();
+  const highlights = shadow(page, ".aa-marker-highlight");
+  await expect(highlights).toHaveCount(2);
+  const assertAligned = async () => {
+    await expect.poll(async () => {
+      const targetBoxes = await Promise.all([
+        page.locator("#target").boundingBox(),
+        frame.locator("#late-multi-target").boundingBox(),
+      ]);
+      const highlightBoxes = await Promise.all([
+        highlights.nth(0).boundingBox(),
+        highlights.nth(1).boundingBox(),
+      ]);
+      return highlightBoxes.map((box, index) => ({
+        x: Math.round(box!.x - targetBoxes[index]!.x),
+        y: Math.round(box!.y - targetBoxes[index]!.y),
+        width: Math.round(box!.width - targetBoxes[index]!.width),
+        height: Math.round(box!.height - targetBoxes[index]!.height),
+      }));
+    }).toEqual([
+      { x: 0, y: 0, width: 0, height: 0 },
+      { x: 0, y: 0, width: 0, height: 0 },
+    ]);
+  };
+  await assertAligned();
+  await page.evaluate(() => scrollBy(0, 30));
+  await assertAligned();
+  await page.setViewportSize({ width: 1200, height: 800 });
+  await assertAligned();
+
+  await shadow(page, '[aria-label^="Markers"]').click();
+  await expect(shadow(page, ".aa-marker")).toHaveCount(0);
+  const stopped = Number(await page.locator("#agent-annotations-root").getAttribute("data-marker-refreshes"));
+  await page.waitForTimeout(500);
+  expect(Number(await page.locator("#agent-annotations-root").getAttribute("data-marker-refreshes"))).toBe(stopped);
+});
+
 test("cross-origin stays explicitly unsupported and public freeze keeps toolbar and page usable", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator("#cross-origin-frame")).toBeAttached();
