@@ -1,7 +1,15 @@
 # Changelog
 
-## Unreleased
+## 0.1.0-alpha.0 - 2026-08-22
 
+- Unified release verification around one build and one checksummed tarball;
+  package audits, Node consumers, the installed browser consumer, and five
+  repeated browser runs now reuse that exact candidate and preserve failure
+  logs and artifacts.
+- Split the browser runtime integration suite by marker/capture,
+  diagnostics/extensions, evidence/status, and host/UI controller ownership;
+  Windows CI now covers file locks, stores, evidence, diagnostics, Vite, source
+  paths, and CLI paths on Node 20 and 24.
 - Page context now omits query data by default across tasks, browser state,
   handoff, diagnostics, and evidence metadata. Hosts may provide validated,
   query-free business route keys through `pageContext()`.
@@ -45,9 +53,6 @@
   `--dir` (plus `AGENT_ANNOTATIONS_ROOT`), discovery of the nearest ancestor
   session, and the nearest ancestor workspace (`package.json`/`.git`);
   sessions now record canonical `workspaceRoot` and `runtimeRoot`.
-
-## 0.1.0-alpha.0 - 2026-08-13
-
 - Ships as `@gchust/agent-annotations`; the `agent-annotations` CLI and task schema
   identifiers remain unchanged.
 - Added the host-neutral `agent-annotations.task.v1` schema, mutations, formatting,

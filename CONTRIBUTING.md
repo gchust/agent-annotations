@@ -15,6 +15,8 @@ pnpm run check:architecture   # forbidden patterns + runtime module graph audit
 pnpm run check:docs           # README/API example guards
 pnpm run check:package        # publint + attw
 pnpm run check:tarball        # tarball content audit
+pnpm release:verify           # build/pack once and verify one exact candidate
+pnpm test:e2e:repeat          # reuse its installed browser consumer five times
 ```
 
 ## Packed consumer
@@ -25,8 +27,9 @@ The authoritative browser gate is the packed consumer E2E:
 pnpm test:e2e   # builds, packs, installs into a fresh consumer, runs Playwright
 ```
 
-Run it after any client/runtime, Vite plugin, or packaging change. A Node 20
-and Node 24 exact-tarball smoke is available via `node scripts/node20-smoke.mjs`.
+Run it after any client/runtime or Vite plugin change. For release work,
+`release:verify` owns the single package candidate and includes the Node 20/24
+core/CLI smoke; the repeat gate reuses its already installed browser consumer.
 
 ## Commit convention
 

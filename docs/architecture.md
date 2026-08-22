@@ -1,5 +1,9 @@
 # Architecture
 
+Release verification builds one candidate, records its SHA-256 and manifest,
+and passes that same tarball to package audits and installed consumers. Repeat
+browser runs reset runtime output in the existing consumer without reinstalling.
+
 Agent Annotations is a browser annotation runtime for code review workflows: a
 React/Vite-powered studio captures element, multi, and region annotations with
 full observed context, persists them to a task file, and hands the task off to

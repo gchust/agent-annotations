@@ -21,6 +21,9 @@
     "vite"
   ],
   "private": false,
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "engines": {
     "node": ">=20"
@@ -71,11 +74,12 @@
     "typecheck": "tsc --noEmit",
     "pretest": "pnpm build",
     "test": "vitest run",
+    "test:release": "vitest run --exclude tests/release/core-exports.test.ts --exclude tests/release/pack-regression.test.ts --exclude tests/release/packed-e2e-failure.test.ts",
     "test:e2e": "node scripts/packed-e2e.mjs",
     "test:e2e:repeat": "node scripts/repeat-e2e.mjs",
     "prepack": "pnpm build && node scripts/verify-dist.mjs",
     "prepublishOnly": "pnpm release:verify",
-    "release:verify": "pnpm typecheck && pnpm test && pnpm check:architecture && pnpm check:docs && pnpm check:package && pnpm check:tarball && pnpm test:e2e",
+    "release:verify": "node scripts/release-verify.mjs",
     "check:architecture": "vitest run tests/audit/architecture-audit.test.ts",
     "check:package": "publint && attw --pack . --profile esm-only",
     "check:docs": "node scripts/docs-smoke.mjs",

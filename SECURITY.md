@@ -15,6 +15,9 @@ open a public issue for security bugs. Include:
 
 Only the current release line is supported. Releases are tagged by the
 maintainers; `alpha`/pre-release versions receive best-effort fixes.
+Release verification retains the exact candidate SHA-256, manifest, consumers,
+and logs so a failed package or browser boundary can be inspected without a
+replacement build obscuring the artifact under test.
 
 ## Security boundaries
 

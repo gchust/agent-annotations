@@ -4,6 +4,7 @@ const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.
 const name = manifest.name;
 const bin = Object.keys(manifest.bin)[0];
 const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
+const changelog = readFileSync(new URL("../CHANGELOG.md", import.meta.url), "utf8");
 for (const text of [
   `pnpm add -D ${name}`,
   `import agentAnnotations from "${name}/vite"`,
@@ -26,6 +27,15 @@ for (const text of [
 }
 if (/\bmcp\b/i.test(readme)) {
   throw new Error("README must not mention MCP");
+}
+if (manifest.publishConfig?.access !== "public") {
+  throw new Error("package publishConfig.access must be public");
+}
+if (!changelog.includes(`## ${manifest.version} - 2026-08-22`) || changelog.includes("## Unreleased")) {
+  throw new Error("package version and consolidated changelog release must agree");
+}
+if (existsSync(new URL("../MIGRATION-BASELINE.md", import.meta.url))) {
+  throw new Error("historical migration baseline must not remain at repository root");
 }
 // Goal 15 governance + public-surface guards: the old `verify` command must
 // not reappear as a current usage, governance files must exist, and the
@@ -55,8 +65,11 @@ for (const section of ["dependencies", "peerDependencies", "optionalDependencies
   }
 }
 const arch = readFileSync(new URL("../docs/architecture.md", import.meta.url), "utf8");
-if (/\bmcp\b|\x40nocobase/i.test(arch)) {
-  throw new Error("architecture doc must not mention MCP/NocoBase as a dependency");
+const apiText = readFileSync(new URL("../API.md", import.meta.url), "utf8");
+for (const [file, content] of [["README.md", readme], ["API.md", apiText], ["docs/architecture.md", arch]]) {
+  if (/\bmcp\b|nocobase/i.test(content)) {
+    throw new Error(`${file} must not document MCP/NocoBase coupling`);
+  }
 }
 for (const file of [
   "CONTRIBUTING.md", "SECURITY.md", "CODE_OF_CONDUCT.md",
@@ -73,7 +86,9 @@ for (const file of [
 // map one-to-one with the package.json exports entries (no missing or
 // nonexistent public export).
 const exportsMap = manifest.exports ?? {};
-const apiText = readFileSync(new URL("../API.md", import.meta.url), "utf8");
+for (const [file, content] of [["README.md", readme], ["API.md", apiText], ["CHANGELOG.md", changelog], ["docs/architecture.md", arch]]) {
+  if (/Browser State v1/i.test(content)) throw new Error(`${file} must not document Browser State v1`);
+}
 const headings = [...apiText.matchAll(/^## `(@gchust\/agent-annotations(?:\/[a-z-]+)*)`$/gm)]
   .map((match) => match[1]);
 const expectedHeadings = Object.keys(exportsMap).map((key) =>

@@ -423,11 +423,13 @@ expose arbitrary file reads.
 
 ## Release verification
 
-`pnpm release:verify` runs the full release gate: typecheck, unit tests,
-architecture audit, docs smoke, package checks, tarball audit, and a packed
-consumer E2E. `pnpm pack` always rebuilds and verifies the required `dist`
-entries first through the `prepack` lifecycle, so a clean checkout without
-`dist` still produces a complete tarball.
+`pnpm release:verify` builds and packs once, records the candidate path,
+SHA-256, size, and manifest, then runs typecheck, unit tests, architecture/docs,
+publint, ATTW, tarball audit, Node 20/24 core/CLI smoke, and one installed
+browser consumer against that exact tarball. Candidate metadata, consumers,
+and per-step logs remain under `artifacts/release-candidate` for inspection.
+`pnpm test:e2e:repeat` reuses that installed consumer and tarball for five
+first-pass browser runs, resetting runtime output only.
 
 ## API reference
 

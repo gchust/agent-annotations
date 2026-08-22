@@ -34,9 +34,9 @@ jobs:
       - name: Full test suite (Linux)
         if: runner.os == 'Linux'
         run: pnpm test
-      - name: Portable Goal 09 gates (Windows)
+      - name: Windows filesystem, Vite, and CLI path gates
         if: runner.os == 'Windows'
-        run: pnpm exec vitest run tests/client/runtime.test.ts tests/components/accessibility.test.ts tests/extension/registry.test.ts tests/server/vite.test.ts
+        run: pnpm exec vitest run tests/server/store.test.ts tests/server/diagnostics.test.ts tests/server/evidence.test.ts tests/server/source-path.test.ts tests/server/vite.test.ts tests/cli/arguments.test.ts tests/cli/cli.test.ts
       - name: Install Chromium for the packed E2E
         if: runner.os == 'Linux'
         run: pnpm exec playwright install --with-deps chromium
@@ -66,3 +66,5 @@ jobs:
       # spec or gate fails this job.
       - name: Full release verification
         run: pnpm release:verify
+      - name: Repeat the installed exact-candidate browser consumer
+        run: pnpm test:e2e:repeat

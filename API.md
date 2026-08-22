@@ -1,5 +1,8 @@
 # API reference
 
+The release gate validates these public entries from one checksummed tarball;
+package, Node consumer, and browser consumer checks do not repack it.
+
 ## `@gchust/agent-annotations`
 
 - `mountAgentAnnotations(options)` mounts the React runtime and returns

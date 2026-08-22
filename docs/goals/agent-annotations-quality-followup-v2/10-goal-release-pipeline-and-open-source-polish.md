@@ -132,22 +132,41 @@ Commit:
 
 ## Progress
 
-- [ ] 检查实际 HEAD 和工作区。
-- [ ] 建立 AC → 文件 → 测试 → 证据映射。
-- [ ] 实现生产代码。
-- [ ] 增加最小回归测试。
-- [ ] 运行当前 Goal 完整门禁。
-- [ ] 独立 Review。
-- [ ] 更新 Outcomes。
+- [x] 2026-08-22：从 clean HEAD `91d6e9017fd62f934ad7c5508f6bb8cdd3491833` 检查工作区、Goal 合同、全部 pack/build/consumer/E2E caller、CI、公开文档和 runtime 测试结构。
+- [x] 建立 G10-001～G10-008 到 release orchestrator、exact-mode scripts、CI、测试拆分、package/docs smoke 和 packed browser evidence 的映射。
+- [x] 实现单候选 release orchestrator、exact tarball audits/consumers、同 consumer repeat gate、Windows matrix、发布元数据和公开仓库清理。
+- [x] 增加 release path/hash 传播与 browser-consumer failure artifact 保留测试；将 271401-byte runtime suite 按职责拆分并保留小型 integration 文件。
+- [x] 运行全部 Goal 10 门禁，包括一个 SHA-256 的 packed browser consumer 和五次不重装/不 repack 的 repeat E2E。
+- [x] 独立复查最终 diff、failure path、tarball metadata/logs、测试数量、文档禁项和 git cleanliness。
+- [x] 更新 Outcomes；远程 CI 明确留给 Goal 11，未宣称已运行。
 
 ## Surprises & Discoveries
 
-- 执行时填写。
+- `pnpm test` 的 release consumer tests 会自行 pack，用它作为单候选 orchestrator 内部测试会制造额外 tarball；因此 release path 使用 `test:release` 排除三个专门验证独立 pack 生命周期的测试，而验收仍单独实际运行完整 `pnpm test`（42 files / 478 tests）。
+- 机械拆分暴露了原单文件测试对前序 `history` 路由的隐式依赖；为每个需要 `/settings` 的用例显式设置路由，并在各拆分文件 afterEach 恢复 `/`，没有修改生产行为。
+- packed status coverage 故意制造一次 Vite syntax-error HMR 并恢复；日志中的 parser error 是测试输入，最终 Playwright suite 和 repeat run 均 PASS。
+- 首次最终 `release:verify` 暴露了拆分后 evidence suite 的异步断言竞争：完整 suite 中渲染 Promise 可能尚未启动。断言改为等待既有异步边界后，该 suite 连续 5 次（每次 39 tests）、完整 suite 和 release suite 均通过；生产代码未改变。
+- 本地 release candidate 是 `32d4c33b2e3abc3a54fb8715ced90dff1ba7db047ee7f258510b1dfb5ff3a759`、117244 bytes、26 files。用户提供的 2026-08-22 registry E404 证据支持保留 `0.1.0-alpha.0`；本 Goal 未重新查询或发布 registry。
 
 ## Decision Log
 
-- 执行时填写实际决策及原因。
+- 使用一个 `scripts/release-candidate.mjs` 共享候选常量、SHA 校验、步骤清单和 metadata loading；`release-verify.mjs` 仅负责编排，现有 audit/consumer scripts 增加 exact 参数/环境模式，不建立第二套发布框架。
+- candidate 固定保存在 ignored `artifacts/release-candidate/`。成功也保留 metadata、manifest、tarball、两个 consumer 和每步日志，使后续 `test:e2e:repeat` 能复用相同安装；任一步失败同样不清理。
+- 普通 `pnpm test:e2e` 保留原 build/pack/fresh-consumer 便利路径；仅 candidate mode 禁止 build/pack/reinstall。Repeat 每轮只删除 `.agent-annotations`，Playwright 原配置继续负责每个 server 的 runtime reset。
+- `pnpm pack --config.ignore-scripts=true` 在 orchestrator 的唯一显式 build 后执行，避免 `prepack` 再 build；publint、ATTW、tarball audit、Node 20/24 smoke 和 browser consumer 都接收同一路径与 SHA。
+- 按真实职责拆为 `runtime-markers-capture`、`runtime-diagnostics-extensions`、`runtime-evidence-status`、`runtime-host-ui`，`runtime.test.ts` 仅保留跨 controller integration；不抽生产 controller framework。
+- 远程 workflow 只改为 ready：Windows Node 20/24 加入指定 filesystem/Vite/CLI tests，release job 顺序执行 exact `release:verify` 和 repeat。当前远程 CI 未运行，不能作为 G10-008 的当前运行证据。
 
 ## Outcomes & Retrospective
 
-- 完成时填写。
+- G10-001 PASS：`release:verify` 输出一次 build、一次 pack 和一个 candidate metadata；release test 验证固定九步清单，pack lifecycle tests 不在 orchestrator 内重复执行。
+- G10-002 PASS：publint、ATTW、tarball audit、Node 20/24 core/CLI smoke、首次 packed browser 和 5 次 repeat 均使用 SHA-256 `32d4c33b2e3abc3a54fb8715ced90dff1ba7db047ee7f258510b1dfb5ff3a759`；repeat 未 install 或 pack。
+- G10-003 PASS：Windows Node 20/24 workflow 包含 store/file-lock、diagnostics、evidence、source-path、Vite、CLI arguments/paths tests。此为 workflow source 证据，不是远程 CI 运行结果。
+- G10-004 PASS：原 `runtime.test.ts` 5955 lines / 271401 bytes 变为 269 lines / 9859 bytes integration，加四个职责 suite；focused 6 files / 177 tests 和完整 42 files / 478 tests PASS，覆盖数未下降。
+- G10-005 PASS：版本保持 `0.1.0-alpha.0`，Changelog 合并为单个 `2026-08-22` 条目；依据用户提供的 registry E404，不声称本地重新查询。
+- G10-006 PASS：`publishConfig.access` 为 `public`，docs smoke 强制验证。
+- G10-007 PASS：migration baseline 移至 `docs/historical/migration-baseline.md`；README/API/architecture/security/contributing 更新单候选合同，docs smoke 验证根文件缺失、版本、旧 wait flags、旧 Browser State、依赖耦合与公开 exports。
+- G10-008 PASS（workflow ready）：release job 可执行 exact candidate gate 后复用 consumer 的 repeat gate；remote CI `NOT RUN`，实际 candidate SHA 的远程矩阵属于 Goal 11。
+- Failure path PASS：`tests/release/release-candidate.test.ts` 注入 browser-consumer exit 7，命令抛错且 tarball 与逐步日志保留；现有 packed failure test 继续证明单个 Playwright failure 非零且保留 consumer。
+- 完整本地门禁：`pnpm typecheck` PASS；`pnpm test` PASS（42 files / 478 tests）；`pnpm check:architecture` PASS（31 tests）；`pnpm check:docs` PASS；`pnpm build` PASS；`pnpm check:package` PASS；`pnpm check:tarball` PASS（26 files / 117244 bytes）；`pnpm release:verify` PASS（39 non-repacking files / 470 tests、publint/ATTW、26-file tarball audit、Node 20/24、packed 19 browser tests）；`pnpm test:e2e:repeat` PASS（同 consumer 5×19 tests）；evidence suite 在竞争修复后连续 5×39 tests PASS；`git diff --check` PASS。
+- 未解决风险：当前 workflow 的 Ubuntu/Windows Node 20/24 与 release job 远程执行仍未发生；Goal 10 只证明 workflow source 和本地 Linux/Chromium，Goal 11 才能记录远程 CI。

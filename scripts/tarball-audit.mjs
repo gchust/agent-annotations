@@ -1,15 +1,21 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 const root = process.cwd();
-const directory = mkdtempSync(path.join(tmpdir(), "agent-annotations-pack-audit-"));
+const exactTarball = process.argv[2] ? path.resolve(process.argv[2]) : null;
+const expectedSha256 = process.argv[3];
+const directory = exactTarball ? null : mkdtempSync(path.join(tmpdir(), "agent-annotations-pack-audit-"));
 try {
-  execFileSync("pnpm", ["pack", "--pack-destination", directory], { cwd: root, encoding: "utf8" });
-  const tarball = readdirSync(directory).find((file) => file.endsWith(".tgz"));
+  if (directory) execFileSync("pnpm", ["pack", "--pack-destination", directory], { cwd: root, encoding: "utf8" });
+  const packedName = directory && readdirSync(directory).find((file) => file.endsWith(".tgz"));
+  const tarball = exactTarball ?? (packedName ? path.join(directory, packedName) : null);
   if (!tarball) throw new Error("pnpm pack did not produce a tarball");
-  const files = execFileSync("tar", ["-tf", path.join(directory, tarball)], { encoding: "utf8" })
+  const actualSha256 = createHash("sha256").update(readFileSync(tarball)).digest("hex");
+  if (expectedSha256 && actualSha256 !== expectedSha256) throw new Error("release candidate SHA-256 mismatch");
+  const files = execFileSync("tar", ["-tf", tarball], { encoding: "utf8" })
     .split("\n").map((file) => file.trim().replace(/^package\//, "")).filter(Boolean).sort();
   const manifest = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
   for (const file of manifest.files) {
@@ -43,10 +49,10 @@ try {
       throw new Error(`internal import path in declaration: dist/${file}`);
     }
   }
-  const size = statSync(path.join(directory, tarball)).size;
+  const size = statSync(tarball).size;
   if (size > 200_000) throw new Error(`tarball exceeds 200000-byte gate: ${size}`);
   if (JSON.stringify(manifest).includes("workspace:")) throw new Error("workspace protocol in package metadata");
-  console.log(`[agent-annotations] tarball audit PASS (${files.length} files, ${size} bytes)`);
+  console.log(`[agent-annotations] tarball audit PASS (${files.length} files, ${size} bytes, sha256 ${actualSha256})`);
 } finally {
-  rmSync(directory, { recursive: true, force: true });
+  if (directory) rmSync(directory, { recursive: true, force: true });
 }
