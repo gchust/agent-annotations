@@ -93,11 +93,14 @@ entry keeps the browser runtime plus the same core API.
 
 ## `@gchust/agent-annotations/vite`
 
-The default export is `agentAnnotations(options)`. Options are `root`, `dir`,
-`endpoint`, `allowRemote`, and absolute browser-module paths in
-`clientExtensions`. The plugin applies only to Vite's development server.
-`FileTaskStore` and `createSourcePathService` are exported for controlled Node
-integrations.
+The default export is `agentAnnotations(options)`. Options are `root`,
+`dir`, `endpoint`, `allowRemote`, `clientExtensions` (absolute
+browser-module paths), `screenshotEvidence` (`"auto" | "manual" | "off"`),
+`handoff`, `builtins` (flat per-action booleans plus `shortcuts`),
+`initialState` (`collapsed`, `markersVisible`), and `diagnostics`
+(`console`/`network` toggles). The plugin applies only to Vite's development
+server. `FileTaskStore` and `createSourcePathService` are exported for
+controlled Node integrations.
 
 ## `@gchust/agent-annotations/extension`
 
@@ -187,7 +190,11 @@ that directory and never follow traversal or symlink paths.
 ## CLI
 
 The `agent-annotations` bin exposes `list`, `complete`, `reopen`, `print`,
-`validate-task`, `status`, `revision`, `wait`, `diagnostics`, and `evidence`.
+`validate-task`, `status`, `revision`, `wait`, `diagnostics`, and
+`evidence [--json|--prune [--json]]`. `evidence --prune` performs a safe
+orphan sweep of `<runtimeRoot>/evidence` (only unreferenced regular files,
+never symlinks, with a grace window for newly written evidence) and reports
+deleted/skipped/error counts plus safe relative refs.
 `validate-task` strictly validates the persisted task file with
 `parseAgentAnnotationsTask()` and reports task id, revision, schema, and valid
 state; it does not claim anything about browser or dev-server state. Commands

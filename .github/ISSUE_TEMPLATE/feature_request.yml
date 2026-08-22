@@ -1,0 +1,29 @@
+name: Feature request
+description: Propose a feature that fits the product boundaries
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: usecase
+    attributes:
+      label: Use case
+      description: What real workflow does this serve?
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Proposed behavior
+      description: Describe the behavior precisely (CLI/API/UI surface, lifecycle, privacy impact).
+    validations:
+      required: true
+  - type: textarea
+    id: boundaries
+    attributes:
+      label: Product boundaries
+      description: What is explicitly out of scope? (e.g. no new state framework, no server-side task storage, no NocoBase/MCP coupling)
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Existing commands, config, or extension surfaces that could cover this.

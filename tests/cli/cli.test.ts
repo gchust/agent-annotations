@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -230,6 +230,31 @@ describe("public CLI processes", () => {
     }]);
   });
 
+  it("prunes only orphan evidence and reports safe refs", () => {
+    const root = fixture();
+    mkdirSync(path.join(root, "evidence"), { recursive: true });
+    writeFileSync(path.join(root, "evidence", "orphan.png"), "orphan");
+    writeFileSync(path.join(root, "evidence", "kept.png"), "kept");
+    const task = JSON.parse(readFileSync(path.join(root, "tasks/active-task.json"), "utf8"));
+    task.annotations[0].evidence = [{ kind: "screenshot", ref: "evidence/kept.png" }];
+    writeFileSync(path.join(root, "tasks/active-task.json"), JSON.stringify(task));
+    // The orphan is inside the grace window on first run: it must be skipped.
+    const first = JSON.parse(run(root, ["evidence", "--prune", "--json"]));
+    expect(first.deleted).toBe(0);
+    expect(first.skipped).toBe(1);
+    expect(first.refs.skipped).toEqual(["evidence/orphan.png"]);
+    expect(existsSync(path.join(root, "evidence", "orphan.png"))).toBe(true);
+    // Backdate the orphan, then the prune deletes it while keeping refs.
+    const orphan = path.join(root, "evidence", "orphan.png");
+    const past = new Date(Date.now() - 70_000);
+    utimesSync(orphan, past, past);
+    const second = JSON.parse(run(root, ["evidence", "--prune", "--json"]));
+    expect(second.deleted).toBe(1);
+    expect(second.refs.deleted).toEqual(["evidence/orphan.png"]);
+    expect(existsSync(path.join(root, "evidence", "orphan.png"))).toBe(false);
+    expect(existsSync(path.join(root, "evidence", "kept.png"))).toBe(true);
+  });
+
   it("emits pure JSON for list and validate-task and human text otherwise", () => {
     const root = fixture();
     const list = run(root, ["list", "--json"]);
@@ -350,6 +375,18 @@ describe("public CLI processes", () => {
     const missingDir = runExpectingFailure(root, ["--dir", path.join(root, "missing"), "list"]);
     expect(missingDir.status).toBe(2);
     expect(missingDir.stderr).toContain("runtime root does not exist");
+  });
+
+  it("canonicalizes a symlinked workspace/runtime root", () => {
+    const original = fixture();
+    mkdirSync(path.join(original, "tasks"), { recursive: true });
+    const link = path.join(path.dirname(original), `agent-annotations-cli-link-${path.basename(original)}`);
+    try {
+      symlinkSync(original, link, "dir");
+      expect(JSON.parse(run(link, ["list", "--json"]))).toMatchObject({ taskId: "task-cli" });
+    } finally {
+      rmSync(link, { recursive: true, force: true });
+    }
   });
 
   it("resolves workspace and runtime roots from a session in an ancestor directory (monorepo subdirectory)", () => {

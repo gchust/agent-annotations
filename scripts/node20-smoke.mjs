@@ -1,6 +1,7 @@
-// Goal 13 Node 20 smoke: packs the exact tarball, installs it in a fresh
-// consumer WITHOUT React, and runs both the /core import and the CLI under a
-// real Node 20 runtime (npx node@20). Fails loudly when the smoke breaks.
+// Goal 13/15 Node smoke: packs the exact tarball, installs it in a fresh
+// consumer WITHOUT React, and runs both the /core import and the CLI under
+// real Node 20 and Node 24 runtimes (npx node@20 / node@24). Fails loudly
+// when the smoke breaks.
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -9,8 +10,8 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const run = (args, cwd = root) => execFileSync("pnpm", args, { cwd, encoding: "utf8" });
-const node20 = (args, cwd) =>
-  execFileSync("npx", ["-y", "node@20", ...args], { cwd, encoding: "utf8" });
+const nodeVersion = (version, args, cwd) =>
+  execFileSync("npx", ["-y", `node@${version}`, ...args], { cwd, encoding: "utf8" });
 
 const temporary = mkdtempSync(path.join(tmpdir(), "agent-annotations-node20-smoke-"));
 try {
@@ -40,20 +41,21 @@ if (parsed.taskId !== "node20-core" || parsed.schema !== "agent-annotations.task
 }
 console.log("node20-core-ok " + process.version);
 `);
-  const coreOutput = node20(["core.mjs"], consumer);
-  if (!coreOutput.includes("node20-core-ok v20")) {
-    throw new Error(`node20 /core smoke failed: ${coreOutput}`);
+  for (const version of ["20", "24"]) {
+    const coreOutput = nodeVersion(version, ["core.mjs"], consumer);
+    if (!coreOutput.includes(`node20-core-ok v${version}`)) {
+      throw new Error(`node@${version} /core smoke failed: ${coreOutput}`);
+    }
+    console.log(coreOutput.trim());
+    const cliOutput = nodeVersion(version, [
+      "node_modules/@gchust/agent-annotations/dist/cli/index.mjs",
+      "--help",
+    ], consumer);
+    if (!cliOutput.includes("Agent Annotations")) {
+      throw new Error(`node@${version} CLI smoke failed: ${cliOutput}`);
+    }
+    console.log(`node${version}-cli-ok`);
   }
-  console.log(coreOutput.trim());
-
-  const cliOutput = node20([
-    "node_modules/@gchust/agent-annotations/dist/cli/index.mjs",
-    "--help",
-  ], consumer);
-  if (!cliOutput.includes("Agent Annotations")) {
-    throw new Error(`node20 CLI smoke failed: ${cliOutput}`);
-  }
-  console.log("node20-cli-ok");
   console.log(`node20-smoke tarball: ${tarball}`);
 } finally {
   rmSync(temporary, { recursive: true, force: true });

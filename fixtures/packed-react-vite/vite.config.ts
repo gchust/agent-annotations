@@ -5,6 +5,7 @@ import agentAnnotations from "@gchust/agent-annotations/vite";
 import { defineConfig } from "vite";
 
 export default defineConfig({
+  base: process.env.AGENT_ANNOTATIONS_PACKED_BASE ?? "/",
   plugins: [react(), agentAnnotations({
     clientExtensions: [
       path.resolve(import.meta.dirname, "src/demo-extension.ts"),

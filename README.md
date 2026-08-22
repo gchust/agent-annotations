@@ -72,6 +72,71 @@ panel, and shortcut together, and shortcut overrides still run through the
 extension registry's conflict validation. UI preferences are never written to
 the task file.
 
+## Quick start (5 minutes)
+
+1. **Install** (`pnpm add -D @gchust/agent-annotations`), add the Vite plugin
+   and the CLI binary.
+2. **Register an extension** that defines a toolbar action (see
+   [Minimal client extension](#minimal-client-extension)).
+3. **Run the dev server** — the studio dock appears on the page.
+4. **Capture**: pick an element with `Ctrl+Alt+P`, type a comment, save. The
+   task lands in `.agent-annotations/tasks/active-task.json`.
+5. **Hand off**: the browser runtime stays in sync; a code agent edits the
+   source, then runs `agent-annotations wait --browser-source-revision <sha>` —
+   the browser waits for the applied change, then
+   `agent-annotations complete <id> --verified --summary <text>`.
+
+## Manual runtime and custom transports
+
+Without Vite, mount the runtime directly with any `TaskTransport`:
+
+```ts
+import {
+  mountAgentAnnotations,
+  createValidatedTaskTransport,
+  type AgentAnnotationsMutationRequest,
+  type AgentAnnotationsTask,
+} from "@gchust/agent-annotations";
+
+// Your transport owns the task storage; the runtime validates and redacts
+// every read/mutate crossing this boundary.
+declare const task: AgentAnnotationsTask;
+declare const persistMutation: (
+  request: AgentAnnotationsMutationRequest
+) => Promise<AgentAnnotationsTask>;
+
+const mounted = await mountAgentAnnotations({
+  transport: createValidatedTaskTransport({
+    read: async () => task,
+    mutate: persistMutation,
+  }),
+});
+```
+
+Every mutation is validated and redacted before your transport sees it. The
+CLI is authoritative for the task file and handoff when the transport shares
+the same runtime task files under `.agent-annotations` (the Vite and file
+stores do); a fully custom remote transport must bring its own CLI-equivalent
+authority.
+
+## Configuration
+
+```ts
+agentAnnotations({
+  builtins: { help: false },                       // toggle built-in actions
+  initialState: { collapsed: false, markersVisible: true },
+  screenshotEvidence: "auto",                      // "auto" | "manual" | "off"
+  diagnostics: { console: true, network: true },   // both default true
+});
+```
+
+- `builtins`: configure or disable the built-in toolbar contributions.
+- `initialState`: `collapsed` and `markersVisible` defaults.
+- `screenshotEvidence`: background evidence capture, manual editor capture, or
+  off.
+- `diagnostics`: gate console-error and network-failure capture (network
+  stores only origin+path, never bodies/headers/auth).
+
 ## Minimal client extension
 
 Create `src/annotation-extension.ts` using only the public extension entry:
@@ -142,7 +207,7 @@ agent-annotations revision [--json]
 agent-annotations wait --source-revision <sha256> [--timeout-ms <n>] [--json]
 agent-annotations wait --browser-source-revision <sha256> [--timeout-ms <n>] [--json]
 agent-annotations diagnostics [--json|--clear]
-agent-annotations evidence [--json]
+agent-annotations evidence [--json|--prune [--json]]
 ```
 
 `validate-task` strictly validates the persisted task file with the schema
@@ -214,22 +279,30 @@ dictionary (`src/client/messages.ts`). The runtime resolves the dictionary
 against the host locale (`host.locale()`, else `<html lang>`):
 
 ```ts
-agentAnnotations({
-  extensions: [defineClientExtension({
-    id: "host",
-    apiVersion: 1,
-    host: { locale: () => "zh-CN" },
-  })],
+import { defineClientExtension } from "@gchust/agent-annotations/extension";
+import { mountAgentAnnotations, type TaskTransport } from "@gchust/agent-annotations";
+
+declare const myTransport: TaskTransport;
+
+const localeHost = defineClientExtension({
+  id: "host",
+  apiVersion: 1,
+  host: {
+    locale: () => "zh-CN",
+    messages: { "Pick": "Select" }, // overrides the built-in key
+  },
+});
+
+const mounted = await mountAgentAnnotations({
+  transport: myTransport,
+  extensions: [localeHost],
 });
 ```
 
 The public snapshot's `messages` are merged as
 builtin dictionary → registry messages → host `messages`, so a host can
-override any built-in key:
-
-```ts
-host: { messages: { "Pick": "Select" } }
-```
+override any built-in key (`host.messages` above). With the Vite plugin,
+register the host extension through `clientExtensions` instead.
 
 A locale switch re-renders in place: the Studio never remounts and an open
 composer/editor draft survives. Multi-target annotations show `resolved/total`

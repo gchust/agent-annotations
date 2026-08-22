@@ -11,7 +11,7 @@ import {
   readAgentAnnotationsBrowserState,
 } from "../server/browser-state.js";
 import { clearDiagnostics, readDiagnostics } from "../server/diagnostics.js";
-import { listEvidence } from "../server/evidence.js";
+import { listEvidence, pruneOrphanEvidence } from "../server/evidence.js";
 import { createSourcePathService } from "../server/source-path.js";
 import { FileTaskStore } from "../server/store.js";
 import { PACKAGE_VERSION } from "../metadata.js";
@@ -38,7 +38,7 @@ Commands:
   wait --source-revision <sha256> [--timeout-ms <n>] [--json]
   wait --browser-source-revision <sha256> [--timeout-ms <n>] [--json]
   diagnostics [--json|--clear]
-  evidence [--json]
+  evidence [--json|--prune [--json]]
 `;
 
 const KNOWN_COMMANDS = new Set([
@@ -355,9 +355,34 @@ const main = async (): Promise<void> => {
   }
   if (command === "evidence") {
     const json = args.includes("--json");
-    const unknown = args.filter((arg) => arg !== "--json");
+    const prune = args.includes("--prune");
+    const unknown = args.filter((arg) => arg !== "--json" && arg !== "--prune");
     if (unknown.length) return fail(`unknown option: ${unknown[0]}`, 2);
-    const current = new FileTaskStore(runtimeRoot).read();
+    const store = new FileTaskStore(runtimeRoot);
+    const current = store.read();
+    if (prune) {
+      // Orphan sweep: delete only unreferenced regular files inside the
+      // evidence directory (never symlinks, never referenced evidence, with
+      // a grace period for files still awaiting their task mutation).
+      const result = current ? pruneOrphanEvidence(runtimeRoot, current) : {
+        deleted: [] as string[], skipped: [] as string[], errors: [] as string[],
+      };
+      if (json) {
+        process.stdout.write(`${JSON.stringify({
+          deleted: result.deleted.length,
+          skipped: result.skipped.length,
+          errors: result.errors.length,
+          refs: { deleted: result.deleted, skipped: result.skipped, errors: result.errors },
+        })}\n`);
+      } else {
+        process.stdout.write(
+          `pruned ${result.deleted.length} orphan evidence file(s), ` +
+          `skipped ${result.skipped.length}, errors ${result.errors.length}\n`
+        );
+        for (const ref of result.deleted) process.stdout.write(`${ref}\n`);
+      }
+      return;
+    }
     const entries = current ? listEvidence(runtimeRoot, current) : [];
     if (json) {
       process.stdout.write(`${JSON.stringify(entries)}\n`);

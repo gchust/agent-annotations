@@ -106,7 +106,44 @@ describe("serve-only Vite plugin", () => {
     expect(String(loaded)).toContain("screenshotEvidence: config.screenshotEvidence");
   });
 
-  it("injects and validates the screenshot evidence mode", () => {
+  it("combines a custom endpoint with the resolved Vite base", async () => {
+    const { root } = fixture();
+    const plugin = agentAnnotations({ root, endpoint: "/custom-aa" });
+    (plugin.configResolved as Function).call({} as never, { root, base: "/app/" });
+    const loaded = (plugin.load as Function).call({} as never, "\0virtual:agent-annotations/client", {} as never);
+    // The injected endpoint is the base-resolved custom endpoint.
+    expect(String(loaded)).toContain('"endpoint":"/app/custom-aa"');
+    const server = await createServer({
+      root,
+      base: "/app/",
+      logLevel: "silent",
+      server: { host: "127.0.0.1", port: 0 },
+      plugins: [agentAnnotations({ root, endpoint: "/custom-aa" })],
+    });
+    await server.listen();
+    try {
+      const address = server.httpServer!.address();
+      if (!address || typeof address === "string") throw new Error("no address");
+      const base = `http://127.0.0.1:${address.port}`;
+      const token = JSON.parse(
+        readFileSync(path.join(root, ".agent-annotations", "session.json"), "utf8")
+      ).token;
+      // The middleware serves the task under the base + custom endpoint...
+      const task = await fetch(`${base}/app/custom-aa/task`, {
+        headers: { "x-agent-annotations-token": token },
+      });
+      expect(task.status).toBe(200);
+      // ...and rejects requests under the default endpoint path.
+      const denied = await fetch(`${base}/app/__agent-annotations/task`, {
+        headers: { "x-agent-annotations-token": token },
+      });
+      expect(denied.status).toBe(404);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("injects and validates the screenshot evidence mode", async () => {
     for (const mode of ["auto", "manual", "off"] as const) {
       const plugin = agentAnnotations({ root: "/tmp/demo", screenshotEvidence: mode });
       const loaded = String((plugin.load as Function).call({} as never, "\0virtual:agent-annotations/client", {} as never));

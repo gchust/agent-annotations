@@ -35,6 +35,18 @@ describe("cross-realm selector recovery", () => {
     });
   });
 
+  it("reports a closed shadow root as unsupported with the stable reason", () => {
+    const host = document.createElement("div");
+    host.id = "closed-host";
+    const shadow = host.attachShadow({ mode: "closed" });
+    shadow.append(document.createElement("button"));
+    document.body.append(host);
+    expect(resolveTargetResult("#closed-host >>> #target")).toEqual({
+      status: "unsupported",
+      reason: "closed or missing shadow root",
+    });
+  });
+
   it("reports a cross-origin/unavailable boundary without throwing", () => {
     const frame = document.createElement("iframe");
     frame.id = "blocked";

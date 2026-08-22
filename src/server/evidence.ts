@@ -1,4 +1,4 @@
-import { realpathSync, rmSync, statSync } from "node:fs";
+import { lstatSync, readdirSync, realpathSync, rmSync, statSync, type Dirent } from "node:fs";
 import path from "node:path";
 
 import type { AgentAnnotationsTask } from "../types/index.js";
@@ -84,4 +84,80 @@ export const removeEvidenceRefs = (root: string, refs: readonly string[]): strin
     }
   }
   return removed;
+};
+
+// Recently written evidence may still be awaiting the task mutation that
+// references it (writeEvidence writes the file, then persists the task).
+// A prune must never delete such a file, so a grace window applies.
+export const EVIDENCE_GRACE_PERIOD_MS = 60_000;
+
+export type EvidencePruneResult = {
+  deleted: string[];
+  skipped: string[];
+  errors: string[];
+};
+
+// Orphan sweep: only regular files directly inside <runtimeRoot>/evidence are
+// considered; symlinks, directories, and nested paths are never followed or
+// deleted, and anything referenced by the current valid task is preserved.
+export const pruneOrphanEvidence = (
+  root: string,
+  task: AgentAnnotationsTask,
+  graceMs: number = EVIDENCE_GRACE_PERIOD_MS
+): EvidencePruneResult => {
+  const deleted: string[] = [];
+  const skipped: string[] = [];
+  const errors: string[] = [];
+  const referenced = collectEvidenceRefs(task);
+  const evidenceRoot = path.join(root, EVIDENCE_DIR);
+  let entries: Dirent<string>[] | null = null;
+  try {
+    // The evidence root itself must be a real directory: a symlinked root
+    // would redirect the whole sweep outside the runtime directory.
+    const rootStat = lstatSync(evidenceRoot);
+    if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
+      return { deleted, skipped, errors };
+    }
+    entries = readdirSync(evidenceRoot, { encoding: "utf8", withFileTypes: true }) as Dirent<string>[];
+  } catch {
+    // Missing or unreadable evidence directory: nothing to prune.
+    return { deleted, skipped, errors };
+  }
+  // Stable output: process entries in name order regardless of readdir order.
+  entries.sort((left, right) => left.name.localeCompare(right.name));
+  const now = Date.now();
+  for (const entry of entries) {
+    // Directories and symlinks are never deleted ("don't follow symlinks").
+    if (!entry.isFile()) {
+      skipped.push(`${EVIDENCE_DIR}/${entry.name}`);
+      continue;
+    }
+    const ref = `${EVIDENCE_DIR}/${entry.name}`;
+    if (referenced.has(ref)) continue;
+    const absolute = path.join(evidenceRoot, entry.name);
+    // lstat, never stat: a symlink swapped in between the directory read and
+    // this check must not be followed or deleted.
+    let entryStat;
+    try {
+      entryStat = lstatSync(absolute);
+    } catch {
+      errors.push(ref);
+      continue;
+    }
+    if (entryStat.isSymbolicLink() || !entryStat.isFile()) {
+      skipped.push(ref);
+      continue;
+    }
+    if (entryStat.mtimeMs > now - graceMs) {
+      skipped.push(ref);
+      continue;
+    }
+    try {
+      rmSync(absolute, { force: true });
+      deleted.push(ref);
+    } catch {
+      errors.push(ref);
+    }
+  }
+  return { deleted, skipped, errors };
 };

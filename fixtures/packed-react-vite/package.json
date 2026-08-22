@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1 --strictPort",
     "build": "vite build",
-    "test:e2e": "playwright test tests/vertical.spec.ts && playwright test tests/source-benchmark.spec.ts && playwright test tests/reliability.spec.ts && playwright test tests/route-region.spec.ts && playwright test tests/ux.spec.ts && playwright test tests/polish-ux.spec.ts && node tests/shutdown.mjs && playwright test tests/status.spec.ts"
+    "test:e2e": "playwright test tests/vertical.spec.ts && playwright test tests/source-benchmark.spec.ts && playwright test tests/reliability.spec.ts && playwright test tests/route-region.spec.ts && playwright test tests/ux.spec.ts && playwright test tests/polish-ux.spec.ts && AGENT_ANNOTATIONS_PACKED_BASE=/app/ playwright test --config=playwright.relative-base.config.ts tests/relative-base.spec.ts && node tests/shutdown.mjs && playwright test tests/status.spec.ts"
   },
   "devDependencies": {
     "@gchust/agent-annotations": "file:./gchust-agent-annotations.tgz",

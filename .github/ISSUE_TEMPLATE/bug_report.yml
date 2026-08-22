@@ -1,0 +1,55 @@
+name: Bug report
+description: Report a reproducible defect
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Package version
+      description: e.g. 0.1.0-alpha.0, or the commit SHA
+    validations:
+      required: true
+  - type: input
+    id: node
+    attributes:
+      label: Node version
+      placeholder: e.g. 20.20.2
+    validations:
+      required: true
+  - type: input
+    id: react
+    attributes:
+      label: React version
+      placeholder: e.g. 19.2.8
+  - type: input
+    id: vite
+    attributes:
+      label: Vite version
+      placeholder: e.g. 6.4.3
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: A packed-consumer or fixture reproduction is ideal; include the failing command/spec output.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy reminder
+      description: Redact session tokens, task content, and evidence paths before posting.
+      options:
+        - label: I removed tokens, secrets, and private task content.
+          required: true
