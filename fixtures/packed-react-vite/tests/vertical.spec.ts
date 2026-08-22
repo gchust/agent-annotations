@@ -65,7 +65,8 @@ test("packed browser to file to CLI to browser loop, HMR and session security", 
   }, privacySentinel);
   await expect.poll(() => cli("diagnostics", "--json")).toContain("privacy-probe");
   expect(cli("diagnostics", "--json")).not.toContain(privacySentinel);
-  const browserState = readFileSync(path.join(runtimeRoot, "browser-state.json"), "utf8");
+  const selectedRuntimeId = JSON.parse(cli("status", "--json")).selectedRuntimeId;
+  const browserState = readFileSync(path.join(runtimeRoot, "browser-states", `${selectedRuntimeId}.json`), "utf8");
   expect(JSON.parse(browserState).routeKey).toBe("/#/customers");
   expect(browserState).not.toContain(privacySentinel);
   cli("diagnostics", "--clear");
@@ -86,6 +87,7 @@ test("packed browser to file to CLI to browser loop, HMR and session security", 
   await page.keyboard.press("Control+Alt+C");
   const handoff = await page.evaluate(() => navigator.clipboard.readText());
   expect(handoff).toContain("- route: /#/customers");
+  expect(handoff).toContain(`--runtime ${selectedRuntimeId}`);
   expect(handoff).not.toContain(privacySentinel);
   await page.keyboard.press("Control+Alt+KeyJ");
   await expect.poll(() => page.evaluate(() => window.__demoExtension?.actionCount)).toBe(1);

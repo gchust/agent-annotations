@@ -202,9 +202,9 @@ agent-annotations complete <annotation-id> --verified --summary <text>
 agent-annotations reopen <annotation-id>
 agent-annotations print [--json|--markdown]
 agent-annotations validate-task [--json]
-agent-annotations status [--json] [--check]
+agent-annotations status [--json] [--check] [--runtime <runtime-id>|--route <route-key>]
 agent-annotations revision [--json]
-agent-annotations wait --browser-update-revision <integer> [--timeout-ms <n>] [--json]
+agent-annotations wait --browser-update-revision <integer> [--runtime <runtime-id>|--route <route-key>] [--timeout-ms <n>] [--json]
 agent-annotations wait --referenced-source-revision <sha256> [--timeout-ms <n>] [--json]
 agent-annotations diagnostics [--json|--clear]
 agent-annotations evidence [--json|--prune [--json]]
@@ -216,13 +216,17 @@ claims anything about the browser or the running dev server. `--json` prints
 exactly one parseable JSON value on stdout; without it the CLI prints stable
 human-readable text; errors go to stderr with stable exit codes.
 
-`status [--json] [--check]` reports task validity, session presence, browser
+`status [--json] [--check]` reports task validity, session presence, all fresh
+browser runtimes, the selected runtime, browser
 connection, task synchronization, browser update generation, disk-computed
 referenced-source revision, browser-reported referenced-source revision, and
 whether referenced-source synchronization is available. When no source files
 are known, the revision and synchronization fields are `null`; this does not
-make `status --check` fail. `wait --browser-update-revision <integer>` waits
-for a fresh browser generation above the baseline, while `wait
+make `status --check` fail. With multiple fresh runtimes, pass the exact
+`--runtime <runtime-id>` or safe `--route <route-key>`; otherwise status and
+browser-update waits fail with `ambiguous_browser_runtime` rather than choosing
+a last writer. `wait --browser-update-revision <integer>` waits for the selected
+fresh browser generation above the baseline, while `wait
 --referenced-source-revision <sha256>` watches known referenced files and
 returns an explicit unavailable result when none are known.
 

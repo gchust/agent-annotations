@@ -39,11 +39,11 @@ describe("serve-only Vite plugin", () => {
     expect(String(loaded)).toContain(`from ${JSON.stringify(pkg.name)}`);
     expect(String(loaded)).toContain(`from ${JSON.stringify(`${pkg.name}/vite/client`)}`);
     expect(String(loaded)).toContain("mountAgentAnnotations");
-    expect(String(loaded)).toContain("mountAgentAnnotations({ transport, extensions, screenshotEvidence: config.screenshotEvidence, browserStatus: { endpoint: config.endpoint, token: config.token }, handoff: config.handoff, builtins: config.builtins, initialState: config.initialState, diagnostics: config.diagnostics })");
+    expect(String(loaded)).toContain("runtimeId: window[runtimeKey]");
     expect(String(loaded)).toContain("mounted.reportBrowserUpdate()");
     expect(String(loaded)).toContain("vite:afterUpdate");
     expect(String(loaded)).toContain("responses.every((response) => response.ok)");
-    expect(String(loaded)).toContain("window[key]?.()");
+    expect(String(loaded)).toContain("window[key]?.(true)");
     expect(String(loaded)).toContain("import.meta.hot.accept()");
     expect(String(loaded)).toContain("import.meta.hot.dispose");
     expect(String(loaded)).not.toContain("extension.setup");
@@ -316,7 +316,7 @@ describe("serve-only Vite plugin", () => {
 
   it("persists authenticated browser state heartbeats and cleans only its own state on close", async () => {
     const { root } = fixture();
-    const statePath = path.join(root, ".agent-annotations", "browser-state.json");
+    const statePath = path.join(root, ".agent-annotations", "browser-states", "runtime-1.json");
     const state = {
       schema: "agent-annotations.browser-state.v2",
       runtimeId: "runtime-1",
@@ -412,14 +412,15 @@ describe("serve-only Vite plugin", () => {
     });
     await second.listen();
     const secondSession = await session(second);
+    const replacementPath = path.join(root, ".agent-annotations", "browser-states", "runtime-3.json");
     try {
       await secondSession.heartbeat({ ...state, runtimeId: "runtime-2" });
-      writeFileSync(statePath, JSON.stringify({ ...state, runtimeId: "runtime-3" }));
+      writeFileSync(replacementPath, JSON.stringify({ ...state, runtimeId: "runtime-3" }));
     } finally {
       await second.close();
     }
-    expect(JSON.parse(readFileSync(statePath, "utf8")).runtimeId).toBe("runtime-3");
-    rmSync(statePath, { force: true });
+    expect(JSON.parse(readFileSync(replacementPath, "utf8")).runtimeId).toBe("runtime-3");
+    rmSync(replacementPath, { force: true });
   });
 
   it("warns only for explicit remote opt-in", () => {

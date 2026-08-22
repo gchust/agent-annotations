@@ -132,22 +132,45 @@ Commit:
 
 ## Progress
 
-- [ ] 检查实际 HEAD 和工作区。
-- [ ] 建立 AC → 文件 → 测试 → 证据映射。
-- [ ] 实现生产代码。
-- [ ] 增加最小回归测试。
-- [ ] 运行当前 Goal 完整门禁。
-- [ ] 独立 Review。
-- [ ] 更新 Outcomes。
+- [x] 检查实际 HEAD 和工作区：从 clean `2d7cb914ab936850acd53c07b955fb339d4849f4` 开始。
+- [x] 建立 AC → 文件 → 测试 → 证据映射：Store/路径（G04-001/006/007）、CLI Selector（G04-002/003/005）、Handoff（G04-004）、Packed Browser Lifecycle（G04-001/005）。
+- [x] 实现生产代码：per-runtime Store、共享 Selector、CLI flags、Handoff pin、Unmount/Shutdown cleanup。
+- [x] 增加最小回归测试：Store、CLI、Vite、Handoff、Client 和 packed 双页 Browser coverage。
+- [x] 运行当前 Goal 完整门禁：全部 PASS，证据见 Outcomes。
+- [x] 独立 Review：检查最终 diff、旧单文件引用、路径边界、HMR runtime identity、`git diff --check`。
+- [x] 更新 Outcomes。
 
 ## Surprises & Discoveries
 
-- 执行时填写。
+- 初次 focused gate 的失败只来自旧测试仍读取 `browser-state.json`；重建公开 CLI 并改为 per-runtime fixture 后 47/47 通过。
+- 第一次 packed E2E 暴露真实生命周期问题：Vite virtual client HMR 重挂载会生成新 `runtimeId`，导致已经带 `--runtime` 的 Wait 在 CSS HMR 中报告 `browser_runtime_not_found`。最终让每个 Page 的 runtime ID 跨 HMR 保持稳定，且 HMR-only teardown 保留状态；普通 Page close 与 Vite shutdown 仍删除所属状态。修复后的完整 packed E2E 通过。
+- 同时运行 `build`、`check:package`、`check:tarball` 会因多个命令清理同一个 `dist/` 产生一次非产品并发失败；随后串行重跑 `check:package` 通过。Required gates 均按串行最终状态记录。
 
 ## Decision Log
 
-- 执行时填写实际决策及原因。
+- Browser State 固定存储为 `<runtimeRoot>/browser-states/<runtimeId>.json`；不读取、不迁移旧 `browser-state.json`。
+- 复用 `AGENT_ANNOTATIONS_ID_PATTERN` 校验 Runtime ID，并对目录、文件名、真实目录和 containment 同时校验；非法/过期文件安全清理，合法 stale 文件保留到固定 24 小时 cleanup threshold。Freshness 仍为 15 秒。
+- `selectAgentAnnotationsBrowserState()` 是 `status` 与 browser-update `wait` 的唯一选择逻辑：精确 runtime/route、一个 fresh runtime 自动选择、零个 disconnected、多个明确 `ambiguous_browser_runtime`；不看 mtime。
+- `status --json` 返回确定排序的 `runtimes`、`selectedRuntimeId` 和 `runtimeSelectionError`。`--runtime`/`--route` 严格、互斥，不添加兼容 alias。
+- Handoff 记录生成时的安全 route 和 runtime，并给 Wait/Status 命令加 `--runtime`，避免后续页面切换或并发标签页改变目标。
+- Page close 用 authenticated DELETE 只删除自己的文件；Vite shutdown 删除该 session 已接受的 runtime 集合；HMR 保持同一 Page runtime identity 且不做删除，避免 pinned Wait 在热更新中失去目标。
 
 ## Outcomes & Retrospective
 
-- 完成时填写。
+- 行为结果：单文件 Last Writer Wins 已移除；并行 Page 各自持久化、选择、等待、交接和清理自己的 Browser State。
+- `pnpm exec vitest run tests/server/browser-state.test.ts tests/cli/cli.test.ts tests/server/vite.test.ts`：PASS，3 files / 47 tests。
+- `pnpm typecheck`：PASS。
+- `pnpm test`：PASS，37 files / 444 tests（含 build pretest）。
+- `pnpm check:architecture`：PASS，1 file / 29 tests。
+- `pnpm check:docs`：PASS，`docs smoke PASS`。
+- `pnpm build`：PASS，三组 ESM/declaration outputs 完成。
+- `pnpm test:e2e`：PASS；fresh packed tarball consumer 中 18 个 Playwright tests 加 shutdown fixture 全部通过，其中双页 `/customers` + `/orders` 验证隔离 HMR/Wait/Page close。
+- 额外证据：串行 `pnpm check:package` PASS（publint + ATTW），`pnpm check:tarball` PASS（26 files, 111508 bytes）。
+- G04-001 PASS：Store 并行写测试和 packed 双页测试证明两个 Runtime 稳定共存、不覆盖。
+- G04-002 PASS：CLI 单测覆盖零个、一个、多个 runtime，以及精确 `--runtime`/`--route`；摘要按 runtime ID 排序。
+- G04-003 PASS：CLI 单测证明 ambiguity 返回 `ambiguous_browser_runtime`，`status --check` 与 `wait` 均 exit 1。
+- G04-004 PASS：Core/Client/packed vertical tests 证明 Handoff 记录 runtime/route 且 Wait/Status 带发起 runtime 的 `--runtime`。
+- G04-005 PASS：packed `/orders` route-specific HMR 只满足 orders runtime wait，customers wait 保持原 generation。
+- G04-006 PASS：生产代码、测试、公开文档均无单文件读写路径；旧文件仅在历史问题说明中出现并被忽略。
+- G04-007 PASS：Store/CLI 单测拒绝 traversal、separator、dot、超长 Runtime ID、query route 和互斥 selector；真实目录 containment 受校验。
+- Remaining risk：authenticated DELETE 是 browser unload 的 best-effort keepalive；未送达时状态会在 15 秒后失去 fresh 资格，并在 24 小时 cleanup threshold 后清理，不会被默认选择。

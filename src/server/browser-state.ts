@@ -1,21 +1,30 @@
-import { readFileSync, rmSync } from "node:fs";
+import {
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  type Dirent,
+} from "node:fs";
 import path from "node:path";
 
 import { AGENT_ANNOTATIONS_ID_PATTERN } from "../core/index.js";
 import { atomicWriteJson } from "./store.js";
 
 export const BROWSER_STATE_SCHEMA = "agent-annotations.browser-state.v2";
-export const BROWSER_STATE_FILE = "browser-state.json";
-// Fixed, documented staleness threshold: a heartbeat older than this never
-// reports the browser as connected.
+export const BROWSER_STATES_DIR = "browser-states";
+// A heartbeat older than this never reports the browser as connected.
 export const BROWSER_HEARTBEAT_STALE_MS = 15_000;
+// Stale files remain visible for diagnostics, then are removed after one day.
+export const BROWSER_STATE_CLEANUP_MS = 24 * 60 * 60 * 1_000;
 
 const MAX_ROUTE_KEY = 500;
-const MAX_RUNTIME_ID = 64;
 const MAX_CLIENT_VERSION = 128;
 const MAX_REFERENCED_SOURCE_FILES = 256;
 const MAX_SOURCE_FILE = 2_048;
 const SHA256 = /^[0-9a-f]{64}$/;
+const CONTROL = /[\u0000-\u001f\u007f]/;
 
 export type AgentAnnotationsBrowserState = {
   schema: "agent-annotations.browser-state.v2";
@@ -31,25 +40,51 @@ export type AgentAnnotationsBrowserState = {
   lastHeartbeatAt: string;
 };
 
+export type AgentAnnotationsBrowserStateSelector = {
+  runtimeId?: string;
+  routeKey?: string;
+};
+
+export type AgentAnnotationsBrowserStateSelection = {
+  selected: AgentAnnotationsBrowserState | null;
+  error: "ambiguous_browser_runtime" | "browser_runtime_not_found" | null;
+};
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === "object" && !Array.isArray(value);
 
-const boundedString = (value: unknown, maxLength: number, path: string): string | null => {
+const boundedString = (value: unknown, maxLength: number, field: string): string | null => {
   if (typeof value !== "string" || value.length === 0 || value.length > maxLength) {
-    return `${path} must be a non-empty string of at most ${maxLength} characters`;
+    return `${field} must be a non-empty string of at most ${maxLength} characters`;
   }
   return null;
 };
 
-const timestampIssue = (value: unknown, path: string): string | null => {
+const timestampIssue = (value: unknown, field: string): string | null => {
   if (
     typeof value !== "string" ||
     Number.isNaN(Date.parse(value)) ||
     new Date(value).toISOString() !== value
   ) {
-    return `${path} must be an ISO-8601 timestamp`;
+    return `${field} must be an ISO-8601 timestamp`;
   }
   return null;
+};
+
+export const parseAgentAnnotationsRuntimeId = (value: unknown): string => {
+  if (typeof value !== "string" || !AGENT_ANNOTATIONS_ID_PATTERN.test(value)) {
+    throw new TypeError("runtimeId must be a valid runtime id");
+  }
+  return value;
+};
+
+export const parseAgentAnnotationsRouteKey = (value: unknown): string => {
+  const issue = boundedString(value, MAX_ROUTE_KEY, "routeKey");
+  if (issue) throw new TypeError(issue);
+  if ((value as string).includes("?") || CONTROL.test(value as string)) {
+    throw new TypeError("routeKey must not contain a query or control characters");
+  }
+  return value as string;
 };
 
 // Strict v2 parser: unknown fields are rejected, every string is bounded, and
@@ -77,18 +112,10 @@ export const parseAgentAnnotationsBrowserState = (
   if (input.schema !== BROWSER_STATE_SCHEMA) {
     throw new TypeError(`unknown browser state schema: ${input.schema}`);
   }
-  const runtimeId = boundedString(input.runtimeId, MAX_RUNTIME_ID, "runtimeId");
-  if (runtimeId) throw new TypeError(runtimeId);
+  parseAgentAnnotationsRuntimeId(input.runtimeId);
   const clientVersion = boundedString(input.clientVersion, MAX_CLIENT_VERSION, "clientVersion");
   if (clientVersion) throw new TypeError(clientVersion);
-  const routeKey = boundedString(input.routeKey, MAX_ROUTE_KEY, "routeKey");
-  if (routeKey) throw new TypeError(routeKey);
-  // Privacy boundary: the route key must never carry a raw URL query; the
-  // client strips query portions (keeping hash routes) and the server rejects
-  // any route key that still contains one.
-  if ((input.routeKey as string).includes("?") || /[\u0000-\u001f\u007f]/.test(input.routeKey as string)) {
-    throw new TypeError("routeKey must not contain a query or control characters");
-  }
+  parseAgentAnnotationsRouteKey(input.routeKey);
   if (
     typeof input.taskId !== "string" ||
     !AGENT_ANNOTATIONS_ID_PATTERN.test(input.taskId)
@@ -136,39 +163,119 @@ export const parseAgentAnnotationsBrowserState = (
   return input as AgentAnnotationsBrowserState;
 };
 
-export const browserStatePath = (runtimeRoot: string): string =>
-  path.join(runtimeRoot, BROWSER_STATE_FILE);
+const statesRoot = (runtimeRoot: string): string =>
+  path.resolve(runtimeRoot, BROWSER_STATES_DIR);
 
-export const readAgentAnnotationsBrowserState = (
-  runtimeRoot: string
-): AgentAnnotationsBrowserState | null => {
-  let raw: string;
+const checkedStatesRoot = (runtimeRoot: string, create: boolean): string | null => {
+  const runtime = path.resolve(runtimeRoot);
+  const root = statesRoot(runtime);
+  if (create) mkdirSync(root, { recursive: true, mode: 0o700 });
+  let stat: ReturnType<typeof lstatSync>;
   try {
-    raw = readFileSync(browserStatePath(runtimeRoot), "utf8");
+    stat = lstatSync(root);
   } catch {
     return null;
   }
-  try {
-    return parseAgentAnnotationsBrowserState(JSON.parse(raw));
-  } catch {
-    return null;
+  if (!stat.isDirectory() || stat.isSymbolicLink()) {
+    throw new TypeError("browser-states must be a real directory");
   }
+  const relative = path.relative(realpathSync(runtime), realpathSync(root));
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new TypeError("browser-states escapes runtime root");
+  }
+  return root;
+};
+
+export const browserStatePath = (runtimeRoot: string, runtimeId: string): string => {
+  const id = parseAgentAnnotationsRuntimeId(runtimeId);
+  const root = statesRoot(runtimeRoot);
+  const file = path.resolve(root, `${id}.json`);
+  if (path.dirname(file) !== root) throw new TypeError("runtimeId escapes browser-states");
+  return file;
+};
+
+export const readAgentAnnotationsBrowserStates = (
+  runtimeRoot: string,
+  now = Date.now()
+): AgentAnnotationsBrowserState[] => {
+  let root: string;
+  try {
+    root = checkedStatesRoot(runtimeRoot, false) ?? statesRoot(runtimeRoot);
+  } catch {
+    return [];
+  }
+  let entries: Dirent[];
+  try {
+    entries = readdirSync(root, { withFileTypes: true, encoding: "utf8" });
+  } catch {
+    return [];
+  }
+  const states: AgentAnnotationsBrowserState[] = [];
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
+    const runtimeId = entry.name.slice(0, -".json".length);
+    let file: string;
+    try {
+      file = browserStatePath(runtimeRoot, runtimeId);
+      const state = parseAgentAnnotationsBrowserState(JSON.parse(readFileSync(file, "utf8")));
+      if (state.runtimeId !== runtimeId) throw new TypeError("runtimeId does not match filename");
+      if (now - Date.parse(state.lastHeartbeatAt) > BROWSER_STATE_CLEANUP_MS) {
+        rmSync(file, { force: true });
+      } else {
+        states.push(state);
+      }
+    } catch {
+      try {
+        file = path.resolve(root, entry.name);
+        if (path.dirname(file) === root) rmSync(file, { force: true });
+      } catch {
+        // Invalid state is absent even if cleanup fails.
+      }
+    }
+  }
+  return states.sort((a, b) => a.runtimeId.localeCompare(b.runtimeId));
 };
 
 export const writeAgentAnnotationsBrowserState = (
   runtimeRoot: string,
-  state: AgentAnnotationsBrowserState
+  input: AgentAnnotationsBrowserState
 ): void => {
-  atomicWriteJson(browserStatePath(runtimeRoot), state);
+  const state = parseAgentAnnotationsBrowserState(input);
+  checkedStatesRoot(runtimeRoot, true);
+  atomicWriteJson(browserStatePath(runtimeRoot, state.runtimeId), state);
 };
 
-export const removeAgentAnnotationsBrowserState = (runtimeRoot: string): void => {
-  rmSync(browserStatePath(runtimeRoot), { force: true });
+export const removeAgentAnnotationsBrowserState = (
+  runtimeRoot: string,
+  runtimeId: string
+): void => {
+  const root = checkedStatesRoot(runtimeRoot, false);
+  if (root === null) return;
+  rmSync(browserStatePath(runtimeRoot, runtimeId), { force: true });
 };
 
 export const isBrowserStateFresh = (state: AgentAnnotationsBrowserState, now = Date.now()): boolean => {
-  // The heartbeat age must be at least zero (a future timestamp is invalid)
-  // and at most the fixed staleness threshold.
   const age = now - Date.parse(state.lastHeartbeatAt);
   return age >= 0 && age <= BROWSER_HEARTBEAT_STALE_MS;
+};
+
+export const selectAgentAnnotationsBrowserState = (
+  states: readonly AgentAnnotationsBrowserState[],
+  selector: AgentAnnotationsBrowserStateSelector = {},
+  now = Date.now()
+): AgentAnnotationsBrowserStateSelection => {
+  const fresh = states.filter((state) => isBrowserStateFresh(state, now));
+  const matches = selector.runtimeId !== undefined
+    ? fresh.filter((state) => state.runtimeId === selector.runtimeId)
+    : selector.routeKey !== undefined
+      ? fresh.filter((state) => state.routeKey === selector.routeKey)
+      : fresh;
+  if (matches.length === 1) return { selected: matches[0]!, error: null };
+  if (matches.length > 1) return { selected: null, error: "ambiguous_browser_runtime" };
+  return {
+    selected: null,
+    error: selector.runtimeId !== undefined || selector.routeKey !== undefined
+      ? "browser_runtime_not_found"
+      : null,
+  };
 };

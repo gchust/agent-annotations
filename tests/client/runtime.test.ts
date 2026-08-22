@@ -5544,8 +5544,8 @@ describe("client runtime", () => {
       expect(output).toContain("# Agent Annotations Handoff");
       expect(output).toContain("- browser update revision baseline: 0");
       expect(output).toContain("- referenced source revision: referenced source revision unavailable");
-      expect(output).toContain("wait --browser-update-revision 0 --json");
-      expect(output).toContain("agent-annotations status --check --json");
+      expect(output).toContain("wait --browser-update-revision 0 --runtime ");
+      expect(output).toContain("agent-annotations status --check --runtime ");
       expect(output).toContain("agent-annotations validate-task --json");
       expect(output).toContain(
         "agent-annotations complete ann-1 --verified --summary 'Make the button purple'"
@@ -5771,20 +5771,16 @@ describe("client runtime", () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
       expect(written).toContain("# Agent Annotations Handoff");
       expect(mounted.api.getSnapshot().captureMode).toBe("idle");
-    } finally {
-      mounted.unmount();
       delete (navigator as { clipboard?: unknown }).clipboard;
-    }
-    // Without clipboard support the same output lands in the fallback.
-    const mounted2 = await mountAgentAnnotations({ transport: new MemoryTaskTransport(task) });
-    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
-    try {
-      await mounted2.api.commands.annotations.copyOpen();
+      // Without clipboard support the same runtime output lands in the fallback.
+      await mounted.api.commands.annotations.copyOpen();
       await new Promise((resolve) => setTimeout(resolve, 0));
+      const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
       const fallback = shadow.querySelector<HTMLTextAreaElement>(".aa-copy-fallback textarea")!;
       expect(fallback.value).toBe(written);
     } finally {
-      mounted2.unmount();
+      mounted.unmount();
+      delete (navigator as { clipboard?: unknown }).clipboard;
     }
   });
 });

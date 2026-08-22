@@ -45,7 +45,8 @@ flowchart TD
   `MemoryTaskTransport` and custom transports are supported.
 - `FileTaskStore` persists the task, session, and evidence with atomic writes
   under a shared cross-process file lock with stale-lock recovery.
-- `Browser State / Diagnostics` feed the CLI `status` check, the
+- Per-runtime `Browser State` files and shared deterministic selection feed the
+  CLI `status`/browser-update wait checks; diagnostics feed the
   `diagnostics` boundary, and handoff output; the CLI is the Code agent's
   read/write authority (`validate-task`, `wait --browser-update-revision`,
   `complete`, `reopen`, `evidence`, `revision`).

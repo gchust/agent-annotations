@@ -30,13 +30,16 @@ describe("agent handoff formatter", () => {
     const output = formatAgentAnnotationsHandoff(annotated(), {
       browserUpdateRevision: 7,
       referencedSourceRevision: sha,
+      runtimeId: "runtime-customers",
     });
     expect(output).toContain(`# Agent Annotations Handoff ${annotated().taskId}`);
     expect(output).toContain(`- task revision: 4`);
     expect(output).toContain("- browser update revision baseline: 7");
     expect(output).toContain(`- referenced source revision: ${sha}`);
-    expect(output).toContain("agent-annotations wait --browser-update-revision 7 --json");
-    expect(output).toContain("agent-annotations status --check --json");
+    expect(output).toContain("- browser runtime: runtime-customers");
+    expect(output).toContain("- browser route: browser route unavailable");
+    expect(output).toContain("agent-annotations wait --browser-update-revision 7 --runtime runtime-customers --json");
+    expect(output).toContain("agent-annotations status --check --runtime runtime-customers --json");
     expect(output).toContain("agent-annotations validate-task --json");
     expect(output).toContain("editing active-task.json is not a solution");
     expect(output).toContain(

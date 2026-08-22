@@ -1,4 +1,5 @@
 import {
+  AGENT_ANNOTATIONS_ID_PATTERN,
   parseAgentAnnotationsTask,
 } from "./schema.js";
 import {
@@ -15,6 +16,8 @@ import type {
 export type AgentAnnotationsHandoffOptions = AgentAnnotationsHandoffConfig & {
   browserUpdateRevision?: number | null;
   referencedSourceRevision?: string | null;
+  runtimeId?: string | null;
+  routeKey?: string | null;
 };
 
 export type NormalizedAgentAnnotationsHandoffConfig = {
@@ -213,6 +216,13 @@ export function formatAgentAnnotationsHandoff(
     SHA256.test(options.referencedSourceRevision)
     ? options.referencedSourceRevision
     : null;
+  const runtimeId = typeof options.runtimeId === "string" && AGENT_ANNOTATIONS_ID_PATTERN.test(options.runtimeId)
+    ? options.runtimeId
+    : null;
+  const routeKey = typeof options.routeKey === "string" && options.routeKey.length > 0 &&
+    options.routeKey.length <= 500 && !options.routeKey.includes("?") && !CONTROL.test(options.routeKey)
+    ? options.routeKey
+    : null;
   const annotations = selectAgentAnnotations(
     task.annotations,
     config.includeCompleted ? "all" : "open"
@@ -223,6 +233,8 @@ export function formatAgentAnnotationsHandoff(
     `- task revision: ${task.taskRevision}`,
     `- schema: ${task.schema}`,
     `- browser update revision baseline: ${browserUpdateRevision ?? "browser update revision unavailable"}`,
+    `- browser runtime: ${runtimeId ?? "browser runtime unavailable"}`,
+    `- browser route: ${routeKey ?? "browser route unavailable"}`,
     `- referenced source revision: ${referencedSourceRevision ?? "referenced source revision unavailable"}`,
     `- command: ${command}`,
     "",
@@ -232,9 +244,9 @@ export function formatAgentAnnotationsHandoff(
     "- Run the project-relevant typecheck and tests.",
     ...config.verificationCommands.map((verification) => `- Run: ${verification}`),
     ...(browserUpdateRevision !== null
-      ? [`- Run ${command} wait --browser-update-revision ${browserUpdateRevision} --json and wait until the browser reports a newer applied update.`]
+      ? [`- Run ${command} wait --browser-update-revision ${browserUpdateRevision}${runtimeId ? ` --runtime ${runtimeId}` : ""} --json and wait until the browser reports a newer applied update.`]
       : []),
-    `- Run ${command} status --check --json; task validity, browser connection, task synchronization, and available referenced-source synchronization must pass.`,
+    `- Run ${command} status --check${runtimeId ? ` --runtime ${runtimeId}` : ""} --json; task validity, browser connection, task synchronization, and available referenced-source synchronization must pass.`,
     `- Run ${command} validate-task --json to confirm the task file itself is valid.`,
     `- Only after every verification passes, complete each affected annotation with ${command} complete <annotation-id> --verified --summary "<text>".`,
     "- If verification fails, do not mark anything complete; keep the error and report it.",

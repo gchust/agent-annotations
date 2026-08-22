@@ -1,4 +1,4 @@
-import { readFileSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -7,9 +7,13 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   BROWSER_HEARTBEAT_STALE_MS,
+  BROWSER_STATE_CLEANUP_MS,
+  browserStatePath,
   isBrowserStateFresh,
   parseAgentAnnotationsBrowserState,
-  readAgentAnnotationsBrowserState,
+  readAgentAnnotationsBrowserStates,
+  removeAgentAnnotationsBrowserState,
+  selectAgentAnnotationsBrowserState,
   writeAgentAnnotationsBrowserState,
   type AgentAnnotationsBrowserState,
 } from "../../src/server/browser-state.js";
@@ -93,21 +97,32 @@ describe("browser state v2", () => {
       .toThrow(/routeKey/);
   });
 
-  it("writes atomically with session-level mode and reads back", () => {
+  it("writes parallel runtime states atomically with private mode", () => {
     const dir = root();
     writeAgentAnnotationsBrowserState(dir, state);
-    const file = path.join(dir, "browser-state.json");
+    writeAgentAnnotationsBrowserState(dir, { ...state, runtimeId: "runtime-2", routeKey: "/orders" });
+    const file = browserStatePath(dir, state.runtimeId);
     expect(statSync(file).mode & 0o777).toBe(0o600);
     expect(JSON.parse(readFileSync(file, "utf8"))).toEqual(state);
-    expect(readAgentAnnotationsBrowserState(dir)).toEqual(state);
+    expect(readAgentAnnotationsBrowserStates(dir, Date.parse(state.lastHeartbeatAt)).map(({ runtimeId, routeKey }) => ({ runtimeId, routeKey })))
+      .toEqual([
+        { runtimeId: "runtime-1", routeKey: "/settings" },
+        { runtimeId: "runtime-2", routeKey: "/orders" },
+      ]);
+    removeAgentAnnotationsBrowserState(dir, "runtime-1");
+    expect(readAgentAnnotationsBrowserStates(dir, Date.parse(state.lastHeartbeatAt)).map(({ runtimeId }) => runtimeId)).toEqual(["runtime-2"]);
   });
 
-  it("treats unreadable or invalid files as absent and marks stale heartbeats", () => {
+  it("cleans invalid and expired files without deleting merely stale states", () => {
     const dir = root();
-    expect(readAgentAnnotationsBrowserState(dir)).toBeNull();
-    writeFileSync(path.join(dir, "browser-state.json"), "{broken");
-    expect(readAgentAnnotationsBrowserState(dir)).toBeNull();
+    const states = path.join(dir, "browser-states");
+    mkdirSync(states, { recursive: true });
+    writeFileSync(path.join(states, "invalid.json"), "{broken");
+    writeAgentAnnotationsBrowserState(dir, state);
     const now = Date.parse(state.lastHeartbeatAt);
+    expect(readAgentAnnotationsBrowserStates(dir, now + BROWSER_HEARTBEAT_STALE_MS + 1)).toEqual([state]);
+    expect(readAgentAnnotationsBrowserStates(dir, now + BROWSER_STATE_CLEANUP_MS + 1)).toEqual([]);
+    expect(readAgentAnnotationsBrowserStates(dir)).toEqual([]);
     expect(isBrowserStateFresh(state, now)).toBe(true);
     expect(isBrowserStateFresh(state, now + BROWSER_HEARTBEAT_STALE_MS + 1)).toBe(false);
     // A future heartbeat timestamp is invalid, never fresh.
@@ -116,5 +131,31 @@ describe("browser state v2", () => {
       ...state,
       lastHeartbeatAt: new Date(Date.now() + 60_000).toISOString(),
     })).toBe(false);
+  });
+
+  it("selects one fresh runtime deterministically and reports ambiguity or missing selectors", () => {
+    const now = Date.parse(state.lastHeartbeatAt);
+    const other = { ...state, runtimeId: "runtime-2", routeKey: "/orders" };
+    expect(selectAgentAnnotationsBrowserState([state], {}, now)).toEqual({ selected: state, error: null });
+    expect(selectAgentAnnotationsBrowserState([state, other], {}, now)).toEqual({
+      selected: null,
+      error: "ambiguous_browser_runtime",
+    });
+    expect(selectAgentAnnotationsBrowserState([state, other], { runtimeId: "runtime-2" }, now))
+      .toEqual({ selected: other, error: null });
+    expect(selectAgentAnnotationsBrowserState([state, other], { routeKey: "/settings" }, now))
+      .toEqual({ selected: state, error: null });
+    expect(selectAgentAnnotationsBrowserState([state], { runtimeId: "missing" }, now)).toEqual({
+      selected: null,
+      error: "browser_runtime_not_found",
+    });
+  });
+
+  it("rejects runtime ids that could escape browser-states", () => {
+    for (const runtimeId of ["../escape", "a/b", "a\\b", ".", "", "x".repeat(65)]) {
+      expect(() => browserStatePath(root(), runtimeId)).toThrow(/runtimeId/);
+    }
+    expect(() => parseAgentAnnotationsBrowserState({ ...state, runtimeId: "../escape" }))
+      .toThrow(/runtimeId/);
   });
 });

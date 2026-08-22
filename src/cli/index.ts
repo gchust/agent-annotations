@@ -7,8 +7,11 @@ import {
   parseAgentAnnotationsTask,
 } from "../core/index.js";
 import {
-  isBrowserStateFresh,
-  readAgentAnnotationsBrowserState,
+  parseAgentAnnotationsRouteKey,
+  parseAgentAnnotationsRuntimeId,
+  readAgentAnnotationsBrowserStates,
+  selectAgentAnnotationsBrowserState,
+  type AgentAnnotationsBrowserStateSelector,
 } from "../server/browser-state.js";
 import { clearDiagnostics, readDiagnostics } from "../server/diagnostics.js";
 import { listEvidence, pruneOrphanEvidence } from "../server/evidence.js";
@@ -33,9 +36,9 @@ Commands:
   reopen <annotation-id>
   print [--json|--markdown]
   validate-task [--json]
-  status [--json] [--check]
+  status [--json] [--check] [--runtime <runtime-id>|--route <route-key>]
   revision [--json]
-  wait --browser-update-revision <integer> [--timeout-ms <n>] [--json]
+  wait --browser-update-revision <integer> [--runtime <runtime-id>|--route <route-key>] [--timeout-ms <n>] [--json]
   wait --referenced-source-revision <sha256> [--timeout-ms <n>] [--json]
   diagnostics [--json|--clear]
   evidence [--json|--prune [--json]]
@@ -67,6 +70,37 @@ const task = (runtimeRoot: string): AgentAnnotationsTask => {
   const found = new FileTaskStore(runtimeRoot).read();
   if (!found) return fail(`no task found at ${taskPath(runtimeRoot)}`);
   return found;
+};
+
+const parseBrowserSelector = (args: string[]): {
+  selector: AgentAnnotationsBrowserStateSelector;
+  rest: string[];
+} => {
+  let runtimeId: string | undefined;
+  let routeKey: string | undefined;
+  const rest: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const option = args[index]!;
+    if (option !== "--runtime" && option !== "--route") {
+      rest.push(option);
+      continue;
+    }
+    const value = args[++index];
+    if (value === undefined) fail(`${option} requires a value`, 2);
+    if (option === "--runtime") {
+      if (runtimeId !== undefined) fail("duplicate --runtime", 2);
+      try { runtimeId = parseAgentAnnotationsRuntimeId(value); }
+      catch { fail("--runtime must be a valid runtime id", 2); }
+    } else {
+      if (routeKey !== undefined) fail("duplicate --route", 2);
+      try { routeKey = parseAgentAnnotationsRouteKey(value); }
+      catch { fail("--route must be a safe query-free route key", 2); }
+    }
+  }
+  if (runtimeId !== undefined && routeKey !== undefined) {
+    fail("--runtime and --route are mutually exclusive", 2);
+  }
+  return { selector: { runtimeId, routeKey }, rest };
 };
 
 const parseMutationArgs = (command: "complete" | "reopen", args: string[]): {
@@ -186,9 +220,10 @@ const main = async (): Promise<void> => {
     return;
   }
   if (command === "status") {
-    const json = args.includes("--json");
-    const check = args.includes("--check");
-    const unknown = args.filter((arg) => arg !== "--json" && arg !== "--check");
+    const { selector, rest } = parseBrowserSelector(args);
+    const json = rest.includes("--json");
+    const check = rest.includes("--check");
+    const unknown = rest.filter((arg) => arg !== "--json" && arg !== "--check");
     if (unknown.length) return fail(`unknown option: ${unknown[0]}`, 2);
     const store = new FileTaskStore(runtimeRoot);
     let current: AgentAnnotationsTask | null = null;
@@ -198,8 +233,10 @@ const main = async (): Promise<void> => {
       current = null;
     }
     const taskValid = current !== null;
-    const browser = readAgentAnnotationsBrowserState(runtimeRoot);
-    const browserConnected = browser !== null && isBrowserStateFresh(browser);
+    const browserStates = readAgentAnnotationsBrowserStates(runtimeRoot);
+    const selection = selectAgentAnnotationsBrowserState(browserStates, selector);
+    const browser = selection.selected;
+    const browserConnected = browser !== null;
     const sourcePaths = createSourcePathService(workspaceRoot);
     const referencedSourceRevision = current ? sourcePaths.revision(current) : null;
     const referencedSourceFiles = current ? sourcePaths.files(current) : [];
@@ -215,6 +252,17 @@ const main = async (): Promise<void> => {
       taskValid,
       // The resolved, shape-validated session (canonical roots, token, pid).
       sessionPresent: session !== null,
+      runtimeSelectionError: selection.error,
+      selectedRuntimeId: browser?.runtimeId ?? null,
+      runtimes: browserStates.map((state) => ({
+        runtimeId: state.runtimeId,
+        routeKey: state.routeKey,
+        connected: selectAgentAnnotationsBrowserState([state]).selected !== null,
+        taskId: state.taskId,
+        taskRevision: state.taskRevision,
+        browserUpdateRevision: state.browserUpdateRevision,
+        lastHeartbeatAt: state.lastHeartbeatAt,
+      })),
       browserConnected,
       taskSynchronized,
       referencedSourceSynchronized,
@@ -240,6 +288,7 @@ const main = async (): Promise<void> => {
     }
     if (check && !(
       report.taskValid &&
+      report.runtimeSelectionError === null &&
       report.browserConnected &&
       report.taskSynchronized &&
       report.referencedSourceSynchronized !== false
@@ -273,8 +322,10 @@ const main = async (): Promise<void> => {
     let browserUpdateTarget: string | null = null;
     let referencedSourceTarget: string | null = null;
     let timeoutMs = 30_000;
-    const json = args.includes("--json");
-    const rest = args.filter((arg) => arg !== "--json");
+    const selected = parseBrowserSelector(args);
+    const selector = selected.selector;
+    const json = selected.rest.includes("--json");
+    const rest = selected.rest.filter((arg) => arg !== "--json");
     while (rest.length) {
       const option = rest.shift();
       if (option === "--browser-update-revision") {
@@ -325,10 +376,12 @@ const main = async (): Promise<void> => {
     const deadline = Date.now() + timeoutMs;
     while (true) {
       if (browserUpdateBaseline !== null) {
-        const browser = readAgentAnnotationsBrowserState(runtimeRoot);
-        const observed = browser !== null && isBrowserStateFresh(browser)
-          ? browser.browserUpdateRevision
-          : null;
+        const selection = selectAgentAnnotationsBrowserState(
+          readAgentAnnotationsBrowserStates(runtimeRoot),
+          selector
+        );
+        if (selection.error !== null) return fail(selection.error, 1);
+        const observed = selection.selected?.browserUpdateRevision ?? null;
         const changed = observed !== null && observed > browserUpdateBaseline;
         if (changed || Date.now() >= deadline) {
           const result = { changed, browserUpdateRevision: observed };

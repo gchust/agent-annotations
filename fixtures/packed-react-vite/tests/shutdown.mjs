@@ -25,7 +25,7 @@ const port = await new Promise((resolve, reject) => {
 });
 
 rmSync(sessionPath, { force: true });
-const browserStatePath = path.join(runtimeRoot, "browser-state.json");
+const browserStatePath = path.join(runtimeRoot, "browser-states", "shutdown-runtime.json");
 rmSync(browserStatePath, { force: true });
 const child = spawn(process.execPath, [vite, "--host", "127.0.0.1", "--port", String(port), "--strictPort"], {
   stdio: ["ignore", "pipe", "pipe"],
@@ -57,15 +57,15 @@ try {
     }),
   });
   if (response.status !== 200) throw new Error(`heartbeat failed: ${response.status}`);
-  await waitFor(() => existsSync(browserStatePath), "heartbeat did not persist browser-state.json");
+  await waitFor(() => existsSync(browserStatePath), "heartbeat did not persist per-runtime browser state");
   child.kill("SIGTERM");
   await new Promise((resolve, reject) => {
     child.once("exit", resolve);
     child.once("error", reject);
   });
   await waitFor(() => !existsSync(sessionPath), "SIGTERM did not remove session.json");
-  await waitFor(() => !existsSync(browserStatePath), "SIGTERM did not remove owned browser-state.json");
-  console.log("SIGTERM removed session.json and owned browser-state.json");
+  await waitFor(() => !existsSync(browserStatePath), "SIGTERM did not remove owned browser state");
+  console.log("SIGTERM removed session.json and owned browser state");
 } finally {
   if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
 }

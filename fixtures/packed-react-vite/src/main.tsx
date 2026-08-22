@@ -101,8 +101,8 @@ function App() {
       window.removeEventListener("hashchange", onChange);
     };
   }, []);
-  if (path === "/route-a") return <RouteA />;
-  if (path === "/route-b") return <RouteB />;
+  if (path === "/route-a" || path === "/customers") return <RouteA />;
+  if (path === "/route-b" || path === "/orders") return <RouteB />;
   return <Home />;
 }
 

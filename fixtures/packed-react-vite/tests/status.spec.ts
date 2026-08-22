@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import { expect, test } from "@playwright/test";
@@ -14,6 +14,52 @@ const cli = (...args: string[]) => execFileSync("pnpm", ["exec", "agent-annotati
 const statusJson = () => JSON.parse(cli("status", "--json"));
 const card = path.resolve("src/duplicate-a/Card.tsx");
 const extension = path.resolve("src/demo-extension.ts");
+const ordersSource = path.resolve("src/route-b/RouteB.tsx");
+
+test("keeps two browser runtimes isolated through HMR and page close", async ({ page, context }) => {
+  const orders = await context.newPage();
+  await page.routeWebSocket(/.*/, (socket) => socket.close());
+  await page.goto("/customers");
+  await orders.goto("/orders");
+  const runtime = async (routeKey: string) => {
+    const report = statusJson();
+    return report.runtimes.find((entry: { routeKey: string }) => entry.routeKey === routeKey) ?? null;
+  };
+  await expect.poll(() => runtime("/customers"), { timeout: 15_000 }).not.toBeNull();
+  await expect.poll(() => runtime("/orders"), { timeout: 15_000 }).not.toBeNull();
+  const customersRuntime = await runtime("/customers");
+  const ordersRuntime = await runtime("/orders");
+  expect(customersRuntime.runtimeId).not.toBe(ordersRuntime.runtimeId);
+  expect(statusJson()).toMatchObject({
+    selectedRuntimeId: null,
+    runtimeSelectionError: "ambiguous_browser_runtime",
+  });
+
+  const before = readFileSync(ordersSource, "utf8");
+  try {
+    writeFileSync(ordersSource, before.replace("Route B</h1>", "Route B UPDATED</h1>"));
+    const waited = JSON.parse(cli(
+      "wait", "--browser-update-revision", String(ordersRuntime.browserUpdateRevision),
+      "--runtime", ordersRuntime.runtimeId, "--timeout-ms", "15000", "--json"
+    ));
+    expect(waited.changed).toBe(true);
+    await expect(orders.locator("h1")).toHaveText("Route B UPDATED");
+    expect(JSON.parse(cli(
+      "wait", "--browser-update-revision", String(customersRuntime.browserUpdateRevision),
+      "--runtime", customersRuntime.runtimeId, "--timeout-ms", "0", "--json"
+    ))).toEqual({
+      changed: false,
+      browserUpdateRevision: customersRuntime.browserUpdateRevision,
+    });
+  } finally {
+    writeFileSync(ordersSource, before);
+  }
+
+  await page.close();
+  const customersStatePath = path.join(runtimeRoot, "browser-states", `${customersRuntime.runtimeId}.json`);
+  await expect.poll(() => existsSync(customersStatePath), { timeout: 5_000 }).toBe(false);
+  expect(await runtime("/orders")).toMatchObject({ runtimeId: ordersRuntime.runtimeId });
+});
 
 test("browser status health and HMR-applied source revision ordering", async ({ page }) => {
   await page.goto("/");
@@ -47,7 +93,8 @@ test("browser status health and HMR-applied source revision ordering", async ({ 
   // Navigate with an ordinary secret query: the route key never persists it.
   await page.goto("/?secret=supersecretquery");
   await expect.poll(() => statusJson().routeKey, { timeout: 15_000 }).toBe("/");
-  const diskState = JSON.parse(readFileSync(path.join(runtimeRoot, "browser-state.json"), "utf8"));
+  const runtimeId = statusJson().selectedRuntimeId;
+  const diskState = JSON.parse(readFileSync(path.join(runtimeRoot, "browser-states", `${runtimeId}.json`), "utf8"));
   expect(diskState.routeKey).not.toContain("secret");
   expect(JSON.stringify(diskState)).not.toContain("supersecretquery");
   await expect.poll(async () => {
@@ -82,7 +129,7 @@ test("browser status health and HMR-applied source revision ordering", async ({ 
     const next = before.replace("Duplicate A</button>", "Duplicate A APPLIED</button>");
     writeFileSync(card, next);
     const waited = JSON.parse(cli(
-      "wait", "--browser-update-revision", String(baselineGeneration), "--timeout-ms", "15000", "--json"
+      "wait", "--browser-update-revision", String(baselineGeneration), "--runtime", runtimeId, "--timeout-ms", "15000", "--json"
     ));
     expect(waited).toMatchObject({ changed: true });
     expect(waited.browserUpdateRevision).toBeGreaterThan(baselineGeneration);
@@ -128,7 +175,7 @@ test("browser status health and HMR-applied source revision ordering", async ({ 
       }));
       writeFileSync(theme, `${themeBefore}\n#target { outline-color: rgb(220, 40, 40); outline-width: 4px; }\n`);
       const cssWait = JSON.parse(cli(
-        "wait", "--browser-update-revision", String(cssGeneration), "--timeout-ms", "15000", "--json"
+        "wait", "--browser-update-revision", String(cssGeneration), "--runtime", runtimeId, "--timeout-ms", "15000", "--json"
       ));
       expect(cssWait.changed).toBe(true);
       expect(cssWait.browserUpdateRevision).toBeGreaterThan(cssGeneration);

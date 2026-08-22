@@ -16,7 +16,7 @@ import type {
 import { FileTaskStore } from "../server/store.js";
 import {
   parseAgentAnnotationsBrowserState,
-  readAgentAnnotationsBrowserState,
+  parseAgentAnnotationsRuntimeId,
   removeAgentAnnotationsBrowserState,
   writeAgentAnnotationsBrowserState,
 } from "../server/browser-state.js";
@@ -170,9 +170,7 @@ export default function agentAnnotations(
   let closeInstalled = false;
   let viteBase = "/";
   let resolvedEndpoint = endpoint;
-  // Runtime identity of the last browser state this server session accepted;
-  // shutdown removes only state owned by this session's runtime.
-  let browserRuntimeId: string | null = null;
+  const browserRuntimeIds = new Set<string>();
 
   if (allowRemote) {
     console.warn(
@@ -224,10 +222,14 @@ export default function agentAnnotations(
         `const config = ${JSON.stringify({ endpoint: resolvedEndpoint, token, screenshotEvidence, handoff, builtins, initialState, diagnostics })};`,
         `const extensions = [${values}];`,
         "const key = Symbol.for('agent-annotations.mount');",
-        "window[key]?.();",
+        "const runtimeKey = Symbol.for('agent-annotations.runtime-id');",
+        "window[runtimeKey] ??= crypto.randomUUID();",
+        "window[key]?.(true);",
         "const transport = new HttpTaskTransport(config);",
-        `const mounted = await mountAgentAnnotations({ transport, extensions, screenshotEvidence: config.screenshotEvidence, browserStatus: { endpoint: config.endpoint, token: config.token }, handoff: config.handoff, builtins: config.builtins, initialState: config.initialState, diagnostics: config.diagnostics });`,
-        "window[key] = () => { mounted.unmount(); delete window[key]; };",
+        `const mounted = await mountAgentAnnotations({ transport, extensions, screenshotEvidence: config.screenshotEvidence, browserStatus: { endpoint: config.endpoint, token: config.token, runtimeId: window[runtimeKey] }, handoff: config.handoff, builtins: config.builtins, initialState: config.initialState, diagnostics: config.diagnostics });`,
+        "const onPageHide = () => window[key]?.(false);",
+        "window.addEventListener('pagehide', onPageHide, { once: true });",
+        "window[key] = (preserveBrowserState = false) => { window.removeEventListener('pagehide', onPageHide); mounted.unmount(preserveBrowserState); delete window[key]; };",
         "mounted.reportBrowserUpdate();",
         "if (import.meta.hot) {",
         "  const reportAfterUpdate = async (event) => {",
@@ -241,7 +243,7 @@ export default function agentAnnotations(
         "    } catch {}",
         "  };",
         "  import.meta.hot.accept();",
-        "  import.meta.hot.dispose(() => window[key]?.());",
+        "  import.meta.hot.dispose(() => window[key]?.(true));",
         "  import.meta.hot.on('vite:afterUpdate', (event) => { void reportAfterUpdate(event); });",
         "}",
       ].filter(Boolean).join("\n");
@@ -299,12 +301,10 @@ export default function agentAnnotations(
           process.kill(process.pid, signal);
         };
         const cleanupBrowserState = (): void => {
-          // Remove only the browser state written by this session's runtime;
-          // a replacement runtime's state is preserved.
-          const state = readAgentAnnotationsBrowserState(runtimeRoot);
-          if (state && browserRuntimeId !== null && state.runtimeId === browserRuntimeId) {
-            removeAgentAnnotationsBrowserState(runtimeRoot);
+          for (const runtimeId of browserRuntimeIds) {
+            removeAgentAnnotationsBrowserState(runtimeRoot, runtimeId);
           }
+          browserRuntimeIds.clear();
         };
         process.once("exit", onExit);
         for (const signal of signals) process.once(signal, onSignal);
@@ -374,12 +374,24 @@ export default function agentAnnotations(
                   ...state,
                   lastHeartbeatAt: new Date().toISOString(),
                 });
-                browserRuntimeId = state.runtimeId;
+                browserRuntimeIds.add(state.runtimeId);
               } else if (Object.keys(claimed).length > 0) {
                 return json(response, 400, { error: "invalid_heartbeat_payload" });
               }
             }
             return json(response, 200, { ok: true, receivedAt: new Date().toISOString() });
+          }
+          if (url.pathname === `${resolvedEndpoint}/heartbeat` && request.method === "DELETE") {
+            const input = await body(request, 1_024) as Record<string, unknown>;
+            if (!input || typeof input !== "object" || Array.isArray(input) ||
+              Object.keys(input).length !== 1 || !("runtimeId" in input)) {
+              return json(response, 400, { error: "invalid_browser_runtime" });
+            }
+            const runtimeId = parseAgentAnnotationsRuntimeId(input.runtimeId);
+            if (browserRuntimeIds.delete(runtimeId)) {
+              removeAgentAnnotationsBrowserState(runtimeRoot, runtimeId);
+            }
+            return json(response, 200, { ok: true });
           }
           if (url.pathname === `${resolvedEndpoint}/source` && request.method === "POST") {
             const input = await body(request) as { filePath?: unknown };

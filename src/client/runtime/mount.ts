@@ -177,7 +177,10 @@ export async function mountAgentAnnotations(
   // path every 5 seconds and immediately after mount. The state is bounded,
   // redacted (route key), and never carries the token or sensitive text.
   const browserStatus = options.browserStatus ?? null;
-  const runtimeId = createAgentAnnotationsId();
+  const runtimeId = browserStatus?.runtimeId ?? createAgentAnnotationsId();
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(runtimeId)) {
+    throw new TypeError("browserStatus runtimeId must be a valid runtime id");
+  }
   const clientVersion = PACKAGE_VERSION;
   const mountedAt = now();
   let browserUpdateRevision = 0;
@@ -221,6 +224,18 @@ export async function mountAgentAnnotations(
     }).catch(() => {
       // The dev server may be restarting; the next heartbeat reconnects.
     });
+  };
+  const removeBrowserState = (): void => {
+    if (!browserStatus) return;
+    fetch(`${browserStatus.endpoint}/heartbeat`, {
+      method: "DELETE",
+      headers: {
+        "x-agent-annotations-token": browserStatus.token,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ runtimeId }),
+      keepalive: true,
+    }).catch(() => undefined);
   };
   const setTask = (next: AgentAnnotationsTask): void => {
     const nextFiles = taskSourceFiles(next);
@@ -637,6 +652,8 @@ export async function mountAgentAnnotations(
       includeCompleted: handoff.includeCompleted || filter === "all",
       browserUpdateRevision,
       referencedSourceRevision,
+      runtimeId,
+      routeKey,
     });
     // Final generic text redaction over the complete output. The task and the
     // bounded handoff config already bound the output, so this second pass
@@ -1383,8 +1400,9 @@ export async function mountAgentAnnotations(
     hostElement.remove();
     throw error;
   }
-  const unmount = () => {
+  const unmount = (preserveBrowserState = false) => {
     if (destroyed) return;
+    if (!preserveBrowserState) removeBrowserState();
     destroyed = true;
     setMarkerHighlight(null);
     editorAnchorRect = null;

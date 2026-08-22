@@ -12,7 +12,7 @@
   and the editor's `Capture screenshot` action, and `off` disables capture
   entirely. Invalid values throw a `TypeError`. `options.browserStatus`
   (`{ endpoint, token }`) enables the authenticated browser runtime status
-  heartbeat (`.agent-annotations/browser-state.json`).
+  heartbeat (`.agent-annotations/browser-states/<runtimeId>.json`).
   `reportBrowserUpdate()` is a trusted mount-level hook (used by the
   generated Vite client after mount and after `vite:afterUpdate`): it re-fetches
   the current source revision through the runtime-owned, generation-guarded
@@ -210,16 +210,20 @@ value to stdout, the default writes stable human-readable text, and errors go
 to stderr with exit code 1 (runtime) or 2 (usage). The removed `verify` command
 has no alias.
 
-`status [--json] [--check]` reads the browser runtime state persisted by the
-authenticated dev client (`.agent-annotations/browser-state.json`, strict v2
-schema, mode 0600, no token or sensitive text) and reports task validity,
+`status [--json] [--check] [--runtime <runtime-id>|--route <route-key>]` reads
+the per-runtime browser states persisted by the authenticated dev client
+(`.agent-annotations/browser-states/<runtimeId>.json`, strict v2 schema, mode
+0600, no token or sensitive text) and reports task validity,
 session presence, browser connection (fresh heartbeat within 15 seconds), task
-and source synchronization, ids/revisions, route, last heartbeat, and
-diagnostic count. `--check` exits 1 unless `taskValid`, `browserConnected`,
+and source synchronization, deterministic runtime summaries/selection,
+ids/revisions, route, last heartbeat, and diagnostic count. With multiple fresh
+runtimes, callers must select an exact runtime or route; otherwise the result is
+`ambiguous_browser_runtime`. `--check` exits 1 unless `taskValid`, `browserConnected`,
 `taskSynchronized`, and available referenced-source synchronization are
 healthy; without `--check`
 the command is informational and exits 0. `wait --browser-update-revision
-<integer>` waits for a fresh browser generation above the baseline; `wait
+<integer>` accepts the same runtime selectors and waits for that fresh browser
+generation above the baseline; `wait
 --referenced-source-revision <sha256>` watches known referenced files and
 returns an explicit unavailable result when no files are known.
 

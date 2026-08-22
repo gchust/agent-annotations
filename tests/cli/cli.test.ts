@@ -479,10 +479,11 @@ describe("public CLI processes", () => {
     });
   });
 
-  const writeBrowserState = (target: string, state: Record<string, unknown>) => {
-    writeFileSync(path.join(target, "browser-state.json"), JSON.stringify({
+  const writeBrowserState = (target: string, state: Record<string, unknown>, runtimeId = "runtime-1") => {
+    mkdirSync(path.join(target, "browser-states"), { recursive: true });
+    writeFileSync(path.join(target, "browser-states", `${runtimeId}.json`), JSON.stringify({
       schema: "agent-annotations.browser-state.v2",
-      runtimeId: "runtime-1",
+      runtimeId,
       clientVersion: "0.1.0-alpha.0",
       routeKey: "/settings",
       taskId: "task-1",
@@ -506,6 +507,8 @@ describe("public CLI processes", () => {
       taskSynchronized: false,
       referencedSourceSynchronized: null,
       diagnosticCount: 0,
+      runtimes: [],
+      selectedRuntimeId: null,
     });
     expect(result.taskId).toBe("task-cli");
     expect(run(root, ["status"])).toContain("browserConnected: false");
@@ -632,6 +635,50 @@ describe("public CLI processes", () => {
     });
     expect(JSON.parse(run(root, ["wait", "--browser-update-revision", "1", "--timeout-ms", "0", "--json"])))
       .toEqual({ changed: false, browserUpdateRevision: null });
+  });
+
+  it("selects browser runtimes exactly and fails closed on ambiguity", () => {
+    const root = fixture();
+    writeBrowserState(root, {
+      taskId: "task-cli",
+      routeKey: "/customers",
+      browserUpdateRevision: 2,
+    }, "runtime-customers");
+    writeBrowserState(root, {
+      taskId: "task-cli",
+      routeKey: "/orders",
+      browserUpdateRevision: 9,
+    }, "runtime-orders");
+
+    const ambiguous = JSON.parse(run(root, ["status", "--json"]));
+    expect(ambiguous).toMatchObject({
+      browserConnected: false,
+      selectedRuntimeId: null,
+      runtimeSelectionError: "ambiguous_browser_runtime",
+      runtimes: [
+        { runtimeId: "runtime-customers", routeKey: "/customers", connected: true },
+        { runtimeId: "runtime-orders", routeKey: "/orders", connected: true },
+      ],
+    });
+    expect(runExpectingFailure(root, ["status", "--check", "--json"]).status).toBe(1);
+    expect(JSON.parse(run(root, ["status", "--runtime", "runtime-customers", "--json"])))
+      .toMatchObject({ selectedRuntimeId: "runtime-customers", routeKey: "/customers" });
+    expect(JSON.parse(run(root, ["status", "--route", "/orders", "--json"])))
+      .toMatchObject({ selectedRuntimeId: "runtime-orders", routeKey: "/orders" });
+    expect(JSON.parse(run(root, [
+      "wait", "--browser-update-revision", "2", "--runtime", "runtime-customers", "--timeout-ms", "0", "--json",
+    ]))).toEqual({ changed: false, browserUpdateRevision: 2 });
+    expect(JSON.parse(run(root, [
+      "wait", "--browser-update-revision", "2", "--runtime", "runtime-orders", "--timeout-ms", "0", "--json",
+    ]))).toEqual({ changed: true, browserUpdateRevision: 9 });
+    expect(runExpectingFailure(root, [
+      "wait", "--browser-update-revision", "1", "--timeout-ms", "0", "--json",
+    ])).toMatchObject({ status: 1, stderr: expect.stringContaining("ambiguous_browser_runtime") });
+    expect(runExpectingFailure(root, ["status", "--runtime", "missing", "--check", "--json"]))
+      .toMatchObject({ status: 1, stdout: expect.stringContaining("browser_runtime_not_found") });
+    expect(runExpectingFailure(root, ["status", "--runtime", "../escape"]).status).toBe(2);
+    expect(runExpectingFailure(root, ["status", "--route", "/x?secret=y"]).status).toBe(2);
+    expect(runExpectingFailure(root, ["status", "--runtime", "runtime-customers", "--route", "/customers"]).status).toBe(2);
   });
 
   it("returns an explicit unavailable referenced-source wait result", () => {

@@ -36,7 +36,7 @@ test("keyboard-only Pick, Multi, Copy, List, and Collapse flows with visual evid
   const emptyHandoff = await page.evaluate(() => navigator.clipboard.readText());
   expect(emptyHandoff).toContain("- browser update revision baseline: 1");
   expect(emptyHandoff).toContain("- referenced source revision: referenced source revision unavailable");
-  expect(emptyHandoff).toContain("wait --browser-update-revision 1 --json");
+  expect(emptyHandoff).toContain("wait --browser-update-revision 1 --runtime ");
   // The dock starts collapsed by default.
   await expect(shadow(page, ".aa-dock")).toHaveAttribute("data-collapsed", "true");
   await expect(shadow(page, ".aa-collapsed-count")).toBeVisible();
@@ -109,7 +109,7 @@ test("keyboard-only Pick, Multi, Copy, List, and Collapse flows with visual evid
   expect(clipboard).toContain("Keyboard pick");
   expect(clipboard).toContain("Keyboard multi");
   expect(clipboard).toContain("# Agent Annotations Handoff");
-  expect(clipboard).toContain("agent-annotations status --check --json");
+  expect(clipboard).toContain("agent-annotations status --check --runtime ");
   expect(clipboard).toContain("agent-annotations validate-task --json");
   expect(clipboard).toContain("agent-annotations complete ");
   expect(clipboard).toContain("--verified --summary");
@@ -117,7 +117,7 @@ test("keyboard-only Pick, Multi, Copy, List, and Collapse flows with visual evid
   // old empty-task snapshot and cannot claim that the browser applied it.
   expect(clipboard).toContain("- browser update revision baseline: 1");
   expect(clipboard).toContain("- referenced source revision: referenced source revision unavailable");
-  expect(clipboard).toContain("wait --browser-update-revision 1 --json");
+  expect(clipboard).toContain("wait --browser-update-revision 1 --runtime ");
   await expect.poll(() => annotations()).toBe(2);
   await expect(shadow(page, '[aria-label^="Pick"]')).toHaveAttribute("aria-pressed", "false");
   await expect(shadow(page, '[aria-label^="Multi"]')).toHaveAttribute("aria-pressed", "true");

@@ -255,6 +255,7 @@ export type AgentAnnotationsScreenshotEvidenceMode = "auto" | "manual" | "off";
 export type AgentAnnotationsBrowserStatusConfig = {
   endpoint: string;
   token: string;
+  runtimeId?: string;
 };
 
 export type AgentAnnotationsHandoffConfig = {
