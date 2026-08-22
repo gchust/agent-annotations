@@ -124,22 +124,37 @@ Commit:
 
 ## Progress
 
-- [ ] 检查实际 HEAD 和工作区。
-- [ ] 建立 AC → 文件 → 测试 → 证据映射。
-- [ ] 实现生产代码。
-- [ ] 增加最小回归测试。
-- [ ] 运行当前 Goal 完整门禁。
-- [ ] 独立 Review。
-- [ ] 更新 Outcomes。
+- [x] 2026-08-22：确认 clean HEAD `60feecd4959826b4e4cccaeb8cf8b28c2d93d1d0`，并追踪 Screenshot、Evidence、Freeze、Overlay 和 packed fixture 的实际调用链。
+- [x] 2026-08-22：建立 AC → `screenshot.ts` / `runtime/evidence.ts` / `runtime/overlays.ts` → unit / packed browser 证据映射。
+- [x] 2026-08-22：把现有 Screenshot 管线拆成同步安全化 Prepare 与异步 Render，自动保存改为 Unfreeze 前 Prepare，Manual 复用同一管线。
+- [x] 2026-08-22：增加 Prepare 顺序、DOM 隔离、失败非回滚、Manual/Off、大小上限及 packed popover/5 秒 decode 回归测试。
+- [x] 2026-08-22：运行 Goal 08 focused、typecheck、full test、architecture、build、docs、package、tarball 和 packed E2E 门禁，全部通过。
+- [x] 2026-08-22：逐文件独立检查最终 diff、`git diff --check`、范围和隐私边界；未发现遗漏。
+- [x] 2026-08-22：更新 Outcomes 和逐条 AC 证据。
 
 ## Surprises & Discoveries
 
-- 执行时填写。
+- 根因比预期更集中：旧 `scheduleScreenshotEvidence()` 把 DOM Clone 本身放进 `setTimeout(0)`；保存路径在调度前已执行 `clearTransientSelection()` 和 Unfreeze，因此无需修改 Freeze 引擎即可修复。
+- 浏览器 `Image` load/decode 是实际的慢边界。packed fixture 注入 5 秒 decode 延迟后，保存状态仍在 2 秒断言内出现，Evidence 在 decode 完成后写入（实测 `decodeDurationMs=5002`）。
+- Prepared SVG 必须单独限制大小；仅依赖服务器 2 MB PNG 限制会让过大的序列化 DOM 进入异步解码。新 2 MB UTF-8 上限在 Prepare 阶段 fail closed。
 
 ## Decision Log
 
-- 执行时填写实际决策及原因。
+- 2026-08-22：保留现有 `captureViewportPng()` 作为两阶段函数的薄组合，避免第二条 Screenshot 管线并保留现有内部测试调用方式。
+- 2026-08-22：Prepared Snapshot 仅包含序列化 SVG、输出尺寸、scale、复制并 freeze 的 overlays 和起始时间；异步 Render 不再 Clone 或读取活页面内容。
+- 2026-08-22：Image load 后显式等待现有浏览器 `decode()`，并把后台 watchdog 设为 10 秒，使要求的 5 秒 decode 场景可完成且仍有严格上限；保存 UI 不等待该边界。
+- 2026-08-22：自动 Prepare 失败沿用 `record("console", ...)` 安全 Diagnostic，仍立即清理 Composer 并显示保存成功；不回滚已持久化 Annotation。
+- 2026-08-22：Manual capture 对已解析目标临时调用现有 `setInspectionFrozen(true/false)`，在 `finally` 中立即 Unfreeze，然后才等待 Render/Upload；Off 模式不调用任何阶段。
+- 2026-08-22：不新增依赖、兼容层、截图协议或独立 Evidence 写入路径；Route/Task guard 和单次 Revision Conflict retry 保持在现有 Evidence Controller。
 
 ## Outcomes & Retrospective
 
-- 完成时填写。
+- 行为结果：自动 Evidence 在 Freeze 与 Composer 仍存在时同步固定安全化页面状态，UI 随即恢复；SVG decode、Canvas/PNG 和上传继续在 tracked timer 后台执行。Manual 复用同一 Prepare/Render，Off 完全跳过。
+- G08-001 PASS：packed Chromium 在 popover 保存后隐藏的情况下，PNG 像素采样为 `[234,213,101]`，证明保存瞬间的黄色 popover 被保留。
+- G08-002 PASS：packed Chromium 注入 5 秒 decode，`Annotation saved` 在 2 秒上限内可见且 decode 实测 5002 ms；unit test 也在 Render promise 未完成时确认 Annotation 已持久化、Composer 已关闭。
+- G08-003 PASS：`renderPreparedSnapshotPng()` 只消费 immutable Prepared Snapshot；unit test 在 Prepare 后把活 DOM `Before` 改成 `After`，Render 数据仍只包含 `Before`。
+- G08-004 PASS：原有 form/contenteditable 清理、媒体 placeholder、scroll/scale/overlay 测试全部通过；packed privacy 像素保持 `input=[220,40,40]`、`password=[40,180,40]`、`textarea=[40,40,220]`、`editable=[220,180,40]`。
+- G08-005 PASS：unit test 证明 Manual 先 Freeze、Prepare、finally Unfreeze 后 Render；Off 模式 Prepare/Render 均为 0 次。
+- G08-006 PASS：既有 route/task replacement、unmount、conflict retry 测试在两阶段管线下通过，旧 Screenshot 不写入新 route/task。
+- 精确门禁：focused Vitest `5 files / 182 tests passed`；`pnpm typecheck` PASS；`pnpm test` `37 files / 459 tests passed`；architecture `1 file / 29 tests passed`；`pnpm build` PASS；docs smoke PASS；publint/ATTW PASS；tarball audit PASS（26 files，116743 bytes）；packed E2E PASS（20 tests，含 reliability 9/9）；`git diff --check` PASS。
+- 剩余风险：Screenshot 仍是既有 best-effort SVG `foreignObject` 渲染，浏览器不支持或超出 2 MB Prepared Snapshot 时会安全失败并记录 Diagnostic，不影响 Annotation 保存。

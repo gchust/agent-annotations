@@ -51,7 +51,7 @@ function ReliabilityFixtures() {
       <span id="after-media">After media</span>
     </article>
     <button id="popover-toggle" popoverTarget="fixture-popover">Open popover</button>
-    <div id="fixture-popover" popover="auto">Popover content</div>
+    <div id="fixture-popover" popover="auto" style={{ position: "fixed", left: 120, top: 90, margin: 0, background: "rgb(255, 230, 80)", color: "rgb(30, 30, 30)", padding: 18, width: 220, height: 70 }}>Popover content</div>
     <div id="animated-target" style={{ animation: "fixture-pulse 100ms infinite alternate" }}>Animated target</div>
     <button id="dynamic-target">Dynamic {dynamic}</button>
     <div id="wrapper-fixture" style={{ position: "relative", width: 400, height: 240 }}>

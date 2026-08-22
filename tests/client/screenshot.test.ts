@@ -7,6 +7,8 @@ import {
   cloneScreenshotRoot,
   computeScreenshotScale,
   inlineScreenshotStyle,
+  prepareViewportSnapshot,
+  renderPreparedSnapshotPng,
 } from "../../src/client/screenshot.js";
 
 describe("best-effort screenshot evidence", () => {
@@ -129,5 +131,41 @@ describe("best-effort screenshot evidence", () => {
     expect(drawCalls).toContainEqual({ op: "fill", x: 100, y: 200 });
     expect(drawCalls).toContainEqual({ op: "stroke", x: 100, y: 200 });
     expect(drawCalls.some((call) => call.x !== 100 || call.y !== 200)).toBe(false);
+  });
+
+  it("freezes sanitized DOM data before later live DOM mutations", async () => {
+    document.body.innerHTML = '<div id="snapshot">Before</div>';
+    const snapshot = prepareViewportSnapshot();
+    document.querySelector("#snapshot")!.textContent = "After";
+    expect(snapshot?.svg).toContain("Before");
+    expect(snapshot?.svg).not.toContain("After");
+    expect(snapshot).toBeTruthy();
+
+    let renderedSource = "";
+    const context = {
+      save: vi.fn(), restore: vi.fn(), scale: vi.fn(), drawImage: vi.fn(),
+      fillRect: vi.fn(), strokeRect: vi.fn(),
+    } as unknown as CanvasRenderingContext2D;
+    const canvas = {
+      width: 0, height: 0, getContext: () => context,
+      toDataURL: () => "data:image/png;base64,AAAA",
+    } as unknown as HTMLCanvasElement;
+    vi.spyOn(document, "createElement").mockReturnValue(canvas);
+    vi.stubGlobal("Image", class {
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      set src(value: string) {
+        renderedSource = decodeURIComponent(value);
+        queueMicrotask(() => this.onload?.());
+      }
+    });
+    expect(await renderPreparedSnapshotPng(snapshot!)).not.toBeNull();
+    expect(renderedSource).toContain("Before");
+    expect(renderedSource).not.toContain("After");
+  });
+
+  it("fails closed when the serialized snapshot exceeds its ceiling", () => {
+    document.body.innerHTML = `<div>${"x".repeat(2_100_000)}</div>`;
+    expect(prepareViewportSnapshot()).toBeNull();
   });
 });

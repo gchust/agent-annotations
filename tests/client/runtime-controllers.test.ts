@@ -414,8 +414,8 @@ describe("runtime controllers (focused factory contracts)", () => {
     expect(frame.removed).toContain("load");
   });
 
-  it("evidence controller's deferred screenshot is cancelled by the pre-capture route guard", () => {
-    const captureSpy = vi.spyOn(screenshot, "captureViewportPng").mockResolvedValue(null);
+  it("evidence controller's deferred render is cancelled by the route guard", () => {
+    const renderSpy = vi.spyOn(screenshot, "renderPreparedSnapshotPng").mockResolvedValue(null);
     let route = "/a";
     let destroyed = false;
     let timer: (() => void) | null = null;
@@ -435,6 +435,7 @@ describe("runtime controllers (focused factory contracts)", () => {
       appRoot: () => document,
       host: () => undefined,
       isInAppRoot: () => true,
+      setInspectionFrozen: vi.fn(),
       transport: () => ({
         writeEvidence: async (input) => { written.push(input); return taskFixture(); },
       }),
@@ -444,16 +445,18 @@ describe("runtime controllers (focused factory contracts)", () => {
       taskId: "task-1",
       taskRevision: 0,
       routeKey: "/a",
-      overlays: [],
+      snapshot: {
+        svg: "<svg/>", width: 1, height: 1, scale: 1, overlays: [], startedAt: 0,
+      },
     };
     controller.scheduleScreenshotEvidence(input);
     // Route changes before the deferred capture runs: the pre-capture guard
     // must stop the flow before any screenshot capture or status update.
     route = "/elsewhere";
     timer!();
-    expect(captureSpy).not.toHaveBeenCalled();
+    expect(renderSpy).not.toHaveBeenCalled();
     expect(written).toEqual([]);
     expect(setStatus).not.toHaveBeenCalled();
-    captureSpy.mockRestore();
+    renderSpy.mockRestore();
   });
 });

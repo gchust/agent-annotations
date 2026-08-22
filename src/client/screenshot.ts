@@ -1,5 +1,6 @@
 export const MAX_SCREENSHOT_WIDTH = 1600;
 export const MAX_SCREENSHOT_HEIGHT = 1200;
+export const MAX_SCREENSHOT_SNAPSHOT_BYTES = 2 * 1024 * 1024;
 
 const STYLE_PROPERTIES = [
   "display", "position", "visibility", "opacity", "box-sizing", "width", "height",
@@ -26,6 +27,14 @@ export type CapturedScreenshot = {
   durationMs: number;
   bestEffort: true;
 };
+export type PreparedViewportSnapshot = Readonly<{
+  svg: string;
+  width: number;
+  height: number;
+  scale: number;
+  overlays: readonly Readonly<ScreenshotRect>[];
+  startedAt: number;
+}>;
 
 export const computeScreenshotScale = (
   width: number,
@@ -134,16 +143,19 @@ const imageFromSvg = (svg: string): Promise<HTMLImageElement | null> => new Prom
     window.clearTimeout(timer);
     resolve(value);
   };
-  const timer = window.setTimeout(() => done(null), 5_000);
-  image.onload = () => done(image);
+  const timer = window.setTimeout(() => done(null), 10_000);
+  image.onload = () => {
+    if (typeof image.decode !== "function") return done(image);
+    image.decode().then(() => done(image), () => done(null));
+  };
   image.onerror = () => done(null);
   image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 });
 
-/** Best-effort structural viewport evidence; it deliberately does not claim pixel parity. */
-export async function captureViewportPng(
+/** Freeze-faithful, sanitized snapshot of the live page. */
+export function prepareViewportSnapshot(
   overlays: readonly ScreenshotRect[] = []
-): Promise<CapturedScreenshot | null> {
+): PreparedViewportSnapshot | null {
   const started = performance.now();
   try {
     const viewportWidth = Math.max(1, innerWidth);
@@ -161,34 +173,61 @@ export async function captureViewportPng(
       scrollX,
       scrollY
     );
-    const image = await imageFromSvg(svg);
+    if (new TextEncoder().encode(svg).byteLength > MAX_SCREENSHOT_SNAPSHOT_BYTES) return null;
+    return Object.freeze({
+      svg,
+      width,
+      height,
+      scale,
+      overlays: Object.freeze(overlays.map((rect) => Object.freeze({ ...rect }))),
+      startedAt: started,
+    });
+  } catch {
+    return null;
+  }
+}
+
+/** Render a prepared snapshot without reading the live page DOM. */
+export async function renderPreparedSnapshotPng(
+  snapshot: PreparedViewportSnapshot
+): Promise<CapturedScreenshot | null> {
+  try {
+    const image = await imageFromSvg(snapshot.svg);
     if (!image) return null;
     const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
+    canvas.width = snapshot.width;
+    canvas.height = snapshot.height;
     const context = canvas.getContext("2d");
     if (!context) return null;
     context.save();
-    context.drawImage(image, 0, 0, width, height);
-    context.scale(scale, scale);
+    context.drawImage(image, 0, 0, snapshot.width, snapshot.height);
+    context.scale(snapshot.scale, snapshot.scale);
     context.fillStyle = "#6366f122";
     context.strokeStyle = "#6366f1";
-    context.lineWidth = 2 / scale;
+    context.lineWidth = 2 / snapshot.scale;
     // Overlays are top-level viewport coordinates; the SVG page content is
     // already translated by -scrollX/-scrollY, so no second scroll subtraction.
-    for (const rect of overlays) {
+    for (const rect of snapshot.overlays) {
       context.fillRect(rect.x, rect.y, rect.width, rect.height);
       context.strokeRect(rect.x, rect.y, rect.width, rect.height);
     }
     context.restore();
     return {
       png: canvas.toDataURL("image/png").replace(/^data:image\/png;base64,/, ""),
-      width,
-      height,
-      durationMs: performance.now() - started,
+      width: snapshot.width,
+      height: snapshot.height,
+      durationMs: performance.now() - snapshot.startedAt,
       bestEffort: true,
     };
   } catch {
     return null;
   }
+}
+
+/** Best-effort structural viewport evidence; it deliberately does not claim pixel parity. */
+export async function captureViewportPng(
+  overlays: readonly ScreenshotRect[] = []
+): Promise<CapturedScreenshot | null> {
+  const snapshot = prepareViewportSnapshot(overlays);
+  return snapshot ? renderPreparedSnapshotPng(snapshot) : null;
 }

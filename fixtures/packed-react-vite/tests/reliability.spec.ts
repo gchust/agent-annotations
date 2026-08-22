@@ -79,6 +79,80 @@ test("screenshot keeps style, media geometry, scroll, large viewport and aligned
   console.log(`overlay-pixels inside=${JSON.stringify(samples.inside)} outside=${JSON.stringify(samples.outside)}`);
 });
 
+test("automatic evidence preserves frozen popover state without blocking saved UI", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto("/");
+  await page.locator("#popover-toggle").click();
+  const popover = page.locator("#fixture-popover");
+  await expect(popover).toBeVisible();
+  const popoverBox = await popover.boundingBox();
+  expect(popoverBox).not.toBeNull();
+  await page.evaluate(() => {
+    const nativeDecode = HTMLImageElement.prototype.decode;
+    HTMLImageElement.prototype.decode = function () {
+      if (!this.src.startsWith("data:image/svg+xml")) return nativeDecode.call(this);
+      (window as typeof window & { evidenceDecodeStarted?: number }).evidenceDecodeStarted = Date.now();
+      return new Promise<void>((resolve, reject) => {
+        setTimeout(() => nativeDecode.call(this).then(() => {
+          (window as typeof window & { evidenceDecodeFinished?: number }).evidenceDecodeFinished = Date.now();
+          resolve();
+        }, reject), 5_000);
+      });
+    };
+    const root = document.querySelector("#agent-annotations-root")!.shadowRoot!;
+    new MutationObserver(() => {
+      if (root.querySelector('[role="status"]')?.textContent === "Annotation saved") {
+        document.querySelector<HTMLElement>("#fixture-popover")!.hidePopover();
+      }
+    }).observe(root, { childList: true, subtree: true });
+  });
+
+  await page.keyboard.press("Control+Alt+P");
+  await expect(shadow(page, '[aria-label^="Pick"]')).toHaveAttribute("aria-pressed", "true");
+  await popover.click();
+  await expect(shadow(page, '[aria-label="Annotation comment"]')).toBeVisible();
+  const submittedAt = Date.now();
+  await page.evaluate(() => {
+    const root = document.querySelector("#agent-annotations-root")!.shadowRoot!;
+    const textarea = root.querySelector<HTMLTextAreaElement>('[aria-label="Annotation comment"]')!;
+    textarea.value = "Frozen popover evidence";
+    textarea.closest("form")!.requestSubmit();
+  });
+  await expect(shadow(page, '[role="status"]')).toHaveText("Annotation saved", { timeout: 2_000 });
+  expect(Date.now() - submittedAt).toBeLessThan(2_000);
+  await expect(popover).toBeHidden();
+  await expect.poll(() => page.evaluate(() =>
+    (window as typeof window & { evidenceDecodeStarted?: number }).evidenceDecodeStarted ?? 0
+  )).toBeGreaterThan(0);
+  const taskBeforeDecode = JSON.parse(readFileSync(taskPath, "utf8"));
+  expect(taskBeforeDecode.annotations.at(-1).evidence?.length ?? 0).toBe(0);
+  await expect.poll(() => JSON.parse(readFileSync(taskPath, "utf8")).annotations.at(-1).evidence?.length ?? 0, { timeout: 15_000 }).toBe(1);
+  const task = JSON.parse(readFileSync(taskPath, "utf8"));
+  const evidence = task.annotations.at(-1).evidence.at(-1);
+  const png = readFileSync(path.join(runtimeRoot, evidence.ref));
+  const sample = await page.evaluate(async ({ base64, x, y }) => {
+    const image = new Image();
+    image.src = `data:image/png;base64,${base64}`;
+    await image.decode();
+    const canvas = document.createElement("canvas");
+    canvas.width = image.width;
+    canvas.height = image.height;
+    const context = canvas.getContext("2d")!;
+    context.drawImage(image, 0, 0);
+    const scale = image.width / innerWidth;
+    return [...context.getImageData(Math.round(x * scale), Math.round(y * scale), 1, 1).data.slice(0, 3)];
+  }, { base64: png.toString("base64"), x: popoverBox!.x + 12, y: popoverBox!.y + 12 });
+  expect(sample[0]).toBeGreaterThan(150);
+  expect(sample[1]).toBeGreaterThan(130);
+  expect(sample[2]).toBeLessThan(160);
+  const decodeDuration = await page.evaluate(() => {
+    const state = window as typeof window & { evidenceDecodeStarted?: number; evidenceDecodeFinished?: number };
+    return state.evidenceDecodeFinished! - state.evidenceDecodeStarted!;
+  });
+  expect(decodeDuration).toBeGreaterThanOrEqual(5_000);
+  console.log(`frozen-popover decodeDurationMs=${decodeDuration} sample=${JSON.stringify(sample)}`);
+});
+
 test("nested iframe and iframe open-shadow markers save and recover after reload", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator("#same-origin-frame")).toHaveAttribute("data-ready", "true");

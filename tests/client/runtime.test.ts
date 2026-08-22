@@ -26,7 +26,10 @@ const primitives = vi.hoisted(() => {
     unfreeze: vi.fn(),
   };
 });
-const screenshot = vi.hoisted(() => ({ captureViewportPng: vi.fn() }));
+const screenshot = vi.hoisted(() => ({
+  prepareViewportSnapshot: vi.fn(),
+  renderPreparedSnapshotPng: vi.fn(),
+}));
 
 vi.mock("react-grab/primitives", () => ({
   disposeBaselineStyles: vi.fn(),
@@ -40,7 +43,8 @@ vi.mock("react-grab/primitives", () => ({
   unfreeze: primitives.unfreeze,
 }));
 vi.mock("../../src/client/screenshot.js", () => ({
-  captureViewportPng: screenshot.captureViewportPng,
+  prepareViewportSnapshot: screenshot.prepareViewportSnapshot,
+  renderPreparedSnapshotPng: screenshot.renderPreparedSnapshotPng,
 }));
 
 import { mountAgentAnnotations, RevisionConflictError } from "../../src/client/index.js";
@@ -65,7 +69,11 @@ afterEach(() => {
   primitives.getElementBounds.mockReturnValue({ x: 0, y: 0, width: 1, height: 1 });
   primitives.getElementContext.mockImplementation(primitives.context);
   primitives.getElementsAtPoint.mockReturnValue([]);
-  screenshot.captureViewportPng.mockReset();
+  screenshot.prepareViewportSnapshot.mockReset();
+  screenshot.prepareViewportSnapshot.mockReturnValue(Object.freeze({
+    svg: "<svg/>", width: 100, height: 100, scale: 1, overlays: Object.freeze([]), startedAt: 0,
+  }));
+  screenshot.renderPreparedSnapshotPng.mockReset();
   primitives.freeze.mockClear();
   primitives.unfreeze.mockClear();
   vi.useRealTimers();
@@ -2482,7 +2490,7 @@ describe("client runtime", () => {
     const pageTarget = document.createElement("button");
     document.body.append(pageTarget);
     primitives.getElementAtPoint.mockReturnValue(pageTarget);
-    screenshot.captureViewportPng.mockResolvedValue({ png: "aGVsbG8gc2VjcmV0", width: 1600, height: 900 });
+    screenshot.renderPreparedSnapshotPng.mockResolvedValue({ png: "aGVsbG8gc2VjcmV0", width: 1600, height: 900 });
     const transport = new MemoryTaskTransport();
     const writeEvidence = vi.spyOn(transport, "writeEvidence");
     const mounted = await mountAgentAnnotations({ transport });
@@ -2509,7 +2517,11 @@ describe("client runtime", () => {
     document.body.append(pageTarget);
     primitives.getElementAtPoint.mockReturnValue(pageTarget);
     let resolveCapture!: (value: unknown) => void;
-    screenshot.captureViewportPng.mockReturnValue(new Promise((resolve) => { resolveCapture = resolve; }));
+    screenshot.prepareViewportSnapshot.mockImplementationOnce(() => {
+      expect(primitives.unfreeze).not.toHaveBeenCalled();
+      return Object.freeze({ svg: "<svg/>", width: 100, height: 100, scale: 1, overlays: Object.freeze([]), startedAt: 0 });
+    });
+    screenshot.renderPreparedSnapshotPng.mockReturnValue(new Promise((resolve) => { resolveCapture = resolve; }));
     const transport = new MemoryTaskTransport();
     const writeEvidence = vi.spyOn(transport, "writeEvidence");
     const mounted = await mountAgentAnnotations({ transport });
@@ -2525,9 +2537,37 @@ describe("client runtime", () => {
     // already shown while the screenshot is still pending.
     expect(shadow.querySelector(".aa-composer")).toBeNull();
     expect(shadow.querySelector('[role="status"]')?.textContent).toBe("Annotation saved");
+    expect(screenshot.prepareViewportSnapshot).toHaveBeenCalledOnce();
+    expect(primitives.unfreeze).toHaveBeenCalledOnce();
+    expect(screenshot.renderPreparedSnapshotPng).toHaveBeenCalledOnce();
     expect(writeEvidence).not.toHaveBeenCalled();
     resolveCapture({ png: "fake-png", width: 100, height: 100, durationMs: 1, bestEffort: true });
     await vi.waitFor(() => expect(writeEvidence).toHaveBeenCalledOnce());
+    mounted.unmount();
+    pageTarget.remove();
+  });
+
+  it("keeps a saved annotation when frozen snapshot preparation fails", async () => {
+    const pageTarget = document.createElement("button");
+    document.body.append(pageTarget);
+    primitives.getElementAtPoint.mockReturnValue(pageTarget);
+    screenshot.prepareViewportSnapshot.mockReturnValueOnce(null);
+    const transport = new MemoryTaskTransport();
+    const writeEvidence = vi.spyOn(transport, "writeEvidence");
+    const mounted = await mountAgentAnnotations({ transport });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    mounted.api.commands.capture.startPick();
+    document.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 10 }));
+    const composer = shadow.querySelector<HTMLElement>(".aa-composer")!;
+    composer.querySelector<HTMLTextAreaElement>("textarea")!.value = "Prepare failure";
+    composer.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await vi.waitFor(async () => expect((await transport.read()).annotations).toHaveLength(1));
+    expect(shadow.querySelector(".aa-composer")).toBeNull();
+    expect(shadow.querySelector('[role="status"]')?.textContent).toBe("Annotation saved");
+    expect(mounted.api.getSnapshot().diagnostics.at(-1)?.message).toContain("snapshot preparation failed");
+    expect(primitives.unfreeze).toHaveBeenCalledOnce();
+    expect(screenshot.renderPreparedSnapshotPng).not.toHaveBeenCalled();
+    expect(writeEvidence).not.toHaveBeenCalled();
     mounted.unmount();
     pageTarget.remove();
   });
@@ -2536,7 +2576,7 @@ describe("client runtime", () => {
     const pageTarget = document.createElement("button");
     document.body.append(pageTarget);
     primitives.getElementAtPoint.mockReturnValue(pageTarget);
-    screenshot.captureViewportPng.mockResolvedValue({ png: "fake-png", width: 100, height: 100, durationMs: 1, bestEffort: true });
+    screenshot.renderPreparedSnapshotPng.mockResolvedValue({ png: "fake-png", width: 100, height: 100, durationMs: 1, bestEffort: true });
     const transport = new MemoryTaskTransport();
     const writeEvidence = vi.spyOn(transport, "writeEvidence");
     const mounted = await mountAgentAnnotations({ transport, screenshotEvidence: "manual" });
@@ -2549,7 +2589,8 @@ describe("client runtime", () => {
     composer.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
     await vi.waitFor(async () => expect((await transport.read()).annotations).toHaveLength(1));
     // No automatic capture in manual mode.
-    expect(screenshot.captureViewportPng).not.toHaveBeenCalled();
+    expect(screenshot.prepareViewportSnapshot).not.toHaveBeenCalled();
+    expect(screenshot.renderPreparedSnapshotPng).not.toHaveBeenCalled();
     expect(writeEvidence).not.toHaveBeenCalled();
     const annotationId = (await transport.read()).annotations[0]!.annotationId;
     // The editor exposes the localized Capture screenshot action.
@@ -2558,14 +2599,25 @@ describe("client runtime", () => {
     const captureButton = [...editor.querySelectorAll("button")]
       .find((button) => button.getAttribute("aria-label") === "Capture screenshot");
     expect(captureButton).toBeDefined();
+    primitives.freeze.mockClear();
+    primitives.unfreeze.mockClear();
+    screenshot.prepareViewportSnapshot.mockImplementationOnce(() => {
+      expect(primitives.freeze).toHaveBeenCalledOnce();
+      expect(primitives.unfreeze).not.toHaveBeenCalled();
+      return Object.freeze({ svg: "<svg/>", width: 100, height: 100, scale: 1, overlays: Object.freeze([]), startedAt: 0 });
+    });
     captureButton!.click();
     await vi.waitFor(() => expect(writeEvidence).toHaveBeenCalledOnce());
-    expect(screenshot.captureViewportPng).toHaveBeenCalledOnce();
+    expect(screenshot.prepareViewportSnapshot).toHaveBeenCalledOnce();
+    expect(screenshot.renderPreparedSnapshotPng).toHaveBeenCalledOnce();
+    expect(primitives.unfreeze).toHaveBeenCalledOnce();
     // The public command also captures on demand.
     writeEvidence.mockClear();
-    screenshot.captureViewportPng.mockClear();
+    screenshot.prepareViewportSnapshot.mockClear();
+    screenshot.renderPreparedSnapshotPng.mockClear();
     await mounted.api.commands.annotations.captureEvidence(annotationId);
-    expect(screenshot.captureViewportPng).toHaveBeenCalledOnce();
+    expect(screenshot.prepareViewportSnapshot).toHaveBeenCalledOnce();
+    expect(screenshot.renderPreparedSnapshotPng).toHaveBeenCalledOnce();
     expect(writeEvidence).toHaveBeenCalledOnce();
     mounted.unmount();
     pageTarget.remove();
@@ -2587,7 +2639,8 @@ describe("client runtime", () => {
     composer.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
     await vi.waitFor(async () => expect((await transport.read()).annotations).toHaveLength(1));
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(screenshot.captureViewportPng).not.toHaveBeenCalled();
+    expect(screenshot.prepareViewportSnapshot).not.toHaveBeenCalled();
+    expect(screenshot.renderPreparedSnapshotPng).not.toHaveBeenCalled();
     expect(writeEvidence).not.toHaveBeenCalled();
     const annotationId = (await transport.read()).annotations[0]!.annotationId;
     // No Capture screenshot entry in the editor and the command is a no-op.
@@ -2597,7 +2650,8 @@ describe("client runtime", () => {
       (button) => button.getAttribute("aria-label") === "Capture screenshot"
     )).toBe(false);
     await mounted.api.commands.annotations.captureEvidence(annotationId);
-    expect(screenshot.captureViewportPng).not.toHaveBeenCalled();
+    expect(screenshot.prepareViewportSnapshot).not.toHaveBeenCalled();
+    expect(screenshot.renderPreparedSnapshotPng).not.toHaveBeenCalled();
     mounted.unmount();
     pageTarget.remove();
   });
@@ -2606,7 +2660,7 @@ describe("client runtime", () => {
     const pageTarget = document.createElement("button");
     document.body.append(pageTarget);
     primitives.getElementAtPoint.mockReturnValue(pageTarget);
-    screenshot.captureViewportPng.mockResolvedValue({ png: "fake-png", width: 100, height: 100, durationMs: 1, bestEffort: true });
+    screenshot.renderPreparedSnapshotPng.mockResolvedValue({ png: "fake-png", width: 100, height: 100, durationMs: 1, bestEffort: true });
     const memory = new MemoryTaskTransport();
     const original = memory.writeEvidence.bind(memory);
     let first = true;
@@ -2648,7 +2702,7 @@ describe("client runtime", () => {
     const pageTarget = document.createElement("button");
     document.body.append(pageTarget);
     primitives.getElementAtPoint.mockReturnValue(pageTarget);
-    screenshot.captureViewportPng.mockResolvedValue({ png: "fake-png", width: 100, height: 100, durationMs: 1, bestEffort: true });
+    screenshot.renderPreparedSnapshotPng.mockResolvedValue({ png: "fake-png", width: 100, height: 100, durationMs: 1, bestEffort: true });
     const memory = new MemoryTaskTransport();
     const writeEvidence = vi.spyOn(memory, "writeEvidence").mockImplementation(async (input) => {
       const latest = await memory.read();
@@ -2687,7 +2741,7 @@ describe("client runtime", () => {
     const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
     const capture = async (comment: string) => {
       let resolveCapture!: (value: unknown) => void;
-      screenshot.captureViewportPng.mockReturnValueOnce(new Promise((resolve) => { resolveCapture = resolve; }));
+      screenshot.renderPreparedSnapshotPng.mockReturnValueOnce(new Promise((resolve) => { resolveCapture = resolve; }));
       mounted.api.commands.capture.startPick();
       document.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 10 }));
       const composer = shadow.querySelector<HTMLElement>(".aa-composer")!;
@@ -2728,7 +2782,8 @@ describe("client runtime", () => {
       (button) => button.getAttribute("aria-label") === "Capture screenshot"
     )).toBe(false);
     await mounted.api.commands.annotations.captureEvidence("ann-1");
-    expect(screenshot.captureViewportPng).not.toHaveBeenCalled();
+    expect(screenshot.prepareViewportSnapshot).not.toHaveBeenCalled();
+    expect(screenshot.renderPreparedSnapshotPng).not.toHaveBeenCalled();
     mounted.unmount();
   });
 
@@ -2736,7 +2791,7 @@ describe("client runtime", () => {
     const pageTarget = document.createElement("button");
     document.body.append(pageTarget);
     primitives.getElementAtPoint.mockReturnValue(pageTarget);
-    screenshot.captureViewportPng.mockResolvedValue({ png: "fake-png", width: 100, height: 100, durationMs: 1, bestEffort: true });
+    screenshot.renderPreparedSnapshotPng.mockResolvedValue({ png: "fake-png", width: 100, height: 100, durationMs: 1, bestEffort: true });
     const fetchMock = vi.fn<typeof fetch>(async (input: RequestInfo | URL) => {
       if (String(input).endsWith("/revision")) {
         return new Response(JSON.stringify({ referencedSourceRevision: "ab".repeat(32) }), { status: 200 });
@@ -2792,7 +2847,7 @@ describe("client runtime", () => {
     const pageTarget = document.createElement("button");
     document.body.append(pageTarget);
     primitives.getElementAtPoint.mockReturnValue(pageTarget);
-    screenshot.captureViewportPng.mockResolvedValue({ png: "fake-png", width: 100, height: 100, durationMs: 1, bestEffort: true });
+    screenshot.renderPreparedSnapshotPng.mockResolvedValue({ png: "fake-png", width: 100, height: 100, durationMs: 1, bestEffort: true });
     const memory = new MemoryTaskTransport();
     const writeEvidence = vi.spyOn(memory, "writeEvidence").mockImplementation(async (input) => {
       const latest = await memory.read();
@@ -2827,7 +2882,7 @@ describe("client runtime", () => {
     const initial = taskFixture();
     let publish!: (task: AgentAnnotationsTask) => void;
     let resolveCapture!: (value: unknown) => void;
-    screenshot.captureViewportPng.mockReturnValue(new Promise((resolve) => { resolveCapture = resolve; }));
+    screenshot.renderPreparedSnapshotPng.mockReturnValue(new Promise((resolve) => { resolveCapture = resolve; }));
     const writeEvidence = vi.fn(async (input: { taskId: string }) => {
       expect(input.taskId).toBe(initial.taskId);
       return initial;
@@ -2849,7 +2904,8 @@ describe("client runtime", () => {
       .find((button) => button.getAttribute("aria-label") === "Capture screenshot")!;
     captureButton.click();
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(screenshot.captureViewportPng).toHaveBeenCalledOnce();
+    expect(screenshot.prepareViewportSnapshot).toHaveBeenCalledOnce();
+    expect(screenshot.renderPreparedSnapshotPng).toHaveBeenCalledOnce();
     // The task identity is replaced while the capture is pending.
     publish({ ...initial, taskId: "task-replacement", taskRevision: 0 });
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -2863,7 +2919,7 @@ describe("client runtime", () => {
     const pageTarget = document.createElement("button");
     document.body.append(pageTarget);
     primitives.getElementAtPoint.mockReturnValue(pageTarget);
-    screenshot.captureViewportPng.mockResolvedValue({ png: "fake-png", width: 100, height: 100, durationMs: 1, bestEffort: true });
+    screenshot.renderPreparedSnapshotPng.mockResolvedValue({ png: "fake-png", width: 100, height: 100, durationMs: 1, bestEffort: true });
     const memory = new MemoryTaskTransport();
     const diagnostics: string[] = [];
     const appendDiagnostics = vi.fn(async (entries: AgentAnnotationsDiagnosticsEntry[]) => {
@@ -2913,7 +2969,7 @@ describe("client runtime", () => {
       mutate: async () => initial,
       writeEvidence: () => new Promise((resolve) => { resolveWrite = resolve; }),
     };
-    screenshot.captureViewportPng.mockResolvedValue({ png: "fake-png", width: 100, height: 100, durationMs: 1, bestEffort: true });
+    screenshot.renderPreparedSnapshotPng.mockResolvedValue({ png: "fake-png", width: 100, height: 100, durationMs: 1, bestEffort: true });
     const mounted = await mountAgentAnnotations({ transport, screenshotEvidence: "manual" });
     const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
     mounted.api.commands.markers.focus("ann-1");
@@ -3128,7 +3184,7 @@ describe("client runtime", () => {
     const pageTarget = document.createElement("button");
     document.body.append(pageTarget);
     primitives.getElementAtPoint.mockReturnValue(pageTarget);
-    screenshot.captureViewportPng.mockResolvedValue({ png: "fake-png", width: 100, height: 100, durationMs: 1, bestEffort: true });
+    screenshot.renderPreparedSnapshotPng.mockResolvedValue({ png: "fake-png", width: 100, height: 100, durationMs: 1, bestEffort: true });
     const transport = new MemoryTaskTransport();
     const writeEvidence = vi.spyOn(transport, "writeEvidence");
     const mounted = await mountAgentAnnotations({ transport });
@@ -3142,19 +3198,21 @@ describe("client runtime", () => {
       composer.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
       for (let index = 0; index < 8; index += 1) await Promise.resolve();
     };
-    // Save 1: the capture is deferred behind the tracked timer.
+    // Save 1: preparation is synchronous while rendering is deferred.
     await submitSave("Deferred save");
-    expect(screenshot.captureViewportPng).not.toHaveBeenCalled();
+    expect(screenshot.prepareViewportSnapshot).toHaveBeenCalledTimes(1);
+    expect(screenshot.renderPreparedSnapshotPng).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
-    expect(screenshot.captureViewportPng).toHaveBeenCalledTimes(1);
+    expect(screenshot.renderPreparedSnapshotPng).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(0);
     expect(writeEvidence).toHaveBeenCalledTimes(1);
-    // Save 2: unmount cancels the pending deferred capture before the clone.
+    // Save 2: unmount cancels the pending render, after preparation is complete.
     await submitSave("Cancelled capture");
-    expect(screenshot.captureViewportPng).toHaveBeenCalledTimes(1);
+    expect(screenshot.prepareViewportSnapshot).toHaveBeenCalledTimes(2);
+    expect(screenshot.renderPreparedSnapshotPng).toHaveBeenCalledTimes(1);
     mounted.unmount();
     await vi.runOnlyPendingTimersAsync();
-    expect(screenshot.captureViewportPng).toHaveBeenCalledTimes(1);
+    expect(screenshot.renderPreparedSnapshotPng).toHaveBeenCalledTimes(1);
     expect(writeEvidence).toHaveBeenCalledTimes(1);
     pageTarget.remove();
   });
@@ -4323,7 +4381,7 @@ describe("client runtime", () => {
       }),
       writeEvidence,
     };
-    screenshot.captureViewportPng.mockResolvedValue({ png: "fake-png", width: 100, height: 100 });
+    screenshot.renderPreparedSnapshotPng.mockResolvedValue({ png: "fake-png", width: 100, height: 100 });
     const target = document.createElement("button");
     document.body.append(target);
     primitives.getElementAtPoint.mockReturnValue(target);

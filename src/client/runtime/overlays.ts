@@ -10,6 +10,7 @@ import {
 } from "../icons.js";
 import { elementAnnotation, regionAnnotation, type RegisteredTargetEnricher } from "./annotated.js";
 import { targetBounds } from "../inspection-engine.js";
+import type { PreparedViewportSnapshot } from "../screenshot.js";
 import type { MarkerResolutionSnapshot } from "./markers.js";
 import type {
   AgentAnnotation,
@@ -68,7 +69,10 @@ export type OverlayBindings = {
   closeEditor(): void;
   captureEvidence(annotationId: string): Promise<void>;
   clearTransientSelection(): void;
-  scheduleScreenshotEvidence(input: ScreenshotEvidenceInput & { overlays: readonly ScreenshotRect[] }): void;
+  prepareScreenshotEvidence(
+    input: ScreenshotEvidenceInput & { overlays: readonly ScreenshotRect[] }
+  ): (ScreenshotEvidenceInput & { snapshot: PreparedViewportSnapshot }) | null;
+  scheduleScreenshotEvidence(input: ScreenshotEvidenceInput & { snapshot: PreparedViewportSnapshot }): void;
   setStatus(message: string): void;
   markers: {
     resolutionSnapshot(annotation: AgentAnnotation): MarkerResolutionSnapshot;
@@ -301,18 +305,18 @@ export const createOverlayController = (b: OverlayBindings): OverlayController =
         // Copy the immutable data needed for background evidence, then close
         // the composer and show success immediately: the screenshot never
         // blocks the save and never rolls back the annotation.
-        let evidenceInput: (ScreenshotEvidenceInput & { overlays: readonly ScreenshotRect[] }) | null = null;
+        let evidenceInput: (ScreenshotEvidenceInput & { snapshot: PreparedViewportSnapshot }) | null = null;
         if (persisted && b.canWriteEvidence() && b.screenshotMode() === "auto" && b.routeKey() === submittedRouteKey) {
           const overlays = composer.kind === "region"
             ? [{ ...composer.rect }]
             : composer.elements.map((element) => ({ ...targetBounds(element) }));
-          evidenceInput = {
+          evidenceInput = b.prepareScreenshotEvidence({
             annotationId: annotation.annotationId,
             taskId: persisted.taskId,
             taskRevision: persisted.taskRevision,
             routeKey: submittedRouteKey,
             overlays,
-          };
+          });
         }
         b.clearTransientSelection();
         b.render();

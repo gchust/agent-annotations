@@ -577,9 +577,10 @@ export async function mountAgentAnnotations(
     appRoot: () => appRoot,
     host: () => host,
     isInAppRoot: (element) => isInAppRoot(element),
+    setInspectionFrozen,
     transport: () => transport,
   });
-  const { scheduleScreenshotEvidence, captureEvidence } = evidenceController;
+  const { prepareScreenshotEvidence, scheduleScreenshotEvidence, captureEvidence } = evidenceController;
 
   const snapshot = (): StudioPublicSnapshot => {
     const payload: StudioPublicSnapshot = {
@@ -784,6 +785,7 @@ export async function mountAgentAnnotations(
     closeEditor: () => closeEditor(),
     captureEvidence,
     clearTransientSelection: () => clearTransientSelection(),
+    prepareScreenshotEvidence: (input) => prepareScreenshotEvidence(input),
     scheduleScreenshotEvidence: (input) => scheduleScreenshotEvidence(input),
     setStatus: (message) => setStatus(message),
     markers: {
