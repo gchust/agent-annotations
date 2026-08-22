@@ -75,6 +75,22 @@
 - The remaining root exports are pure ID, selection, placement, selector, and
   shortcut helpers plus their public types.
 
+## `@gchust/agent-annotations/core`
+
+Pure, host-neutral Node entry with no React, React DOM, Vite, or Node built-in
+imports (and a built declaration closure free of React/DOM references): task
+schema and validation (`parseAgentAnnotationsTask`, `validateAgentAnnotationsTask`,
+`createAgentAnnotationsTask`, `isAgentAnnotationsTask`), mutation
+(`applyAgentAnnotationsMutation`), formatting/handoff (`formatAgentAnnotationsTask`,
+`formatAgentAnnotationsTaskMarkdown`, `formatAgentAnnotationsHandoff`),
+redaction (`redactAgentAnnotationsTask`, `redactAgentAnnotationsText`,
+`redactAgentAnnotationsMutationRequest`), ids, selection, placement,
+selectors, shortcuts, and the pure task/core types (`AgentAnnotationsTask`,
+`AgentAnnotation`, `AgentAnnotationFilter`, mutation, redaction, validation,
+shortcut, selection, and placement types). It runs in a Node consumer with no
+React installed and is the recommended import for Node tooling; the root
+entry keeps the browser runtime plus the same core API.
+
 ## `@gchust/agent-annotations/vite`
 
 The default export is `agentAnnotations(options)`. Options are `root`, `dir`,

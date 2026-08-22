@@ -39,7 +39,6 @@ import type {
 import { Component, createElement, useLayoutEffect, useRef, useSyncExternalStore, type ComponentType } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
-import { renderToStaticMarkup } from "react-dom/server";
 import {
   disposeInspectionEngine,
   inspectTarget,
@@ -63,11 +62,13 @@ import {
   CaptureIcon,
   CloseIcon,
   CompleteIcon,
+  createIconSvg,
   DeleteIcon,
   FallbackIcon,
   GripIcon,
   ReopenIcon,
   SaveIcon,
+  type BuiltinIcon,
 } from "./icons.js";
 import { captureViewportPng, type CapturedScreenshot, type ScreenshotRect } from "./screenshot.js";
 import { localeMessages, MESSAGES } from "./messages.js";
@@ -1464,12 +1465,9 @@ export async function mountAgentAnnotations(
     void execute();
   };
 
-  const iconMarkup = (Icon: ComponentType<AgentAnnotationsIconProps>): string =>
-    renderToStaticMarkup(createElement(Icon, { className: "aa-icon" }));
-
   const iconButton = (
     label: string,
-    Icon: ComponentType<AgentAnnotationsIconProps>,
+    Icon: BuiltinIcon,
     action?: () => void,
     attributes: Record<string, string> = {}
   ): HTMLButtonElement => {
@@ -1480,7 +1478,9 @@ export async function mountAgentAnnotations(
     for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, value);
     const slot = document.createElement("span");
     slot.className = "aa-icon-slot";
-    slot.innerHTML = iconMarkup(Icon);
+    // Imperative overlay buttons only ever use built-in icons, rendered as
+    // controlled DOM SVG from the shared path data.
+    slot.append(createIconSvg(Icon));
     node.append(slot);
     if (action) node.addEventListener("click", action);
     node.addEventListener("mouseenter", () => showTooltip(node));
@@ -1492,7 +1492,7 @@ export async function mountAgentAnnotations(
 
   const submitButton = (
     label: string,
-    Icon: ComponentType<AgentAnnotationsIconProps>
+    Icon: BuiltinIcon
   ): HTMLButtonElement => {
     const node = iconButton(label, Icon);
     node.type = "submit";

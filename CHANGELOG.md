@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Added a pure, host-neutral `@gchust/agent-annotations/core` subpath export
+  for Node tooling: task schema/validation, mutation, formatting/handoff,
+  redaction, ids, selection, placement, selectors, and shortcuts plus their
+  pure types. `/core` never imports React, React DOM, Vite, or Node built-ins,
+  and its built declaration closure is free of React/DOM references.
+- Removed the browser runtime's dependency on `react-dom/server`: imperative
+  overlay icons are built as controlled DOM SVG from the same path data as the
+  React icon components.
 - **Breaking**: renamed the CLI `verify` command to `validate-task`; `verify`
   is no longer recognized and returns `unknown command: verify` with exit
   code 2. `validate-task` strictly validates the persisted task file and never

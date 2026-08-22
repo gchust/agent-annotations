@@ -27,4 +27,17 @@ for (const text of [
 if (/\bmcp\b/i.test(readme)) {
   throw new Error("README must not mention MCP");
 }
+// Node 20 compatibility guards: the Vite config example must use the form
+// supported on every Node >= 20 minor (fileURLToPath(new URL(...))), never
+// import.meta.dirname. Compilation of the example is proven once by the
+// external packed consumer gate, not by this smoke.
+if (readme.includes("import.meta.dirname")) {
+  throw new Error("README must not use import.meta.dirname (Node 20 example)");
+}
+if (!readme.includes('import { fileURLToPath } from "node:url"')) {
+  throw new Error("README Vite example must import node:url for fileURLToPath");
+}
+if (!readme.includes('fileURLToPath(new URL("./src/annotation-extension.ts", import.meta.url))')) {
+  throw new Error("README Vite example must use the fileURLToPath(new URL(...)) form");
+}
 console.log("[agent-annotations] docs smoke PASS");

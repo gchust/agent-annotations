@@ -96,15 +96,33 @@ export default defineClientExtension({
 Register its absolute browser-module path with the Vite plugin:
 
 ```ts
-import path from "node:path";
+import { fileURLToPath } from "node:url";
 import agentAnnotations from "@gchust/agent-annotations/vite";
 import { defineConfig } from "vite";
 
+// Node >= 20: fileURLToPath(new URL(...)) works on every supported minor.
 export default defineConfig({
   plugins: [agentAnnotations({
-    clientExtensions: [path.resolve(import.meta.dirname, "src/annotation-extension.ts")],
+    clientExtensions: [fileURLToPath(new URL("./src/annotation-extension.ts", import.meta.url))],
   })],
 });
+```
+
+## Node tooling without the browser runtime
+
+The root export keeps the browser runtime plus the core API, but Node tools
+(task file manipulation, validation, mutation, redaction, formatting,
+handoffs, ids, selection, placement, selectors, shortcuts) can import the
+pure, host-neutral `@gchust/agent-annotations/core` subpath instead. `/core`
+never imports React, React DOM, Vite, or Node built-ins, so it runs in a
+consumer that has none of them installed:
+
+```ts
+import {
+  parseAgentAnnotationsTask,
+  formatAgentAnnotationsTaskMarkdown,
+  redactAgentAnnotationsTask,
+} from "@gchust/agent-annotations/core";
 ```
 
 ## CLI
