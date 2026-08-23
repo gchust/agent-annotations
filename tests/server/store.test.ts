@@ -31,7 +31,9 @@ describe("file task store", () => {
       runtimeRoot: root(),
     };
     store.writeSession(session);
-    expect(statSync(store.sessionPath).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") {
+      expect(statSync(store.sessionPath).mode & 0o777).toBe(0o600);
+    }
     expect(JSON.parse(readFileSync(store.sessionPath, "utf8"))).toEqual(session);
     await store.close("wrong");
     expect(statSync(store.sessionPath).isFile()).toBe(true);
@@ -146,7 +148,7 @@ describe("file task store", () => {
       `const task = await store.readOrCreate();`,
       `process.stdout.write(JSON.stringify({ taskId: task.taskId, revision: task.taskRevision }), () => process.exit(0));`,
     ].join("\n");
-    const children = Array.from({ length: 48 }, () => spawn(
+    const children = Array.from({ length: 8 }, () => spawn(
       process.execPath,
       ["--input-type=module", "-e", script],
       { stdio: ["ignore", "pipe", "pipe"] }

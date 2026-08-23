@@ -226,7 +226,9 @@ test("multi target summary, highlights, and iframe tracking share dynamic refres
   await expect(listItem).toContainText("2/2 targets");
   await page.keyboard.press("Escape");
 
+  await expect(shadow(page, '[aria-label^="Annotations"]')).toBeFocused();
   await marker.focus();
+  await expect(marker).toBeFocused();
   const highlights = shadow(page, ".aa-marker-highlight");
   await expect(highlights).toHaveCount(2);
   const assertAligned = async () => {

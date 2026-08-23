@@ -31,7 +31,9 @@ describe("persisted diagnostics", () => {
       { source: "window", message: "second", timestamp: "2026-08-12T12:00:01.000Z" },
     ]);
     expect(entries.map(({ message }) => message)).toEqual(["first", "second"]);
-    expect(statSync(path.join(dir, DIAGNOSTICS_FILE)).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") {
+      expect(statSync(path.join(dir, DIAGNOSTICS_FILE)).mode & 0o777).toBe(0o600);
+    }
     expect((await readDiagnostics(dir)).map(({ message }) => message)).toEqual(["first", "second"]);
     expect(readFileSync(path.join(dir, DIAGNOSTICS_FILE), "utf8")).not.toContain(".tmp");
   });
@@ -269,7 +271,9 @@ describe("persisted diagnostics", () => {
     }]);
     await clearDiagnostics(dir);
     expect(await readDiagnostics(dir)).toEqual([]);
-    expect(statSync(path.join(dir, DIAGNOSTICS_FILE)).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") {
+      expect(statSync(path.join(dir, DIAGNOSTICS_FILE)).mode & 0o777).toBe(0o600);
+    }
   });
 
   it("serializes concurrent appends and clears without lost or corrupted entries", async () => {

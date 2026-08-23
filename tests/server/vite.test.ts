@@ -193,15 +193,10 @@ describe("serve-only Vite plugin", () => {
     });
     await server.listen();
     try {
-      const address = server.httpServer!.address();
-      if (!address || typeof address === "string") throw new Error("missing Vite address");
       for (const file of [a, b]) {
-        const url = `http://127.0.0.1:${address.port}/${path.relative(root, file).split(path.sep).join("/")}`;
-        const code = await (await fetch(url)).text();
-        const encoded = code.match(/sourceMappingURL=data:application\/json;base64,([A-Za-z\d+/=]+)/)?.[1];
-        expect(encoded).toBeTruthy();
-        const map = JSON.parse(Buffer.from(encoded!, "base64").toString("utf8"));
-        expect(map.sources).toEqual([pathToFileURL(file).href]);
+        const id = `/${path.relative(root, file).split(path.sep).join("/")}`;
+        const transformed = await server.transformRequest(id);
+        expect(transformed?.map).toMatchObject({ sources: [pathToFileURL(file).href] });
       }
     } finally {
       await server.close();
