@@ -195,7 +195,7 @@ describe("serve-only Vite plugin", () => {
     });
     await server.listen();
     try {
-      expect(server.config.root).toBe(realpathSync.native(root));
+      expect(path.normalize(server.config.root)).toBe(path.normalize(realpathSync.native(root)));
       for (const file of [a, b]) {
         const module = await server.environments.client.moduleGraph.ensureEntryFromUrl(file);
         const transformed = await server.pluginContainer.transform(readFileSync(file, "utf8"), module.id!);
