@@ -20,7 +20,7 @@ const stripSuffix = (value: string): string => value.split(/[?#]/, 1)[0]!;
 
 export const createSourcePathService = (workspaceRoot: string) => {
   const resolvedRoot = path.resolve(workspaceRoot);
-  const root = existsSync(resolvedRoot) ? realpathSync(resolvedRoot) : resolvedRoot;
+  const root = existsSync(resolvedRoot) ? realpathSync.native(resolvedRoot) : resolvedRoot;
 
   const canonicalize = (raw: string): string | null => {
     const trimmed = raw.trim();
@@ -58,11 +58,13 @@ export const createSourcePathService = (workspaceRoot: string) => {
           ? path.resolve(value)
           : path.resolve(root, value);
     }
-    if (!inside(root, candidate) || !existsSync(candidate)) return null;
+    if (!existsSync(candidate)) return null;
 
     let real: string;
     try {
-      real = realpathSync(candidate);
+      candidate = path.join(realpathSync.native(path.dirname(candidate)), path.basename(candidate));
+      if (!inside(root, candidate)) return null;
+      real = realpathSync.native(candidate);
     } catch {
       return null;
     }

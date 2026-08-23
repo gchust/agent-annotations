@@ -140,7 +140,7 @@ export default function agentAnnotations(
   const initialState = validateAgentAnnotationsInitialState(options.initialState);
   const diagnostics = validateAgentAnnotationsDiagnosticsConfig(options.diagnostics);
   let root = path.resolve(options.root ?? process.cwd());
-  let realRoot = existsSync(root) ? realpathSync(root) : root;
+  let realRoot = existsSync(root) ? realpathSync.native(root) : root;
   let runtimeRoot = path.resolve(root, options.dir ?? ".agent-annotations");
   const assertRuntimeRoot = (): void => {
     if (!inside(root, runtimeRoot)) {
@@ -176,7 +176,7 @@ export default function agentAnnotations(
       startedAt: new Date().toISOString(),
       token,
       workspaceRoot: realRoot,
-      runtimeRoot: realpathSync(runtimeRoot),
+      runtimeRoot: realpathSync.native(runtimeRoot),
     });
   };
 
@@ -187,7 +187,7 @@ export default function agentAnnotations(
       viteBase = config.base;
       resolvedEndpoint = `${viteBase.replace(/\/$/, "")}${endpoint}`;
       root = path.resolve(options.root ?? config.root);
-      realRoot = realpathSync(root);
+      realRoot = realpathSync.native(root);
       runtimeRoot = path.resolve(root, options.dir ?? ".agent-annotations");
       assertRuntimeRoot();
       store = new FileTaskStore(runtimeRoot);
@@ -247,7 +247,7 @@ export default function agentAnnotations(
           !path.isAbsolute(file) ||
           !existsSync(file)
         ) return;
-        const realModule = realpathSync(file);
+        const realModule = realpathSync.native(file);
         if (!statSync(realModule).isFile() || !inside(realRoot, realModule)) return;
         const map = this.getCombinedSourcemap();
         if (!map?.version || !map.sources.length) return;
@@ -278,7 +278,7 @@ export default function agentAnnotations(
               candidate = path.resolve(base, source);
             }
             if (!existsSync(candidate)) return;
-            const realSource = realpathSync(candidate);
+            const realSource = realpathSync.native(candidate);
             if (!statSync(realSource).isFile() || !inside(realRoot, realSource)) return;
             sources.push(pathToFileURL(realSource).href);
           } catch {

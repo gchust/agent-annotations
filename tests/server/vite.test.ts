@@ -80,13 +80,13 @@ describe("serve-only Vite plugin", () => {
     expect(map).toMatchObject({
       mappings: "AAAA",
       names: ["Card"],
-      sources: [pathToFileURL(realpathSync(a)).href],
+      sources: [pathToFileURL(realpathSync.native(a)).href],
       file: a,
       sourceRoot: undefined,
     });
     const rootedMap = { ...map, sources: [path.basename(a)], sourceRoot: path.dirname(a) };
     transform.call({ getCombinedSourcemap: () => rootedMap }, "code", a, { ssr: false });
-    expect(rootedMap).toMatchObject({ sources: [pathToFileURL(realpathSync(a)).href], sourceRoot: undefined });
+    expect(rootedMap).toMatchObject({ sources: [pathToFileURL(realpathSync.native(a)).href], sourceRoot: undefined });
     expect(transform.call({ getCombinedSourcemap: () => ({ ...map, sources: ["../../../outside.tsx"] }) }, "code", `${a}?direct#fragment`)).toBeUndefined();
     expect(transform.call({ getCombinedSourcemap: () => map }, "code", path.join(root, "node_modules/pkg/Card.tsx"), { ssr: false })).toBeUndefined();
     expect(transform.call({ getCombinedSourcemap: () => map }, "code", a, { ssr: true })).toBeUndefined();
@@ -196,7 +196,7 @@ describe("serve-only Vite plugin", () => {
       for (const file of [a, b]) {
         const module = await server.environments.client.moduleGraph.ensureEntryFromUrl(file);
         const transformed = await server.pluginContainer.transform(readFileSync(file, "utf8"), module.id!);
-        expect(transformed?.map).toMatchObject({ sources: [pathToFileURL(realpathSync(file)).href] });
+        expect(transformed?.map).toMatchObject({ sources: [pathToFileURL(realpathSync.native(file)).href] });
       }
     } finally {
       await server.close();
@@ -219,8 +219,8 @@ describe("serve-only Vite plugin", () => {
       const session = JSON.parse(
         readFileSync(path.join(root, ".agent-annotations", "session.json"), "utf8")
       );
-      expect(session.workspaceRoot).toBe(realpathSync(path.resolve(root)));
-      expect(session.runtimeRoot).toBe(realpathSync(path.join(path.resolve(root), ".agent-annotations")));
+      expect(session.workspaceRoot).toBe(realpathSync.native(path.resolve(root)));
+      expect(session.runtimeRoot).toBe(realpathSync.native(path.join(path.resolve(root), ".agent-annotations")));
       const token = session.token;
       const post = (body: unknown) => fetch(`${base}/__agent-annotations/diagnostics`, {
         method: "POST",

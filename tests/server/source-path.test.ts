@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -38,6 +38,10 @@ describe("source path integrity", () => {
     expect(source.canonicalize("src\\a\\Card.tsx")).toBe("src/a/Card.tsx");
     expect(source.canonicalize(absolute)).toBe("src/a/Card.tsx");
     expect(source.canonicalize(pathToFileURL(absolute).href)).toBe("src/a/Card.tsx");
+    expect(source.canonicalize(pathToFileURL(realpathSync.native(absolute)).href)).toBe("src/a/Card.tsx");
+    const alias = path.join(path.dirname(root), "workspace-alias");
+    symlinkSync(root, alias, process.platform === "win32" ? "junction" : "dir");
+    expect(source.canonicalize(path.join(alias, "src", "a", "Card.tsx"))).toBe("src/a/Card.tsx");
     expect(source.canonicalize(`/@fs/${absolute}?import#source`)).toBe("src/a/Card.tsx");
     expect(source.canonicalize("/src/a/Card.tsx?v=1#L1")).toBe("src/a/Card.tsx");
     if (process.platform !== "win32") {
