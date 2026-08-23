@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { existsSync, linkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -139,7 +140,7 @@ describe("file task store", () => {
     const goFile = path.join(tasksDir, ".go");
     const script = [
       `import { existsSync, writeFileSync } from "node:fs";`,
-      `import { FileTaskStore } from ${JSON.stringify(path.resolve("dist/vite/index.mjs"))};`,
+      `import { FileTaskStore } from ${JSON.stringify(pathToFileURL(path.resolve("dist/vite/index.mjs")).href)};`,
       `const store = new FileTaskStore(${JSON.stringify(dir)});`,
       `writeFileSync(${JSON.stringify(path.join(tasksDir, ".ready."))} + process.pid, "ready");`,
       `while (!existsSync(${JSON.stringify(goFile)})) {`,
@@ -153,18 +154,30 @@ describe("file task store", () => {
       ["--input-type=module", "-e", script],
       { stdio: ["ignore", "pipe", "pipe"] }
     ));
+    const childOutput = new Map<(typeof children)[number], { stdout: string; stderr: string }>();
+    const childClosed = new Map<(typeof children)[number], Promise<number | null>>();
+    for (const child of children) {
+      const output = { stdout: "", stderr: "" };
+      childOutput.set(child, output);
+      child.stdout.on("data", (chunk: Buffer) => { output.stdout += String(chunk); });
+      child.stderr.on("data", (chunk: Buffer) => { output.stderr += String(chunk); });
+      childClosed.set(child, new Promise((resolve) => child.on("close", resolve)));
+    }
     // Wait for every child to signal readiness, then release them together.
     const readyDeadline = Date.now() + 15_000;
     while (readdirSync(tasksDir).filter((name) => name.startsWith(".ready.")).length < children.length) {
+      const exited = children.find((child) => child.exitCode !== null);
+      if (exited) throw new Error(childOutput.get(exited)!.stderr || `child exited ${exited.exitCode}`);
       if (Date.now() > readyDeadline) throw new Error("children did not become ready");
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
     writeFileSync(goFile, "go");
-    const outputs = await Promise.all(children.map((child) => new Promise<string>((resolve) => {
-      let buffer = "";
-      child.stdout.on("data", (chunk: Buffer) => { buffer += String(chunk); });
-      child.on("close", () => resolve(buffer));
-    })));
+    const outputs = await Promise.all(children.map(async (child) => {
+      const code = child.exitCode ?? await childClosed.get(child)!;
+      const output = childOutput.get(child)!;
+      if (code !== 0) throw new Error(output.stderr || `child exited ${code}`);
+      return output.stdout;
+    }));
     const ids = new Set(outputs.map((output) => JSON.parse(output).taskId as string));
     expect(ids.size).toBe(1);
     expect(store.read()!.taskId).toBe([...ids][0]);
