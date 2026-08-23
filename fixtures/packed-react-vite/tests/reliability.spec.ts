@@ -388,7 +388,7 @@ test("removing an annotation deletes its orphan evidence", async ({ page }) => {
   await shadow(page, `[data-annotation-id="${annotation.annotationId}"]`).click();
   await shadow(page, 'button[aria-label="Delete"]').click();
   await expect.poll(() => JSON.parse(readFileSync(taskPath, "utf8")).annotations.length).toBe(initial);
-  expect(existsSync(evidencePath)).toBe(false);
+  await expect.poll(() => existsSync(evidencePath)).toBe(false);
 });
 
 test("dynamic marker refresh stays rAF-bounded and observers stop with hidden markers", async ({ page }) => {
