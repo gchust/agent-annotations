@@ -194,8 +194,8 @@ describe("serve-only Vite plugin", () => {
     await server.listen();
     try {
       for (const file of [a, b]) {
-        await server.environments.client.moduleGraph.ensureEntryFromUrl(file);
-        const transformed = await server.pluginContainer.transform(readFileSync(file, "utf8"), file);
+        const module = await server.environments.client.moduleGraph.ensureEntryFromUrl(file);
+        const transformed = await server.pluginContainer.transform(readFileSync(file, "utf8"), module.id!);
         expect(transformed?.map).toMatchObject({ sources: [pathToFileURL(file).href] });
       }
     } finally {
