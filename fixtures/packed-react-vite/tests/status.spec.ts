@@ -13,6 +13,36 @@ const cli = (...args: string[]) => execFileSync("pnpm", ["exec", "agent-annotati
   env: { ...process.env, AGENT_ANNOTATIONS_DIR: runtimeRoot },
 });
 const statusJson = () => JSON.parse(cli("status", "--json"));
+const spawnWait = (runtimeId: string, baseline: number) => {
+  const child = spawn(process.execPath, [
+    path.resolve("node_modules/@gchust/agent-annotations/dist/cli/index.mjs"), "wait",
+    "--browser-update-revision", String(baseline),
+    "--runtime", runtimeId,
+    "--timeout-ms", "15000",
+    "--json",
+  ], {
+    cwd: process.cwd(),
+    env: { ...process.env, AGENT_ANNOTATIONS_DIR: runtimeRoot },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk) => { stdout += String(chunk); });
+  child.stderr.on("data", (chunk) => { stderr += String(chunk); });
+  return {
+    child,
+    closed: new Promise<number | null>((resolve, reject) => {
+      child.once("error", reject);
+      child.once("close", resolve);
+    }),
+    spawned: new Promise<void>((resolve, reject) => {
+      child.once("spawn", resolve);
+      child.once("error", reject);
+    }),
+    stdout: () => stdout,
+    stderr: () => stderr,
+  };
+};
 const card = path.resolve("src/duplicate-a/Card.tsx");
 const extension = path.resolve("src/demo-extension.ts");
 const ordersSource = path.resolve("src/route-b/RouteB.tsx");
@@ -223,32 +253,11 @@ test("pinned runtime wait survives reload and tabs keep distinct sessions", asyn
   const statePath = path.join(runtimeRoot, "browser-states", `${before.runtimeId}.json`);
   await page.evaluate(() => window.dispatchEvent(new Event("pagehide")));
   writeFileSync(statePath, "{invalid");
-  const child = spawn(process.execPath, [
-    path.resolve("node_modules/@gchust/agent-annotations/dist/cli/index.mjs"), "wait",
-    "--browser-update-revision", String(before.browserUpdateRevision + 1),
-    "--runtime", before.runtimeId,
-    "--timeout-ms", "15000",
-    "--json",
-  ], {
-    cwd: process.cwd(),
-    env: { ...process.env, AGENT_ANNOTATIONS_DIR: runtimeRoot },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  let stdout = "";
-  let stderr = "";
-  child.stdout.on("data", (chunk) => { stdout += String(chunk); });
-  child.stderr.on("data", (chunk) => { stderr += String(chunk); });
-  const closed = new Promise<number | null>((resolve, reject) => {
-    child.once("error", reject);
-    child.once("close", resolve);
-  });
-  await new Promise<void>((resolve, reject) => {
-    child.once("spawn", resolve);
-    child.once("error", reject);
-  });
+  const wait = spawnWait(before.runtimeId, before.browserUpdateRevision + 1);
+  await wait.spawned;
 
   await expect.poll(() => existsSync(statePath), { timeout: 5_000 }).toBe(false);
-  expect(child.exitCode).toBeNull();
+  expect(wait.child.exitCode).toBeNull();
   await page.reload();
   await expect(shadow(page, ".aa-dock")).toBeVisible();
   await expect.poll(() => JSON.parse(cli("status", "--runtime", before.runtimeId, "--json")).browserUpdateRevision, {
@@ -256,7 +265,7 @@ test("pinned runtime wait survives reload and tabs keep distinct sessions", asyn
   }).toBeGreaterThan(before.browserUpdateRevision);
   const afterReload = JSON.parse(cli("status", "--runtime", before.runtimeId, "--json"));
   expect(afterReload.selectedRuntimeId).toBe(before.runtimeId);
-  expect(child.exitCode).toBeNull();
+  expect(wait.child.exitCode).toBeNull();
   const routeSource = path.resolve("src/route-a/RouteA.tsx");
   const routeBefore = readFileSync(routeSource, "utf8");
   try {
@@ -268,10 +277,10 @@ test("pinned runtime wait survives reload and tabs keep distinct sessions", asyn
   } finally {
     writeFileSync(routeSource, routeBefore);
   }
-  expect(await closed).toBe(0);
-  expect(stderr).toBe("");
-  expect(stdout.trim().split("\n")).toHaveLength(1);
-  const waited = JSON.parse(stdout);
+  expect(await wait.closed).toBe(0);
+  expect(wait.stderr()).toBe("");
+  expect(wait.stdout().trim().split("\n")).toHaveLength(1);
+  const waited = JSON.parse(wait.stdout());
   expect(waited).toMatchObject({ changed: true, browserConnected: true });
   expect(waited.browserUpdateRevision).toBeGreaterThan(before.browserUpdateRevision + 1);
   const reloaded = JSON.parse(cli("status", "--runtime", before.runtimeId, "--json"));
@@ -286,4 +295,94 @@ test("pinned runtime wait survives reload and tabs keep distinct sessions", asyn
   const other = statusJson().runtimes.find((entry: { routeKey: string }) => entry.routeKey === "/orders");
   expect(other.runtimeId).not.toBe(before.runtimeId);
   await second.close();
+});
+
+test("keeps persisted revisions monotonic during rapid task, route, and HMR updates", async ({ page }) => {
+  await page.goto("/");
+  await expect(shadow(page, ".aa-dock")).toBeVisible();
+  await expect.poll(() => statusJson().runtimes.find((entry: { routeKey: string }) => entry.routeKey === "/"), {
+    timeout: 15_000,
+  }).toBeDefined();
+  const runtimeId = statusJson().runtimes.find((entry: { routeKey: string }) => entry.routeKey === "/").runtimeId;
+  const runtimeStatus = () => JSON.parse(cli("status", "--runtime", runtimeId, "--json"));
+  const annotationIds = new Set<string>(
+    JSON.parse(readFileSync(taskPath, "utf8")).annotations.map((entry: { annotationId: string }) => entry.annotationId)
+  );
+  await page.keyboard.press("Control+Alt+P");
+  await page.locator("#duplicate-a").click();
+  await shadow(page, '[aria-label="Annotation comment"]').fill("Heartbeat queue pressure");
+  await shadow(page, 'button[aria-label="Save annotation"]').click();
+  await expect.poll(() => JSON.parse(readFileSync(taskPath, "utf8")).annotations.length, {
+    timeout: 15_000,
+  }).toBeGreaterThan(annotationIds.size);
+  const task = JSON.parse(readFileSync(taskPath, "utf8"));
+  const annotationId = task.annotations.find((entry: { annotationId: string }) => !annotationIds.has(entry.annotationId)).annotationId;
+  await expect.poll(() => runtimeStatus().taskSynchronized, { timeout: 15_000 }).toBe(true);
+  const baseline = runtimeStatus();
+  const statePath = path.join(runtimeRoot, "browser-states", `${runtimeId}.json`);
+  const before = readFileSync(card, "utf8");
+  const stressed = before.replace("Duplicate A</button>", "Duplicate A STRESSED</button>");
+  const wait = spawnWait(runtimeId, baseline.browserUpdateRevision);
+  const revisions: number[] = [baseline.browserUpdateRevision];
+  let observing = true;
+  const observe = async () => {
+    while (observing) {
+      try {
+        revisions.push(JSON.parse(readFileSync(statePath, "utf8")).browserUpdateRevision);
+      } catch {
+        // Atomic replacement may briefly leave no readable sample on some platforms.
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  };
+  const observation = observe();
+  try {
+    await wait.spawned;
+    const mutations = page.evaluate(async (id) => {
+      const studio = (window as { __demoExtension?: { studio?: {
+        commands: { annotations: { complete(id: string): Promise<void>; reopen(id: string): Promise<void> } };
+      } } }).__demoExtension?.studio;
+      if (!studio) throw new Error("missing demo studio");
+      await studio.commands.annotations.complete(id);
+      history.pushState({}, "", "/orders");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+      await studio.commands.annotations.reopen(id);
+    }, annotationId);
+    writeFileSync(card, stressed);
+    await mutations;
+    await expect(page.locator("h1")).toHaveText("Route B");
+    expect(await wait.closed).toBe(0);
+    expect(wait.stderr()).toBe("");
+    expect(JSON.parse(wait.stdout())).toMatchObject({ changed: true, browserConnected: true });
+    await expect.poll(() => runtimeStatus().taskSynchronized, { timeout: 15_000 }).toBe(true);
+    const settledRevision = runtimeStatus().browserUpdateRevision;
+    writeFileSync(card, `${stressed}\n`);
+    await expect.poll(() => runtimeStatus().browserUpdateRevision, { timeout: 15_000 })
+      .toBeGreaterThan(settledRevision);
+    await expect.poll(() => runtimeStatus().referencedSourceSynchronized, { timeout: 15_000 }).toBe(true);
+    expect(JSON.parse(cli(
+      "status", "--runtime", runtimeId, "--check", "--json"
+    ))).toMatchObject({
+      selectedRuntimeId: runtimeId,
+      browserConnected: true,
+      taskSynchronized: true,
+      referencedSourceSynchronized: true,
+    });
+  } finally {
+    writeFileSync(card, before);
+    observing = false;
+    await observation;
+    if (wait.child.exitCode === null) {
+      wait.child.kill();
+      await wait.closed;
+    }
+  }
+  revisions.push(JSON.parse(readFileSync(statePath, "utf8")).browserUpdateRevision);
+  const observed = revisions.filter((revision, index) => index === 0 || revision !== revisions[index - 1]);
+  console.log(`heartbeat-revisions observed=${JSON.stringify(observed)}`);
+  expect(observed.length).toBeGreaterThan(1);
+  expect(observed.at(-1)).toBeGreaterThan(baseline.browserUpdateRevision);
+  expect(revisions.every((revision, index) => index === 0 || revision >= revisions[index - 1]!)).toBe(true);
+  await page.close();
+  rmSync(statePath, { force: true });
 });

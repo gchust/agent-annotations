@@ -48,32 +48,62 @@ export const createBrowserStatusController = (b: BrowserStatusBindings) => {
   let referencedSourceRevision: string | null = null;
   let referencedSourceFiles = taskSourceFiles(b.task());
   let referencedSourceRevisionRequest = 0;
+  let requestActive = false;
+  let pendingHeartbeat: string | null = null;
+  let heartbeatsStopped = false;
+
+  const postHeartbeat = (body: string): void => {
+    requestActive = true;
+    const finish = () => {
+      requestActive = false;
+      if (heartbeatsStopped || b.destroyed()) {
+        pendingHeartbeat = null;
+        return;
+      }
+      const pending = pendingHeartbeat;
+      pendingHeartbeat = null;
+      if (pending !== null) postHeartbeat(pending);
+    };
+    try {
+      void fetch(`${b.config!.endpoint}/heartbeat`, {
+        method: "POST",
+        headers: {
+          "x-agent-annotations-token": b.config!.token,
+          "content-type": "application/json",
+        },
+        body,
+      }).then(finish, finish);
+    } catch {
+      finish();
+    }
+  };
 
   const sendHeartbeat = (): void => {
-    if (b.destroyed() || !b.config) return;
-    fetch(`${b.config.endpoint}/heartbeat`, {
-      method: "POST",
-      headers: {
-        "x-agent-annotations-token": b.config.token,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        schema: "agent-annotations.browser-state.v2",
-        runtimeId,
-        clientVersion: PACKAGE_VERSION,
-        routeKey: b.routeKey(),
-        taskId: b.task().taskId,
-        taskRevision: b.task().taskRevision,
-        browserUpdateRevision,
-        referencedSourceRevision,
-        referencedSourceFiles,
-        annotationHealth: b.annotationHealth(),
-        mountedAt,
-        lastHeartbeatAt: now(),
-      }),
-    }).catch(() => {
-      // The dev server may be restarting; the next heartbeat reconnects.
+    if (heartbeatsStopped || b.destroyed() || !b.config) return;
+    const snapshot = JSON.stringify({
+      schema: "agent-annotations.browser-state.v2",
+      runtimeId,
+      clientVersion: PACKAGE_VERSION,
+      routeKey: b.routeKey(),
+      taskId: b.task().taskId,
+      taskRevision: b.task().taskRevision,
+      browserUpdateRevision,
+      referencedSourceRevision,
+      referencedSourceFiles: [...referencedSourceFiles],
+      annotationHealth: b.annotationHealth().map((entry) => ({ ...entry })),
+      mountedAt,
+      lastHeartbeatAt: now(),
     });
+    if (requestActive) {
+      pendingHeartbeat = snapshot;
+      return;
+    }
+    postHeartbeat(snapshot);
+  };
+
+  const stopHeartbeats = (): void => {
+    heartbeatsStopped = true;
+    pendingHeartbeat = null;
   };
 
   const setTask = (next: AgentAnnotationsTask): void => {
@@ -89,14 +119,14 @@ export const createBrowserStatusController = (b: BrowserStatusBindings) => {
   };
 
   const scheduleHeartbeat = (): void => {
-    if (b.destroyed() || !b.config) return;
+    if (heartbeatsStopped || b.destroyed() || !b.config) return;
     b.resetResolutionSnapshots();
     sendHeartbeat();
     b.scheduleTimer(scheduleHeartbeat, 5_000);
   };
 
   const reportBrowserUpdate = (): void => {
-    if (b.destroyed() || !b.config) return;
+    if (heartbeatsStopped || b.destroyed() || !b.config) return;
     // ponytail: Browser State v2 is safe-integer bounded; widen that schema to raise this ceiling.
     if (browserUpdateRevision === Number.MAX_SAFE_INTEGER) return;
     browserUpdateRevision += 1;
@@ -146,6 +176,7 @@ export const createBrowserStatusController = (b: BrowserStatusBindings) => {
 
   const removeBrowserState = (): void => {
     if (!b.config) return;
+    stopHeartbeats();
     clearBrowserSessionState(b.config.endpoint);
     fetch(`${b.config.endpoint}/heartbeat`, {
       method: "DELETE",
@@ -162,6 +193,7 @@ export const createBrowserStatusController = (b: BrowserStatusBindings) => {
     runtimeId,
     setTask,
     sendHeartbeat,
+    stopHeartbeats,
     scheduleHeartbeat,
     reportBrowserUpdate,
     removeBrowserState,

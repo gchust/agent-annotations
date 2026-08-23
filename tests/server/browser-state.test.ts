@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -164,6 +164,64 @@ describe("browser state v2", () => {
     expect(readAgentAnnotationsBrowserStates(dir, Date.parse(state.lastHeartbeatAt)).map(({ runtimeId }) => runtimeId)).toEqual(["runtime-2"]);
   });
 
+  it("rejects lower revisions without changing the file and allows equal state updates", () => {
+    const dir = root();
+    const revision6 = { ...state, browserUpdateRevision: 6 };
+    writeAgentAnnotationsBrowserState(dir, revision6);
+    const file = browserStatePath(dir, state.runtimeId);
+    const beforeStale = readFileSync(file, "utf8");
+    let stale: unknown;
+    try {
+      writeAgentAnnotationsBrowserState(dir, {
+        ...revision6,
+        routeKey: "/stale",
+        browserUpdateRevision: 5,
+      });
+    } catch (error) {
+      stale = error;
+    }
+    expect(stale).toMatchObject({ code: "stale_browser_state", message: "stale_browser_state" });
+    expect(readFileSync(file, "utf8")).toBe(beforeStale);
+
+    writeAgentAnnotationsBrowserState(dir, {
+      ...revision6,
+      routeKey: "/equal",
+      taskRevision: 4,
+      annotationHealth: [{ annotationId: "ann-1", resolved: 1, total: 1, reason: null }],
+    });
+    expect(JSON.parse(readFileSync(file, "utf8"))).toMatchObject({
+      routeKey: "/equal",
+      taskRevision: 4,
+      browserUpdateRevision: 6,
+      annotationHealth: [{ annotationId: "ann-1" }],
+    });
+    writeAgentAnnotationsBrowserState(dir, {
+      ...revision6,
+      routeKey: "/still-valid",
+      taskRevision: 5,
+      browserUpdateRevision: 6,
+    });
+    expect(JSON.parse(readFileSync(file, "utf8"))).toMatchObject({
+      routeKey: "/still-valid",
+      taskRevision: 5,
+      browserUpdateRevision: 6,
+    });
+
+    writeAgentAnnotationsBrowserState(dir, { ...revision6, browserUpdateRevision: 7 });
+    writeAgentAnnotationsBrowserState(dir, {
+      ...state,
+      runtimeId: "runtime-2",
+      browserUpdateRevision: 5,
+    });
+    expect(readAgentAnnotationsBrowserStates(dir, Date.parse(state.lastHeartbeatAt)).map((entry) => ({
+      runtimeId: entry.runtimeId,
+      browserUpdateRevision: entry.browserUpdateRevision,
+    }))).toEqual([
+      { runtimeId: "runtime-1", browserUpdateRevision: 7 },
+      { runtimeId: "runtime-2", browserUpdateRevision: 5 },
+    ]);
+  });
+
   it("cleans invalid and expired files without deleting merely stale states", () => {
     const dir = root();
     const states = path.join(dir, "browser-states");
@@ -208,5 +266,15 @@ describe("browser state v2", () => {
     }
     expect(() => parseAgentAnnotationsBrowserState({ ...state, runtimeId: "../escape" }))
       .toThrow(/runtimeId/);
+  });
+
+  it("does not follow a browser state file symlink while checking revisions", () => {
+    const dir = root();
+    const outside = path.join(dir, "outside.json");
+    mkdirSync(path.join(dir, "browser-states"));
+    writeFileSync(outside, JSON.stringify({ ...state, browserUpdateRevision: 99 }));
+    symlinkSync(outside, browserStatePath(dir, state.runtimeId));
+    expect(() => writeAgentAnnotationsBrowserState(dir, state)).toThrow("browser state must be a real file");
+    expect(JSON.parse(readFileSync(outside, "utf8")).browserUpdateRevision).toBe(99);
   });
 });

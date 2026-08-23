@@ -391,6 +391,33 @@ describe("serve-only Vite plugin", () => {
       const hashRoute = await firstSession.heartbeat({ ...state, routeKey: "/#/settings" });
       expect(hashRoute.status).toBe(200);
       expect(JSON.parse(readFileSync(statePath, "utf8")).routeKey).toBe("/#/settings");
+      const revision6 = await firstSession.heartbeat({
+        ...state,
+        routeKey: "/revision-6",
+        browserUpdateRevision: 6,
+      });
+      expect(revision6.status).toBe(200);
+      const beforeStale = readFileSync(statePath, "utf8");
+      const stale = await firstSession.heartbeat({
+        ...state,
+        routeKey: "/stale",
+        browserUpdateRevision: 5,
+      });
+      expect(stale.status).toBe(409);
+      expect(await stale.json()).toEqual({ error: "stale_browser_state" });
+      expect(readFileSync(statePath, "utf8")).toBe(beforeStale);
+      const equal = await firstSession.heartbeat({
+        ...state,
+        routeKey: "/equal",
+        taskRevision: 1,
+        browserUpdateRevision: 6,
+      });
+      expect(equal.status).toBe(200);
+      expect(JSON.parse(readFileSync(statePath, "utf8"))).toMatchObject({
+        routeKey: "/equal",
+        taskRevision: 1,
+        browserUpdateRevision: 6,
+      });
       // An unauthenticated heartbeat is denied.
       const denied = await fetch(`${firstSession.base}/__agent-annotations/heartbeat`, {
         method: "POST",

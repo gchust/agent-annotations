@@ -932,6 +932,35 @@ describe("runtime-evidence-status", () => {
 
 
 
+  it("drops a queued heartbeat when the runtime unmounts", async () => {
+    vi.useFakeTimers();
+    let resolveHeartbeat!: (response: Response) => void;
+    const heartbeat = new Promise<Response>((resolve) => { resolveHeartbeat = resolve; });
+    const fetchMock = vi.fn<typeof fetch>((input, init) => {
+      if (String(input).endsWith("/heartbeat") && init?.method === "POST") return heartbeat;
+      return Promise.resolve(new Response("{}", { status: 500 }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const mounted = await mountAgentAnnotations({
+        transport: new MemoryTaskTransport(),
+        browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
+      });
+      const posts = () => fetchMock.mock.calls.filter(([input, init]) =>
+        String(input).endsWith("/heartbeat") && init?.method === "POST");
+      expect(posts()).toHaveLength(1);
+      mounted.reportBrowserUpdate();
+      mounted.unmount();
+      resolveHeartbeat(new Response("{}", { status: 200 }));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(posts()).toHaveLength(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+
+
   it("isolates a failing third-party setup and still starts the browser status heartbeat", async () => {
     vi.useFakeTimers();
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("{}", { status: 200 }));

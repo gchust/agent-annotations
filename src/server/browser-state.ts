@@ -287,7 +287,33 @@ export const writeAgentAnnotationsBrowserState = (
 ): void => {
   const state = parseAgentAnnotationsBrowserState(input);
   checkedStatesRoot(runtimeRoot, true);
-  atomicWriteJson(browserStatePath(runtimeRoot, state.runtimeId), state);
+  const file = browserStatePath(runtimeRoot, state.runtimeId);
+  let existing: AgentAnnotationsBrowserState | null = null;
+  let content: string | null = null;
+  try {
+    const stats = lstatSync(file);
+    if (!stats.isFile() || stats.isSymbolicLink()) {
+      throw new TypeError("browser state must be a real file");
+    }
+    content = readFileSync(file, "utf8");
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT") throw error;
+  }
+  if (content !== null) {
+    try {
+      const parsed = parseAgentAnnotationsBrowserState(JSON.parse(content));
+      if (parsed.runtimeId === state.runtimeId) existing = parsed;
+    } catch {
+      // Invalid prior state is replaced by the valid incoming snapshot.
+    }
+  }
+  if (existing && state.browserUpdateRevision < existing.browserUpdateRevision) {
+    const error = new Error("stale_browser_state") as Error & { code: "stale_browser_state" };
+    error.code = "stale_browser_state";
+    throw error;
+  }
+  atomicWriteJson(file, state);
 };
 
 export const removeAgentAnnotationsBrowserState = (

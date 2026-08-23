@@ -194,6 +194,7 @@ export async function mountAgentAnnotations(
     runtimeId,
     setTask,
     sendHeartbeat: sendBrowserHeartbeat,
+    stopHeartbeats: stopBrowserHeartbeats,
     scheduleHeartbeat: scheduleBrowserHeartbeat,
     reportBrowserUpdate,
     removeBrowserState,
@@ -1310,6 +1311,7 @@ export async function mountAgentAnnotations(
   }
   const unmount = (preserveBrowserState = false) => {
     if (destroyed) return;
+    stopBrowserHeartbeats();
     if (!preserveBrowserState) removeBrowserState();
     destroyed = true;
     setMarkerHighlight(null);

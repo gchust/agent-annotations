@@ -25,6 +25,16 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+const deferred = <T>() => {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+};
+
 describe("runtime controllers (focused factory contracts)", () => {
   it("restores strict endpoint-scoped browser session state and replaces invalid values", () => {
     const first = restoreBrowserSessionState("/__agent-annotations");
@@ -139,6 +149,115 @@ describe("runtime controllers (focused factory contracts)", () => {
     });
     controller.reportBrowserUpdate();
     expect(controller.browserUpdateRevision()).toBe(Number.MAX_SAFE_INTEGER);
+  });
+
+  it("serializes heartbeats and replaces pending work with the latest snapshot", async () => {
+    const endpoint = "/__agent-annotations";
+    sessionStorage.setItem(browserSessionStorageKey(endpoint), JSON.stringify({
+      runtimeId: "runtime-queue",
+      browserUpdateRevision: 4,
+    }));
+    const state = { task: taskFixture(), routeKey: "/initial" };
+    const heartbeats: Array<{
+      body: Record<string, unknown>;
+      response: ReturnType<typeof deferred<Response>>;
+    }> = [];
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const fetchMock = vi.fn<typeof fetch>((input, init) => {
+      if (!String(input).endsWith("/heartbeat")) {
+        return Promise.resolve(new Response("{}", { status: 500 }));
+      }
+      const response = deferred<Response>();
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      heartbeats.push({
+        body: JSON.parse(init!.body as string),
+        response,
+      });
+      return response.promise.finally(() => { inFlight -= 1; });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = createBrowserStatusController({
+      config: { endpoint, token: "status-token" },
+      task: () => state.task,
+      setTaskValue: (task) => { state.task = task; },
+      routeKey: () => state.routeKey,
+      destroyed: () => false,
+      annotationHealth: () => [],
+      resetResolutionSnapshots: () => undefined,
+      scheduleTimer: () => 0,
+    });
+
+    controller.reportBrowserUpdate();
+    controller.setTask({ ...state.task, taskRevision: 1 });
+    state.routeKey = "/intermediate";
+    controller.sendHeartbeat();
+    controller.reportBrowserUpdate();
+    controller.setTask({ ...state.task, taskRevision: 2 });
+    state.routeKey = "/latest";
+    controller.sendHeartbeat();
+
+    expect(heartbeats).toHaveLength(1);
+    expect(heartbeats[0]!.body.browserUpdateRevision).toBe(5);
+    expect(inFlight).toBe(1);
+    heartbeats[0]!.response.resolve(new Response(
+      JSON.stringify({ error: "stale_browser_state" }),
+      { status: 409 }
+    ));
+    await vi.waitFor(() => expect(heartbeats).toHaveLength(2));
+    expect(heartbeats.map(({ body }) => body.browserUpdateRevision)).toEqual([5, 6]);
+    expect(heartbeats[1]!.body).toMatchObject({
+      routeKey: "/latest",
+      taskRevision: 2,
+      browserUpdateRevision: 6,
+    });
+    expect(maxInFlight).toBe(1);
+    heartbeats[1]!.response.resolve(new Response("{}", { status: 200 }));
+    await vi.waitFor(() => expect(inFlight).toBe(0));
+    expect(heartbeats).toHaveLength(2);
+  });
+
+  it("drains the latest pending heartbeat after failure and drops work when stopped", async () => {
+    const state = { task: taskFixture(), routeKey: "/initial", destroyed: false };
+    const requests: Array<{
+      body: Record<string, unknown>;
+      response: ReturnType<typeof deferred<Response>>;
+    }> = [];
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>((input, init) => {
+      if (!String(input).endsWith("/heartbeat")) {
+        return Promise.resolve(new Response("{}", { status: 500 }));
+      }
+      const response = deferred<Response>();
+      requests.push({ body: JSON.parse(init!.body as string), response });
+      return response.promise;
+    }));
+    const controller = createBrowserStatusController({
+      config: { endpoint: "/__agent-annotations", token: "status-token", runtimeId: "runtime-failure" },
+      task: () => state.task,
+      setTaskValue: (task) => { state.task = task; },
+      routeKey: () => state.routeKey,
+      destroyed: () => state.destroyed,
+      annotationHealth: () => [],
+      resetResolutionSnapshots: () => undefined,
+      scheduleTimer: () => 0,
+    });
+
+    controller.sendHeartbeat();
+    state.routeKey = "/after-failure";
+    controller.sendHeartbeat();
+    requests[0]!.response.reject(new Error("offline"));
+    await vi.waitFor(() => expect(requests).toHaveLength(2));
+    expect(requests[1]!.body.routeKey).toBe("/after-failure");
+
+    state.routeKey = "/must-not-send";
+    controller.sendHeartbeat();
+    controller.stopHeartbeats();
+    state.destroyed = true;
+    requests[1]!.response.resolve(new Response("{}", { status: 200 }));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(requests).toHaveLength(2);
   });
 
   it("isolates every host callback and disposer with safe fallbacks", () => {

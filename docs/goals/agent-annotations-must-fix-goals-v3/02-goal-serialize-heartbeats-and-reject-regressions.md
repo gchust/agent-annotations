@@ -199,21 +199,42 @@ Commit:
 
 ## Progress
 
-- [ ] 核验 Goal 01 Commit 与当前 HEAD。
-- [ ] 建立并发复现测试。
-- [ ] 实现 single-flight latest-state Queue。
-- [ ] 增加服务端单调性防线。
-- [ ] 运行全部门禁和重复 E2E。
-- [ ] 独立 Review 和 `git diff --check`。
+- [x] 核验 Goal 01 Commit 与当前 HEAD `2e905e92a6c28abcdf9bd5eedb8c3b9464adea7e`。
+- [x] 用可控 Deferred Fetch 建立并发、失败和 Unmount 复现测试。
+- [x] 实现 per-controller single-flight latest-state Queue。
+- [x] 增加服务端 Revision 单调性防线和稳定 409 映射。
+- [x] 运行全部门禁和最终 fresh packed E2E。
+- [x] 独立 Review 和 `git diff --check`。
 
 ## Surprises & Discoveries
 
-- 执行时填写。
+- 首次完整 `pnpm test` 暴露两个 Architecture Audit 失败：初始变量名 `heartbeatInFlight` 命中了禁止旧协议字面量的审计。改为准确描述当前队列状态的 `requestActive` 后，完整套件通过；没有放宽审计。
+- 首次新增 packed 压力场景在并发 Task Mutation 后立即断言 Source Hash，同一次 HMR 的 Hash 合法地对应 mutation 前 Task，因此失败。测试改为先等待 Task 同步，再触发一次 settling HMR 后验证 Source Hash；修正后压力场景和 fresh 完整 packed run 均通过。
+- 独立 Review 发现新增 E2E runtime poll 的 `not.toBeNull()` 会接受 `undefined`；收紧为 `toBeDefined()` 后重新运行最终完整 packed E2E，仍全部通过。
+- 新的 read-before-write 单调检查若直接读取 symlink 会扩大原有文件边界；写入前使用 `lstatSync` 拒绝 symlink/非普通文件，并用独立 symlink 回归测试验证外部目标不变。
+- 一次直接在仓库 fixture 运行 Playwright 使用了旧 checked-in tarball，旧 CLI shape 因此失败；该诊断运行不是产品候选证据。最终证据全部来自 `pnpm test:e2e` fresh pack/install 的同一 tarball consumer。
 
 ## Decision Log
 
-- 执行时填写实际决策及原因。
+- Queue 只保留一个已序列化 JSON pending snapshot：idle 时立即 POST，active 时覆盖 pending，请求 resolve/reject 后只 drain 最新 pending。这样直接满足 single-flight/latest-state，不新增通用队列抽象或协议字段。
+- `409 stale_browser_state` 与网络失败都视为当前请求完成；若有更新 pending 则继续发送。客户端不降低 revision、不读取服务端状态覆盖 session，也不产生用户可见 Diagnostic。
+- Unmount 先永久停止 controller heartbeat 并清空 pending；DELETE 仍由 `removeBrowserState()` 独立发送，不进入 heartbeat Queue。
+- Store 在同一 Runtime 文件上比较严格解析后的 Browser State v2：lower revision 抛出 code/message 均为 `stale_browser_state`，equal 和 greater revision 继续写入。Vite 只增加该错误到既有 409 映射。
+- 保持 Browser State v2、CLI shape、多 Runtime 隔离和 Goal 01 session/reload 行为；未增加 intermediate retry、WebSocket/SSE 或 Goal 03 Release Evidence。
 
 ## Outcomes & Retrospective
 
-- 完成时填写。
+- 行为结果：每个 Browser Status Controller 同时最多一个 heartbeat POST；active 期间重复状态变化只覆盖一个 pending snapshot；成功、409 和 rejection 都 drain 最新 pending；Unmount 清空 pending 且不再开始 POST。
+- 服务端结果：Revision 6 后写 Revision 5 返回 `stale_browser_state`，Vite endpoint 返回 exact `409 {"error":"stale_browser_state"}`，原文件字节保持不变；equal Revision 的 Route/Task/Health 更新、Revision 7 和另一 Runtime 均正常写入。
+- Focused gate PASS：4 files / 77 tests。`pnpm typecheck` PASS。`pnpm test` PASS：42 files / 489 tests。Architecture PASS：31 tests。Docs smoke PASS。Build PASS。`git diff --check` PASS。
+- 最终 `pnpm test:e2e` PASS，无 retry masking：fresh tarball/consumer 的 vertical 1、source 1、reliability 9、route 1、UX 2、polish 3、relative-base 1、shutdown cleanup 与 status 4 tests 全部通过；压力场景实际采样 `heartbeat-revisions observed=[1,2,3]`，CLI Wait 和 `status --check` 均成功。
+- G02-001 PASS：Deferred Fetch 记录 `maxInFlight === 1`，Revision 5 未完成前无第二个 POST。
+- G02-002 PASS：多个中间更新最终只发送 Revision 5 → 6，第二个 body 为最新 `/latest` / Task Revision 2 snapshot。
+- G02-003 PASS：Store unit 与 Vite endpoint 都拒绝 6 → 5，稳定错误码 `stale_browser_state`。
+- G02-004 PASS：Store 与 endpoint 在 stale write 前后比较 exact file bytes，相等。
+- G02-005 PASS：equal Revision 的 Route、Task Revision 和 Annotation Health 更新均成功持久化。
+- G02-006 PASS：controller stop 和实际 mount `unmount()` 测试均证明 active request 完成后 pending 不发送，POST count 保持 1。
+- G02-007 PASS：fresh packed 压力 E2E 采样 revision `[1,2,3]`，逐样本均不下降。
+- G02-008 PASS：489-test full suite、31-test Architecture、Build 和完整 fresh packed consumer 覆盖 CLI、Browser State v2、多 Runtime、Goal 01 reload continuity 与 Production Exclusion/shutdown，无回归。
+- Remaining risk：Store 防线针对本 Vite server 的同步文件写入路径；绕过产品直接并发修改 runtime 文件不在支持合同内。
+- 未开始 Goal 03；未 push、publish、tag 或 release。

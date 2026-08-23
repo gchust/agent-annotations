@@ -408,7 +408,10 @@ export default function agentAnnotations(
           const code = (error as Error & { code?: string }).code ?? (error as Error).message;
           const task = (error as Error & { task?: unknown; latestTask?: unknown }).task
             ?? (error as Error & { latestTask?: unknown }).latestTask;
-          return json(response, code === "revision_conflict" ? 409 : 400, { error: code, ...(task ? { task } : {}) });
+          return json(response, code === "revision_conflict" || code === "stale_browser_state" ? 409 : 400, {
+            error: code,
+            ...(task ? { task } : {}),
+          });
         }
       });
     },
