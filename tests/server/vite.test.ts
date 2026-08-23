@@ -14,7 +14,9 @@ const roots: string[] = [];
 const fixture = () => {
   const parent = mkdtempSync(path.join(tmpdir(), "agent-annotations-vite-"));
   roots.push(parent);
-  const root = path.join(parent, "workspace");
+  const workspace = path.join(parent, "workspace");
+  mkdirSync(workspace);
+  const root = realpathSync.native(workspace);
   const a = path.join(root, "src/duplicate-a/Card.tsx");
   const b = path.join(root, "src/duplicate-b/Card.tsx");
   mkdirSync(path.dirname(a), { recursive: true });
@@ -193,6 +195,7 @@ describe("serve-only Vite plugin", () => {
     });
     await server.listen();
     try {
+      expect(server.config.root).toBe(realpathSync.native(root));
       for (const file of [a, b]) {
         const module = await server.environments.client.moduleGraph.ensureEntryFromUrl(file);
         const transformed = await server.pluginContainer.transform(readFileSync(file, "utf8"), module.id!);
