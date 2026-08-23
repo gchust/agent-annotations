@@ -3,6 +3,8 @@
 Bundle: `agent-annotations-quality-followup-goals-v2`
 Baseline: `6651cff4d970fd3ddf23f414d08f56149d3709ab`
 
+The values below describe the original downloaded v2 bundle. Goal files are living ExecPlans; their `Progress`, `Surprises & Discoveries`, `Decision Log`, and `Outcomes & Retrospective` sections are expected to diverge after execution.
+
 | File | Bytes | Lines | SHA-256 |
 |---|---:|---:|---|
 | `00-shared-contract.md` | 4801 | 127 | `7379a356e6458099bcbb95206a4ecfcac4ec0a413ef500ff78441dc6036c7275` |

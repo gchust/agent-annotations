@@ -1,6 +1,6 @@
 # Goal 11 Release-Candidate Evidence
 
-Status: PASS. Goal 11 changed only this evidence file. No product, test,
+Status: PASS. The Goal 11 evidence commit changed only this evidence file. No product, test,
 workflow, package metadata, lockfile, or goal file changed. No push, tag,
 release, npm publish, force operation, or product rerun was performed.
 

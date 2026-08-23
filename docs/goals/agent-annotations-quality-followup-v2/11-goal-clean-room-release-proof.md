@@ -121,25 +121,34 @@ Commit:
 
 ## Progress
 
-- [ ] 检查实际 HEAD 和工作区。
-- [ ] 建立 AC → 文件 → 测试 → 证据映射。
-- [ ] 实现生产代码。
-- [ ] 增加最小回归测试。
-- [ ] 运行当前 Goal 完整门禁。
-- [ ] 独立 Review。
-- [ ] 更新 Outcomes。
+- [x] 从产品 SHA `0f297ecb9f9465950b4ac4cee5c0544b7db13eaa` 和 clean 专用 worktree 开始，未使用原工作区的并行变更。
+- [x] 建立 G11-001～G11-008 与 F-001～F-050 到 clean-room、exact tarball、consumer、production scan、CI 和 registry 证据的映射。
+- [x] 按合同不修改生产代码；Goal 11 仅更新 `RELEASE-CANDIDATE-EVIDENCE.md`。
+- [x] 按合同不新增产品测试；复用并独立执行 Goal 10 已提交的 release、consumer、browser 和 CI gates。
+- [x] 在全新外部 root `/root/agent-annotations-goal11-final-USTX9j` 运行完整门禁，全部首轮通过。
+- [x] 独立 Review 最终证据、commit scope、产品/证据 SHA、tarball identity、远程 refs、首次 CI 与保护分支。
+- [x] 更新 Outcomes；证据提交已 fast-forward 到 `main`，其首次 CI 亦在 attempt 1 全绿。
 
 ## Surprises & Discoveries
 
-- 执行时填写。
+- 旧证据提交的 Windows Node 20 首次 CI 暴露 stale-lock claim 的 `EPERM` 竞争；按特殊规则返回 Goal 10 修复，产生新产品 SHA，并从全新 archive 从头重跑 Goal 11，未 rerun 旧失败。
+- 本地与 CI 各自从同一产品 SHA pack，因 build chunk metadata 不同而有不同 tarball SHA；每个环境内部均只 pack 一次并一致复用自己的 exact tarball，证据未把两者伪装成同一 artifact。
+- npm registry 对 `@gchust/agent-annotations@0.1.0-alpha.0` 返回 `E404 Not Found`；这是未发布事实，不是发布成功证据。
 
 ## Decision Log
 
-- 执行时填写实际决策及原因。
+- 使用独立 worktree `/root/work/agent-annotations-goal11-final`，避免纳入原 worktree 的并行 Portal-agent 变更。
+- 只接受 `git archive 0f297ec...` 建立的新 external root；不复用旧 logs、tarball、consumer 或失败 run。
+- 将产品 CI `32645393649` 与证据提交 CI `32647597418` 分开记录；两者均为各自 SHA 的首次 run、attempt 1、五个 jobs 全绿。
+- Goal 11 仅提交 evidence，不 tag、不创建 Release、不 npm publish、不 force push。
 
 ## Outcomes & Retrospective
 
-- 完成时填写。
+- Goal 11 PASS：G11-001～G11-008 与最终 F-001～F-050 全部有当前直接证据，完整映射见根目录 `RELEASE-CANDIDATE-EVIDENCE.md`。
+- Clean gates 全部退出 0：frozen install、typecheck、42 files / 479 tests、31 architecture tests、docs、build、`release:verify` 与 `test:e2e:repeat`。
+- Exact local tarball SHA-256 为 `760533f06ff7bc43f65aa67aaa45ed56a7c90d174c24392f5011b71cb7a39607`，117462 bytes、26 files；Core/CLI consumer、browser consumer、production scan 和五次首轮 20-test E2E 均复用它，无 retry/repack/reinstall。
+- 产品 SHA 的 CI run `32645393649` 和 evidence SHA `7c15753a5851af7edec24582e2d354035bf8b2f1` 的首次 CI run `32647597418` 均在 attempt 1 完成 success；Ubuntu/Windows Node 20/24 与 release job 全绿。
+- Evidence 提交完成时，本地 `main`、`origin/main` 和 live remote `main` 对齐 evidence SHA；此后的 living-plan 状态同步不改变产品或 evidence 结论。保护分支 `evidence/goal11-blocked-cc3ec2a` 与原 worktree 的并行变更保持不动。
 
 
 ## 特殊规则
