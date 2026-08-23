@@ -5,6 +5,11 @@ import type {
   AgentAnnotationsTask,
 } from "../../types/index.js";
 import { now } from "./annotated.js";
+import {
+  clearBrowserSessionState,
+  restoreBrowserSessionState,
+  saveBrowserSessionState,
+} from "./browser-session.js";
 
 type AnnotationHealth = Array<{
   annotationId: string;
@@ -34,12 +39,12 @@ const taskSourceFiles = (task: AgentAnnotationsTask): string[] => [
 ].sort();
 
 export const createBrowserStatusController = (b: BrowserStatusBindings) => {
-  const runtimeId = b.config?.runtimeId ?? createAgentAnnotationsId();
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(runtimeId)) {
-    throw new TypeError("browserStatus runtimeId must be a valid runtime id");
-  }
+  const session = b.config
+    ? restoreBrowserSessionState(b.config.endpoint, b.config.runtimeId)
+    : { runtimeId: createAgentAnnotationsId(), browserUpdateRevision: 0 };
+  const runtimeId = session.runtimeId;
   const mountedAt = now();
-  let browserUpdateRevision = 0;
+  let browserUpdateRevision = session.browserUpdateRevision;
   let referencedSourceRevision: string | null = null;
   let referencedSourceFiles = taskSourceFiles(b.task());
   let referencedSourceRevisionRequest = 0;
@@ -92,7 +97,10 @@ export const createBrowserStatusController = (b: BrowserStatusBindings) => {
 
   const reportBrowserUpdate = (): void => {
     if (b.destroyed() || !b.config) return;
+    // ponytail: Browser State v2 is safe-integer bounded; widen that schema to raise this ceiling.
+    if (browserUpdateRevision === Number.MAX_SAFE_INTEGER) return;
     browserUpdateRevision += 1;
+    saveBrowserSessionState(b.config.endpoint, { runtimeId, browserUpdateRevision });
     referencedSourceRevision = null;
     sendHeartbeat();
     const request = ++referencedSourceRevisionRequest;
@@ -138,6 +146,7 @@ export const createBrowserStatusController = (b: BrowserStatusBindings) => {
 
   const removeBrowserState = (): void => {
     if (!b.config) return;
+    clearBrowserSessionState(b.config.endpoint);
     fetch(`${b.config.endpoint}/heartbeat`, {
       method: "DELETE",
       headers: {

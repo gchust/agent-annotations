@@ -15,7 +15,11 @@ package, Node consumer, and browser consumer checks do not repack it.
   and the editor's `Capture screenshot` action, and `off` disables capture
   entirely. Invalid values throw a `TypeError`. `options.browserStatus`
   (`{ endpoint, token }`) enables the authenticated browser runtime status
-  heartbeat (`.agent-annotations/browser-states/<runtimeId>.json`).
+  heartbeat (`.agent-annotations/browser-states/<runtimeId>.json`). The
+  endpoint-scoped tab session keeps its runtime ID and browser update revision
+  across Vite remounts and full reloads. Explicit `unmount()` clears that local
+  session and requests removal of its server state; generated HMR and pagehide
+  teardown preserve both for the replacement mount.
   `reportBrowserUpdate()` is a trusted mount-level hook (used by the
   generated Vite client after mount and after `vite:afterUpdate`): it re-fetches
   the current source revision through the runtime-owned, generation-guarded
@@ -240,7 +244,9 @@ healthy. Diagnostics are informational unless `--fail-on-diagnostics` is
 paired with `--diagnostics-since`; without `--check`
 the command is informational and exits 0. `wait --browser-update-revision
 <integer>` accepts the same runtime selectors and waits for that fresh browser
-generation above the baseline; `wait
+generation above the baseline. A pinned `--runtime` remains pending while that
+runtime is temporarily disconnected and reports `browserConnected: false` on
+timeout; ambiguous selection still fails immediately. `wait
 --referenced-source-revision <sha256>` watches known referenced files and
 returns an explicit unavailable result when no files are known.
 

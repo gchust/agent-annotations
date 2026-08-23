@@ -463,14 +463,20 @@ const main = async (): Promise<void> => {
           readAgentAnnotationsBrowserStates(runtimeRoot),
           selector
         );
-        if (selection.error !== null) return fail(selection.error, 1);
+        if (selection.error !== null && !(
+          selection.error === "browser_runtime_not_found" && selector.runtimeId !== undefined
+        )) return fail(selection.error, 1);
         const observed = selection.selected?.browserUpdateRevision ?? null;
         const changed = observed !== null && observed > browserUpdateBaseline;
         if (changed || Date.now() >= deadline) {
-          const result = { changed, browserUpdateRevision: observed };
+          const result = {
+            changed,
+            browserConnected: selection.selected !== null,
+            browserUpdateRevision: observed,
+          };
           process.stdout.write(json
             ? `${JSON.stringify(result)}\n`
-            : `changed: ${changed}, browserUpdateRevision: ${observed}\n`);
+            : `changed: ${changed}, browserConnected: ${result.browserConnected}, browserUpdateRevision: ${observed}\n`);
           return;
         }
       } else {

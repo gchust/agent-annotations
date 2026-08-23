@@ -41,11 +41,14 @@ describe("serve-only Vite plugin", () => {
     expect(String(loaded)).toContain(`from ${JSON.stringify(pkg.name)}`);
     expect(String(loaded)).toContain(`from ${JSON.stringify(`${pkg.name}/vite/client`)}`);
     expect(String(loaded)).toContain("mountAgentAnnotations");
-    expect(String(loaded)).toContain("runtimeId: window[runtimeKey]");
+    expect(String(loaded)).not.toContain("agent-annotations.runtime-id");
+    expect(String(loaded)).toContain("browserStatus: { endpoint: config.endpoint, token: config.token }");
+    expect(String(loaded)).toContain("const onPageHide = () => window[key]?.(true)");
     expect(String(loaded)).toContain("mounted.reportBrowserUpdate()");
     expect(String(loaded)).toContain("vite:afterUpdate");
     expect(String(loaded)).toContain("responses.every((response) => response.ok)");
     expect(String(loaded)).toContain("window[key]?.(true)");
+    expect(String(loaded)).toContain("import.meta.hot.dispose(() => window[key]?.(true))");
     expect(String(loaded)).toContain("import.meta.hot.accept()");
     expect(String(loaded)).toContain("import.meta.hot.dispose");
     expect(String(loaded)).not.toContain("extension.setup");

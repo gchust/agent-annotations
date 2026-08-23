@@ -49,6 +49,7 @@ vi.mock("../../src/client/screenshot.js", () => ({
 
 import { mountAgentAnnotations, RevisionConflictError } from "../../src/client/index.js";
 import { createSafePageContext } from "../../src/client/runtime/annotated.js";
+import { browserSessionStorageKey } from "../../src/client/runtime/browser-session.js";
 import { defineClientExtension } from "../../src/extension/index.js";
 import { FileTaskStore } from "../../src/server/store.js";
 import { MemoryTaskTransport } from "../../src/testing/index.js";
@@ -62,6 +63,7 @@ import type {
 import { annotationFixture, targetFixture, taskFixture } from "../core/test-data.js";
 
 afterEach(() => {
+  try { sessionStorage.clear(); } catch {}
   document.getElementById("agent-annotations-root")?.remove();
   primitives.getElementAtPoint.mockReset();
   primitives.getElementAtPoint.mockReturnValue(null);
@@ -906,6 +908,7 @@ describe("runtime-evidence-status", () => {
       expect(body.routeKey).toBe("/#/settings");
       expect(JSON.stringify(body)).not.toContain("supersecret");
       expect(JSON.stringify(body)).not.toContain("status-token");
+      expect(sessionStorage.getItem(browserSessionStorageKey("/__agent-annotations"))).not.toBeNull();
       // The applied revision is reported only through the trusted mount hook.
       mounted.reportBrowserUpdate();
       await vi.advanceTimersByTimeAsync(0);
@@ -914,6 +917,11 @@ describe("runtime-evidence-status", () => {
         .toBe("ab".repeat(32));
       // Unmount stops the heartbeats.
       mounted.unmount();
+      expect(sessionStorage.getItem(browserSessionStorageKey("/__agent-annotations"))).toBeNull();
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/__agent-annotations/heartbeat",
+        expect.objectContaining({ method: "DELETE" })
+      );
       const calls = fetchMock.mock.calls.length;
       await vi.advanceTimersByTimeAsync(20_000);
       expect(fetchMock.mock.calls.length).toBe(calls);

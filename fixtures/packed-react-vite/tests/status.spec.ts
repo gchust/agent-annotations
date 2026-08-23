@@ -1,5 +1,5 @@
-import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { execFileSync, spawn } from "node:child_process";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import { expect, test } from "@playwright/test";
@@ -50,6 +50,7 @@ test("keeps two browser runtimes isolated through HMR and page close", async ({ 
       "--runtime", customersRuntime.runtimeId, "--timeout-ms", "0", "--json"
     ))).toEqual({
       changed: false,
+      browserConnected: true,
       browserUpdateRevision: customersRuntime.browserUpdateRevision,
     });
   } finally {
@@ -58,14 +59,19 @@ test("keeps two browser runtimes isolated through HMR and page close", async ({ 
 
   await page.close();
   const customersStatePath = path.join(runtimeRoot, "browser-states", `${customersRuntime.runtimeId}.json`);
-  await expect.poll(() => existsSync(customersStatePath), { timeout: 5_000 }).toBe(false);
+  expect(existsSync(customersStatePath)).toBe(true);
   expect(await runtime("/orders")).toMatchObject({ runtimeId: ordersRuntime.runtimeId });
+  await orders.close();
+  rmSync(customersStatePath, { force: true });
+  rmSync(path.join(runtimeRoot, "browser-states", `${ordersRuntime.runtimeId}.json`), { force: true });
 });
 
 test("browser status health and HMR-applied source revision ordering", async ({ page }) => {
   await page.goto("/");
   // Capture an annotation whose source is a component file that hot-updates.
   await expect(shadow(page, ".aa-dock")).toBeVisible();
+  await expect.poll(() => statusJson().selectedRuntimeId, { timeout: 15_000 }).not.toBeNull();
+  const initialStatus = statusJson();
   const initialAnnotations = JSON.parse(readFileSync(taskPath, "utf8")).annotations.length;
   await page.keyboard.press("Control+Alt+P");
   await expect(shadow(page, '[aria-label^="Pick"]')).toHaveAttribute("aria-pressed", "true");
@@ -94,7 +100,8 @@ test("browser status health and HMR-applied source revision ordering", async ({ 
     taskSynchronized: true,
     referencedSourceSynchronized: true,
   });
-  expect(healthy.browserUpdateRevision).toBe(1);
+  expect(healthy.selectedRuntimeId).toBe(initialStatus.selectedRuntimeId);
+  expect(healthy.browserUpdateRevision).toBeGreaterThan(initialStatus.browserUpdateRevision);
   expect(healthy.browserReferencedSourceRevision).toMatch(/^[0-9a-f]{64}$/);
 
   // Navigate with an ordinary secret query: the route key never persists it.
@@ -161,6 +168,11 @@ test("browser status health and HMR-applied source revision ordering", async ({ 
     await expect.poll(() => page.evaluate(() =>
       (window as { __demoExtension?: { setupCount?: number } }).__demoExtension?.setupCount ?? 0
     ), { timeout: 15_000 }).toBeGreaterThan(setupBefore);
+    await expect.poll(() => JSON.parse(cli("status", "--runtime", runtimeId, "--json")), { timeout: 15_000 })
+      .toMatchObject({ selectedRuntimeId: runtimeId, browserConnected: true });
+    await expect.poll(() => JSON.parse(cli("status", "--runtime", runtimeId, "--json")).browserUpdateRevision, {
+      timeout: 15_000,
+    }).toBeGreaterThan(applied.browserUpdateRevision);
     await expect.poll(() => statusJson().browserReferencedSourceRevision, { timeout: 15_000 })
       .toBe(appliedRevision);
     const setupAfterChange = await page.evaluate(() =>
@@ -197,4 +209,81 @@ test("browser status health and HMR-applied source revision ordering", async ({ 
   } finally {
     writeFileSync(card, before);
   }
+  await page.close();
+  rmSync(path.join(runtimeRoot, "browser-states", `${runtimeId}.json`), { force: true });
+});
+
+test("pinned runtime wait survives reload and tabs keep distinct sessions", async ({ page, context }) => {
+  await page.goto("/customers");
+  await expect(shadow(page, ".aa-dock")).toBeVisible();
+  await expect.poll(() => statusJson().runtimes.find((entry: { routeKey: string }) =>
+    entry.routeKey === "/customers"), { timeout: 15_000 }).not.toBeNull();
+  const before = statusJson().runtimes.find((entry: { routeKey: string }) =>
+    entry.routeKey === "/customers");
+  const statePath = path.join(runtimeRoot, "browser-states", `${before.runtimeId}.json`);
+  await page.evaluate(() => window.dispatchEvent(new Event("pagehide")));
+  writeFileSync(statePath, "{invalid");
+  const child = spawn(process.execPath, [
+    path.resolve("node_modules/@gchust/agent-annotations/dist/cli/index.mjs"), "wait",
+    "--browser-update-revision", String(before.browserUpdateRevision + 1),
+    "--runtime", before.runtimeId,
+    "--timeout-ms", "15000",
+    "--json",
+  ], {
+    cwd: process.cwd(),
+    env: { ...process.env, AGENT_ANNOTATIONS_DIR: runtimeRoot },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk) => { stdout += String(chunk); });
+  child.stderr.on("data", (chunk) => { stderr += String(chunk); });
+  const closed = new Promise<number | null>((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", resolve);
+  });
+  await new Promise<void>((resolve, reject) => {
+    child.once("spawn", resolve);
+    child.once("error", reject);
+  });
+
+  await expect.poll(() => existsSync(statePath), { timeout: 5_000 }).toBe(false);
+  expect(child.exitCode).toBeNull();
+  await page.reload();
+  await expect(shadow(page, ".aa-dock")).toBeVisible();
+  await expect.poll(() => JSON.parse(cli("status", "--runtime", before.runtimeId, "--json")).browserUpdateRevision, {
+    timeout: 15_000,
+  }).toBeGreaterThan(before.browserUpdateRevision);
+  const afterReload = JSON.parse(cli("status", "--runtime", before.runtimeId, "--json"));
+  expect(afterReload.selectedRuntimeId).toBe(before.runtimeId);
+  expect(child.exitCode).toBeNull();
+  const routeSource = path.resolve("src/route-a/RouteA.tsx");
+  const routeBefore = readFileSync(routeSource, "utf8");
+  try {
+    writeFileSync(routeSource, routeBefore.replace("Route A</h1>", "Route A RELOADED</h1>"));
+    await expect(page.locator("h1")).toHaveText("Route A RELOADED");
+    await expect.poll(() => JSON.parse(
+      cli("status", "--runtime", before.runtimeId, "--json")
+    ).browserUpdateRevision, { timeout: 15_000 }).toBeGreaterThan(afterReload.browserUpdateRevision);
+  } finally {
+    writeFileSync(routeSource, routeBefore);
+  }
+  expect(await closed).toBe(0);
+  expect(stderr).toBe("");
+  expect(stdout.trim().split("\n")).toHaveLength(1);
+  const waited = JSON.parse(stdout);
+  expect(waited).toMatchObject({ changed: true, browserConnected: true });
+  expect(waited.browserUpdateRevision).toBeGreaterThan(before.browserUpdateRevision + 1);
+  const reloaded = JSON.parse(cli("status", "--runtime", before.runtimeId, "--json"));
+  expect(reloaded.selectedRuntimeId).toBe(before.runtimeId);
+  expect(reloaded.browserUpdateRevision).toBeGreaterThan(before.browserUpdateRevision);
+
+  const second = await context.newPage();
+  await second.goto("/orders");
+  await expect(shadow(second, ".aa-dock")).toBeVisible();
+  await expect.poll(() => statusJson().runtimes.find((entry: { routeKey: string }) =>
+    entry.routeKey === "/orders"), { timeout: 15_000 }).not.toBeNull();
+  const other = statusJson().runtimes.find((entry: { routeKey: string }) => entry.routeKey === "/orders");
+  expect(other.runtimeId).not.toBe(before.runtimeId);
+  await second.close();
 });

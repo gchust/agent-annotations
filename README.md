@@ -227,7 +227,11 @@ make `status --check` fail. With multiple fresh runtimes, pass the exact
 `--runtime <runtime-id>` or safe `--route <route-key>`; otherwise status and
 browser-update waits fail with `ambiguous_browser_runtime` rather than choosing
 a last writer. `wait --browser-update-revision <integer>` waits for the selected
-fresh browser generation above the baseline, while `wait
+fresh browser generation above the baseline; a pinned `--runtime` tolerates a
+temporary reload disconnect and reports `browserConnected: false` if it times
+out before reconnection. The generated Vite client keeps that runtime ID and
+generation in endpoint-scoped tab session storage across HMR and full reloads.
+Explicit library `unmount()` clears the session. `wait
 --referenced-source-revision <sha256>` watches known referenced files and
 returns an explicit unavailable result when none are known.
 

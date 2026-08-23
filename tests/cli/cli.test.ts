@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, 
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import pkg from "../../package.json" with { type: "json" };
 import { createAgentAnnotationsTask } from "../../src/core/index.js";
@@ -652,15 +652,15 @@ describe("public CLI processes", () => {
     const task = createAgentAnnotationsTask({ taskId: "task-bw", createdAt: "2026-08-12T12:00:00.000Z" });
     writeFileSync(path.join(root, "tasks/active-task.json"), JSON.stringify(task));
     expect(JSON.parse(run(root, ["wait", "--browser-update-revision", "1", "--timeout-ms", "0", "--json"])))
-      .toEqual({ changed: false, browserUpdateRevision: null });
+      .toEqual({ changed: false, browserConnected: false, browserUpdateRevision: null });
     writeBrowserState(root, { taskId: "task-bw", taskRevision: 0, browserUpdateRevision: 1 });
     expect(JSON.parse(run(root, ["wait", "--browser-update-revision", "1", "--timeout-ms", "0", "--json"])))
-      .toEqual({ changed: false, browserUpdateRevision: 1 });
+      .toEqual({ changed: false, browserConnected: true, browserUpdateRevision: 1 });
     writeBrowserState(root, { taskId: "task-bw", taskRevision: 0, browserUpdateRevision: 2 });
     expect(JSON.parse(run(root, ["wait", "--browser-update-revision", "1", "--timeout-ms", "0", "--json"])))
-      .toEqual({ changed: true, browserUpdateRevision: 2 });
+      .toEqual({ changed: true, browserConnected: true, browserUpdateRevision: 2 });
     expect(run(root, ["wait", "--browser-update-revision", "1", "--timeout-ms", "0"]))
-      .toBe("changed: true, browserUpdateRevision: 2\n");
+      .toBe("changed: true, browserConnected: true, browserUpdateRevision: 2\n");
     // Stale browser state never flips.
     writeBrowserState(root, {
       taskId: "task-bw",
@@ -669,7 +669,58 @@ describe("public CLI processes", () => {
       lastHeartbeatAt: "2026-08-12T12:00:00.000Z",
     });
     expect(JSON.parse(run(root, ["wait", "--browser-update-revision", "1", "--timeout-ms", "0", "--json"])))
-      .toEqual({ changed: false, browserUpdateRevision: null });
+      .toEqual({ changed: false, browserConnected: false, browserUpdateRevision: null });
+  });
+
+  it("keeps a pinned runtime wait alive through temporary disconnection", async () => {
+    const root = fixture();
+    const runtimeId = "runtime-reload";
+    const statePath = path.join(root, "browser-states", `${runtimeId}.json`);
+    expect(JSON.parse(run(root, [
+      "wait", "--browser-update-revision", "4", "--runtime", runtimeId,
+      "--timeout-ms", "0", "--json",
+    ]))).toEqual({
+      changed: false,
+      browserConnected: false,
+      browserUpdateRevision: null,
+    });
+    expect(JSON.parse(run(root, ["status", "--runtime", runtimeId, "--json"])))
+      .toMatchObject({ browserConnected: false, runtimeSelectionError: "browser_runtime_not_found" });
+
+    mkdirSync(path.dirname(statePath), { recursive: true });
+    writeFileSync(statePath, "{invalid");
+    const child = spawn(process.execPath, [
+      script, "wait", "--browser-update-revision", "4", "--runtime", runtimeId,
+      "--timeout-ms", "5000", "--json",
+    ], {
+      cwd: root,
+      env: cleanEnv({ AGENT_ANNOTATIONS_DIR: root }),
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk: Buffer) => { stdout += String(chunk); });
+    child.stderr.on("data", (chunk: Buffer) => { stderr += String(chunk); });
+    const closed = new Promise<number | null>((resolve) => child.once("close", resolve));
+    await new Promise<void>((resolve, reject) => {
+      child.once("spawn", resolve);
+      child.once("error", reject);
+    });
+    await vi.waitFor(() => expect(existsSync(statePath)).toBe(false), { timeout: 2_000 });
+    expect(child.exitCode).toBeNull();
+    writeBrowserState(root, {
+      taskId: "task-cli",
+      taskRevision: 0,
+      browserUpdateRevision: 5,
+    }, runtimeId);
+    expect(await closed).toBe(0);
+    expect(stderr).toBe("");
+    expect(stdout.trim().split("\n")).toHaveLength(1);
+    expect(JSON.parse(stdout)).toEqual({
+      changed: true,
+      browserConnected: true,
+      browserUpdateRevision: 5,
+    });
   });
 
   it("selects browser runtimes exactly and fails closed on ambiguity", () => {
@@ -702,10 +753,10 @@ describe("public CLI processes", () => {
       .toMatchObject({ selectedRuntimeId: "runtime-orders", routeKey: "/orders" });
     expect(JSON.parse(run(root, [
       "wait", "--browser-update-revision", "2", "--runtime", "runtime-customers", "--timeout-ms", "0", "--json",
-    ]))).toEqual({ changed: false, browserUpdateRevision: 2 });
+    ]))).toEqual({ changed: false, browserConnected: true, browserUpdateRevision: 2 });
     expect(JSON.parse(run(root, [
       "wait", "--browser-update-revision", "2", "--runtime", "runtime-orders", "--timeout-ms", "0", "--json",
-    ]))).toEqual({ changed: true, browserUpdateRevision: 9 });
+    ]))).toEqual({ changed: true, browserConnected: true, browserUpdateRevision: 9 });
     expect(runExpectingFailure(root, [
       "wait", "--browser-update-revision", "1", "--timeout-ms", "0", "--json",
     ])).toMatchObject({ status: 1, stderr: expect.stringContaining("ambiguous_browser_runtime") });

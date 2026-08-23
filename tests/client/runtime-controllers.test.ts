@@ -7,6 +7,12 @@ import { createDiagnosticsController } from "../../src/client/runtime/diagnostic
 import { createMarkerController } from "../../src/client/runtime/markers.js";
 import { createEvidenceController } from "../../src/client/runtime/evidence.js";
 import { createCaptureController } from "../../src/client/runtime/capture.js";
+import { createBrowserStatusController } from "../../src/client/runtime/browser-status.js";
+import {
+  browserSessionStorageKey,
+  clearBrowserSessionState,
+  restoreBrowserSessionState,
+} from "../../src/client/runtime/browser-session.js";
 import * as screenshot from "../../src/client/screenshot.js";
 import { RevisionConflictError } from "../../src/core/index.js";
 import type { AgentAnnotationsRect, StudioPublicSnapshot } from "../../src/types/index.js";
@@ -15,10 +21,126 @@ import { annotationFixture, targetFixture, taskFixture } from "../core/test-data
 import { MemoryTaskTransport } from "../../src/testing/index.js";
 
 afterEach(() => {
+  try { sessionStorage.clear(); } catch {}
   vi.unstubAllGlobals();
 });
 
 describe("runtime controllers (focused factory contracts)", () => {
+  it("restores strict endpoint-scoped browser session state and replaces invalid values", () => {
+    const first = restoreBrowserSessionState("/__agent-annotations");
+    expect(first).toMatchObject({ runtimeId: expect.any(String), browserUpdateRevision: 0 });
+    expect(restoreBrowserSessionState("/__agent-annotations")).toEqual(first);
+    expect(restoreBrowserSessionState("/other-endpoint").runtimeId).not.toBe(first.runtimeId);
+
+    const invalid = [
+      "{broken",
+      JSON.stringify({ runtimeId: "", browserUpdateRevision: 1 }),
+      JSON.stringify({ runtimeId: "runtime-old", browserUpdateRevision: -1 }),
+      JSON.stringify({ runtimeId: "runtime-old", browserUpdateRevision: 1.5 }),
+      JSON.stringify({ runtimeId: "runtime-old", browserUpdateRevision: Number.MAX_SAFE_INTEGER + 1 }),
+      JSON.stringify({ runtimeId: "runtime-old", browserUpdateRevision: 1, extra: true }),
+    ];
+    invalid.forEach((value, index) => {
+      const endpoint = `/invalid-${index}`;
+      const runtimeId = `runtime-${index}`;
+      sessionStorage.setItem(browserSessionStorageKey(endpoint), value);
+      expect(restoreBrowserSessionState(endpoint, runtimeId)).toEqual({
+        runtimeId,
+        browserUpdateRevision: 0,
+      });
+      expect(JSON.parse(sessionStorage.getItem(browserSessionStorageKey(endpoint))!)).toEqual({
+        runtimeId,
+        browserUpdateRevision: 0,
+      });
+    });
+    expect(() => restoreBrowserSessionState("/invalid-id", "../escape")).toThrow(/runtimeId/);
+    clearBrowserSessionState("/__agent-annotations");
+    expect(sessionStorage.getItem(browserSessionStorageKey("/__agent-annotations"))).toBeNull();
+  });
+
+  it("keeps working when session storage reads, writes, and removals fail", () => {
+    vi.stubGlobal("sessionStorage", {
+      getItem: () => { throw new Error("disabled"); },
+      setItem: () => { throw new Error("disabled"); },
+      removeItem: () => { throw new Error("disabled"); },
+    });
+    expect(restoreBrowserSessionState("/__agent-annotations", "runtime-fallback")).toEqual({
+      runtimeId: "runtime-fallback",
+      browserUpdateRevision: 0,
+    });
+    expect(() => clearBrowserSessionState("/__agent-annotations")).not.toThrow();
+  });
+
+  it("restores controller revisions across remounts without advancing for task-only updates", async () => {
+    const endpoint = "/__agent-annotations";
+    sessionStorage.setItem(browserSessionStorageKey(endpoint), JSON.stringify({
+      runtimeId: "runtime-continuity",
+      browserUpdateRevision: 7,
+    }));
+    const state = { task: taskFixture() };
+    const fetchMock = vi.fn<typeof fetch>(async (input: RequestInfo | URL) =>
+      String(input).endsWith("/revision")
+        ? new Response(JSON.stringify({
+            taskId: state.task.taskId,
+            taskRevision: state.task.taskRevision,
+            referencedSourceRevision: null,
+            referencedSourceFiles: [],
+          }), { status: 200 })
+        : new Response("{}", { status: 200 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = () => createBrowserStatusController({
+      config: { endpoint, token: "status-token" },
+      task: () => state.task,
+      setTaskValue: (task) => { state.task = task; },
+      routeKey: () => "/settings",
+      destroyed: () => false,
+      annotationHealth: () => [],
+      resetResolutionSnapshots: () => undefined,
+      scheduleTimer: () => 0,
+    });
+
+    const first = controller();
+    expect(first.runtimeId).toBe("runtime-continuity");
+    expect(first.browserUpdateRevision()).toBe(7);
+    first.setTask({ ...state.task, taskRevision: 1 });
+    expect(first.browserUpdateRevision()).toBe(7);
+    first.reportBrowserUpdate();
+    expect(first.browserUpdateRevision()).toBe(8);
+    expect(JSON.parse(sessionStorage.getItem(browserSessionStorageKey(endpoint))!))
+      .toEqual({ runtimeId: "runtime-continuity", browserUpdateRevision: 8 });
+
+    const remounted = controller();
+    expect(remounted.runtimeId).toBe(first.runtimeId);
+    expect(remounted.browserUpdateRevision()).toBe(8);
+    remounted.reportBrowserUpdate();
+    expect(remounted.browserUpdateRevision()).toBe(9);
+    remounted.removeBrowserState();
+    expect(sessionStorage.getItem(browserSessionStorageKey(endpoint))).toBeNull();
+    await Promise.resolve();
+  });
+
+  it("keeps the Browser State v2 revision safe at its numeric ceiling", () => {
+    const endpoint = "/__agent-annotations";
+    sessionStorage.setItem(browserSessionStorageKey(endpoint), JSON.stringify({
+      runtimeId: "runtime-ceiling",
+      browserUpdateRevision: Number.MAX_SAFE_INTEGER,
+    }));
+    const task = taskFixture();
+    const controller = createBrowserStatusController({
+      config: { endpoint, token: "status-token" },
+      task: () => task,
+      setTaskValue: () => undefined,
+      routeKey: () => "/",
+      destroyed: () => false,
+      annotationHealth: () => [],
+      resetResolutionSnapshots: () => undefined,
+      scheduleTimer: () => 0,
+    });
+    controller.reportBrowserUpdate();
+    expect(controller.browserUpdateRevision()).toBe(Number.MAX_SAFE_INTEGER);
+  });
+
   it("isolates every host callback and disposer with safe fallbacks", () => {
     const fault = (name: string) => () => { throw new Error(`${name} secret=hidden`); };
     let subscriptions = 0;
