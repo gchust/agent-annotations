@@ -1,223 +1,220 @@
-# Release Candidate Evidence — 0.1.0-alpha.0
+# Goal 11 Release-Candidate Evidence
 
-Clean-room, repeatable acceptance of the final alpha Product Candidate. Performed
-on 2026-08-22 (UTC) after the Goal 15–16 repair commit. The product candidate
-was not modified; this document is a new file created in the repository. Nothing
-was pushed, published, or tagged.
+Status: PASS. This is the only repository file changed by Goal 11. No product,
+test, workflow, package metadata, lockfile, or goal bundle file was changed.
+No npm publish, tag, release, push, or Goal 10 rerun was performed.
 
-## Product Candidate
+## Candidate and provenance
 
-- Commit SHA: `339b3681976917a3baed7e4952bfd91d0421d558`
-  - `test(e2e): accept balanced HMR invalidations` (Goal 16 repair; parent
-    `edd23a4b0ce36c9e79c1f20feb82b3007760082a`)
-- Repository: `/root/work/agent-annotations` (`main`); worktree clean except for
-  this document (the sole repo change of this Goal).
+- Product repository: `/root/work/agent-annotations`
+- Product SHA under audit: `d24718380734c6407ee0c790d98815aaf67143b5`
+- Candidate archive source: `git archive d24718380734c6407ee0c790d98815aaf67143b5`
+- Fresh external clean-room root: `/root/agent-annotations-goal11-INDM3X`
+- Archive: `/root/agent-annotations-goal11-INDM3X/archive/source.tar`
+- Archive SHA-256: `2c9fa5fb6dd14c0feccaa59cf6b8094166460aa74693b0be72ac0a59559c7661`
+- Archive size: `1,812,480` bytes
+- Archive scan: `tar -tf ... | rg '(^|/)(\\.git|dist|node_modules)(/|$)'` returned no matches; extracted `find` returned zero `.git`, `dist`, or `node_modules` paths.
+- Product worktree before evidence: clean. `HEAD` and `origin/main` were the product SHA; `git ls-remote origin refs/heads/main` also returned the product SHA. The checked-out branch was `goal10-ci-repair`. A separate stale local branch `refs/heads/main` points to the protected historical evidence branch `cc3ec2a`; it was not used or modified.
+- Environment: Linux `dev3-199`, x86_64, kernel `6.8.12-4-pve`; Node `v22.22.0`; pnpm `10.28.1`; Chromium installed by the existing packed-E2E gate.
+- Logs and reports: `/root/agent-annotations-goal11-INDM3X/logs/` and `/root/agent-annotations-goal11-INDM3X/reports/`.
 
-## Goal 01–16 Commit Map (exact)
+## Clean-room commands and exits
 
-| Goal | Commit SHA(s) |
-|---|---|
-| 01 | `7f4cd88cc8acec85659fe219dcf2538cd04bbc16` |
-| 02 | `f52f8b76cf4c6e39389f14e596443958439855d6` |
-| 03 | `a765e7788573d8e0e862182dd53a770b44f9bb0f` |
-| 04 | `e82393f64617fb563b8cc35df883b1cf8147ef80`, `52d344d51f0c88476f9d467c844f3204547ab4c4` |
-| 05 | `27c97b0ed38bd252314730b013a0e98a0e4419b6`, `c0014cd33ef31a8ee889e1c06d1137b814b38abd` |
-| 06 | `2a9c09d9db9685d07630dc3ada8d9e54f8cb06cb`, `4c509d82a35d57f607fe0a185764bb7acfdb3f42`, `5e90c6fea8e806598a55b71f96c7a9f2d9bcf082` |
-| 07 | `cc56d3bcea56ab4ecf2d3e46725d310737e9dc06`, `8fb03d7d47422cbb94b0adcb486de5dd6493b196` |
-| 08 | `5025fcd439bad90231796b27308fda49f01615fb` |
-| 09 | `4fee85e26286d80e2c437a639e5bf3e45914f46d` |
-| 10 | `5d9810dcc27a3d06c3cd7f77882634f3fd9839fb` |
-| 11 | `cc975c081d64c0707fca65d544e209bfa924a33b` |
-| 12 | `db1840d62f9ea8ab5467915d47dbcbeb32f35bcc` |
-| 13 | `3644a72eeccab10d7b5f03151a3706e35aa0fc1f` |
-| 14 | `6f58f9af46d3cd0515921fd4c2690efd42003a8a` |
-| 15 | `edd23a4b0ce36c9e79c1f20feb82b3007760082a` |
-| 16 repair | `339b3681976917a3baed7e4952bfd91d0421d558` |
-| 16 evidence | pending at document creation |
+Commands ran in the extracted archive, in this order. The exit codes are the
+observed first-run values in `logs/exit-codes.txt`; no gate was rerun after a
+failure because none failed.
 
-The 16 evidence commit was not yet created when this document was written, so
-its SHA is recorded as pending; it cannot be known inside the document itself.
+| Command | Exit | Log |
+|---|---:|---|
+| `pnpm install --frozen-lockfile` | 0 | `logs/01-install.log` |
+| `pnpm typecheck` | 0 | `logs/02-typecheck.log` |
+| `pnpm test` | 0 | `logs/03-test.log` (42 files, 478 tests) |
+| `pnpm check:architecture` | 0 | `logs/04-architecture.log` (31 tests) |
+| `pnpm check:docs` | 0 | `logs/05-docs.log` |
+| `pnpm build` | 0 | `logs/06-build.log` |
+| `pnpm release:verify` | 0 | `logs/07-release-verify.log` |
+| `pnpm test:e2e:repeat` | 0 | `logs/08-repeat-e2e.log` |
+| browser consumer `pnpm build` | 0 | `logs/09-browser-production-build.log` |
+| artifact identity and scans | 0 | `reports/artifact-identity.txt`, `reports/production-scan.txt`, `reports/core-no-react.txt` |
 
-## Clean-room Method
+The ordinary full test suite was run before the release orchestrator and passed
+`42 files / 478 tests`. The release orchestrator's non-repacking suite passed
+`39 files / 470 tests`, architecture passed `31/31`, publint reported `All
+good!`, ATTW passed its ESM/bundler profiles, the tarball audit passed, both
+Node 20 and Node 24 core/CLI smoke runs passed, and the first packed browser
+consumer passed.
 
-- Archive created with no `.git`, no `dist`, no `node_modules`:
+## Exact candidate artifact
 
-  ```bash
-  git archive --format=tar --prefix=aa-g16b/ 339b3681976917a3baed7e4952bfd91d0421d558 | tar -x -C /tmp
-  mv /tmp/aa-g16b /tmp/aa-g16b-clean
-  ```
+`pnpm release:verify` created one candidate tarball after its single build and
+single pack. The release directory contains exactly one `.tgz` file.
 
-- Clean archive path: `/tmp/aa-g16b-clean`
-- Environment: Linux dev3-199 6.8.12-4-pve x86_64; Node `v22.22.0`; pnpm
-  `10.28.1`.
-- All command stdout/stderr logs preserved outside the repo:
-  `/tmp/aa-g16b-logs/`. Gate logs store stdout/stderr only; exit codes were
-  printed at the console outside the redirects and are recorded in the
-  observed first-run exit-code summary (`exit-codes.txt` in the same
-  directory); no gate was re-run to produce that summary.
-
-## Clean Archive Gates
-
-| # | Gate | Exit | Log | Notes |
-|---|---|---|---|---|
-| 1 | `pnpm install --frozen-lockfile` | 0 | `01-install.log` | Done in 1.5s |
-| 2 | `pnpm typecheck` | 0 | `02-typecheck.log` | 0 TS errors |
-| 3 | `pnpm test` | 0 | `03-test.log` | **37 files, 434 tests passed** |
-| 4 | `pnpm run check:architecture` | 0 | `04-arch.log` | **29 passed** |
-| 5 | `pnpm run check:docs` | 0 | `05-docs.log` | docs smoke PASS |
-| 6 | `pnpm build` | 0 | `06-build.log` | Build complete 7437ms |
-| 7 | `pnpm run check:package` | 0 | `07-package.log` | |
-| 8 | `pnpm run check:tarball` | 0 | `08-tarball.log` | tarball audit PASS (26 files, 106630 bytes) |
-| 9 | `pnpm test:e2e` | 0 | `09-e2e-clean.log` | **17 passed** |
-| 10 | `pnpm release:verify` | 0 | `10-release-verify.log` | full chain rerun, all passed |
-
-First-run exit codes only; no rerun was needed for any gate.
-
-## Exact Tarball (packed once, after all gates)
-
-- Path: `/tmp/aa-g16b-pack/gchust-agent-annotations-0.1.0-alpha.0.tgz`
-- **SHA-256**: `3b76627d4381c833f465afb296390f10bd302290f42beeeeb7bd899e0f769821`
-- **Size**: 106588 bytes
-- Full file list (`tar -tf | sort`, `12-tarball-list.txt`):
-
-  ```
-  package/API.md
-  package/CHANGELOG.md
-  package/LICENSE
-  package/README.md
-  package/THIRD_PARTY_NOTICES.md
-  package/dist/cli/index.d.mts
-  package/dist/cli/index.mjs
-  package/dist/client/index.d.ts
-  package/dist/client/index.js
-  package/dist/core/index.d.ts
-  package/dist/core/index.js
-  package/dist/extension/index.d.ts
-  package/dist/extension/index.js
-  package/dist/index-U5OVvAFX.d.ts
-  package/dist/metadata-BXwV313k.mjs
-  package/dist/mutation-PTz8le1H.js
-  package/dist/testing/index.d.ts
-  package/dist/testing/index.js
-  package/dist/transport-BZmnDCEv.js
-  package/dist/types/index.d.ts
-  package/dist/types/index.js
-  package/dist/vite/client.d.ts
-  package/dist/vite/client.js
-  package/dist/vite/index.d.mts
-  package/dist/vite/index.mjs
-  package/package.json
-  ```
-
-- Tarball content scan: no `src/`, `tests/`, `fixtures/`, `scripts/` entries, no
-  `*.map`, no `workspace:` references (0 leaks).
-
-## External Consumers
-
-### Core/CLI consumer (no React installed — proven)
-
-- Path: `/tmp/aa-g16b-core-consumer`; install: `pnpm add <exact tarball>`.
-- Lockfile: `@gchust/agent-annotations@file:../aa-g16b-pack/gchust-agent-annotations-0.1.0-alpha.0.tgz` (no `workspace:`).
-- Realpath: `/tmp/aa-g16b-core-consumer/node_modules/.pnpm/@gchust+agent-annotations@file+..+aa-g16b-pack+…/node_modules/@gchust/agent-annotations` (consumer's own store).
-- **No React installed (proof in `/tmp/aa-g16b-logs/core-no-react.log`)**: lockfile
-  has 0 direct `react`/`react-dom` dependency entries; `node_modules/react` and
-  `node_modules/react-dom` are ABSENT; the `.pnpm` store has no `react@…`/
-  `react-dom@…` directories (the only `react-*` entry is `react-grab@0.1.50`,
-  the screenshot-capture library, not React). Installed manifest
-  `dependencies: { magic-string, react-grab }`; `peerDependencies` list
-  `react/react-dom/vite` but none were installed (peers not auto-installed).
-- `/core` import in this no-React Node consumer: **PASS** (`core-consumer-ok`).
-- CLI (`dist/cli/index.mjs`):
-  - `--help` exit 0
-  - `verify` → **unknown command, exit 2**
-  - `validate-task --json` exit 0 `{"ok":true,"taskId":"g16b-task",…}`
-  - `status --json` exit 0
-  - `diagnostics --json` exit 0 `[]`
-  - `evidence --json` exit 0 `[]`
-  - `wait --source-revision … --timeout-ms 0 --json` exit 0
-  - public bin `node_modules/.bin/agent-annotations validate-task` exit 0
-
-### Browser consumer (authoritative 5× stability gate)
-
-- Path: `/tmp/aa-g16b-browser-consumer` = fresh copy of
-  `fixtures/packed-react-vite` from the clean archive; ONLY the exact tarball
-  copied in as `gchust-agent-annotations.tgz`; `pnpm install` once (lockfile
-  generated/frozen).
-- Tarball SHA inside consumer: `3b76627d4381c833f465afb296390f10bd302290f42beeeeb7bd899e0f769821` (identical).
-- Lockfile: `@gchust/agent-annotations@file:gchust-agent-annotations.tgz`; no `workspace:`.
-- Realpath: `/tmp/aa-g16b-browser-consumer/node_modules/.pnpm/@gchust+agent-annotations@file+gchust-agent-annotations.tgz_react-dom@19.2.8_react@19.2_4dd4aec5e157bd666c6f282739718a77/node_modules/@gchust/agent-annotations`.
-- No reinstall, no repack, no Playwright retries, no rerun-after-failure.
-
-### Five consecutive first-pass runs (same exact tarball)
-
-| Run | Exit | Result | Log |
-|---|---|---|---|
-| 1 | 0 | **17 passed** | `browser-e2e-1.log` |
-| 2 | 0 | **17 passed** | `browser-e2e-2.log` |
-| 3 | 0 | **17 passed** | `browser-e2e-3.log` |
-| 4 | 0 | **17 passed** | `browser-e2e-4.log` |
-| 5 | 0 | **17 passed** | `browser-e2e-5.log` |
-
-All five first-pass green; vertical HMR (balanced setup/dispose deltas), relative
-base `/app/` authoritative run included in each.
-
-## Production Exclusion & Browser Bundle Scan
-
-### Consumer production build (explicit, real results)
-
-- `pnpm build` run once in the browser consumer (`/tmp/aa-g16b-browser-consumer`):
-  exit **0**, "✓ built in 2.17s" — stdout/stderr in `/tmp/aa-g16b-logs/browser-build.log`.
-- Production exclusion scan of the built `dist/` (`/tmp/aa-g16b-logs/browser-build-scan.log`):
-
-  | Marker | Result |
-  |---|---|
-  | `mountAgentAnnotations` | ABSENT |
-  | `virtual:agent-annotations` | ABSENT |
-  | `__agent-annotations` | ABSENT |
-  | `agent-annotations-root` | ABSENT |
-  | `react-dom/server` | ABSENT |
-
-  No runtime/API marker is present in the consumer production build.
-
-### Clean-archive dist scan
-
-- `dist` scan in `/tmp/aa-g16b-clean`: no `react-dom/server` occurrence
-  (`grep -R` exit 1 = no match).
-
-### Tarball content scan
-
-- Tarball excludes all source/test/fixture/workspace content (full list above).
-
-## Remote CI (real state, read-only `gh run list --workflow ci --limit 10`)
-
-- Runs visible: 1 — `32198810235` (`failure`, headSha
-  `53f840292182eda5fe7ed0351e9956450db19f01`, created 2026-08-18, push).
-- The only run does NOT match the Product Candidate SHA `339b368…`.
-- **Remote CI: NOT RUN** for the candidate SHA.
-- The historical failed run for an older SHA is recorded above; it is not
-  candidate CI and is never treated as PASS or FAIL for the candidate.
-
-## Known Limitations
-
-- Remote CI has never executed for the candidate; GitHub Actions CI status is
-  therefore `NOT RUN` by design of the acceptance contract.
-- The browser E2E stability gate is machine-local (Linux, Node 22); the
-  candidate was not exercised on Windows/macOS runners in this acceptance.
-- Evidence logs live outside the repository (`/tmp/aa-g16b-logs/`); they are
-  not committed with the repository.
-- The 16-evidence commit SHA is unknowable at document creation (see above).
-
-## Conclusion
-
-- All clean-archive gates passed (first-run exit codes, no reruns).
-- Exact tarball packed once; SHA-256/size/full list recorded.
-- External core/CLI consumer passed (no React installed, proven); external
-  browser consumer passed 5×17/17 first-pass runs on the exact tarball.
-- Production exclusion scan: all five contract markers ABSENT from the built
-  consumer dist (real scan results).
-- Remote CI for the candidate: NOT RUN (recorded as-is, no fabrication).
-- Product Candidate SHA reviewed throughout: `339b3681976917a3baed7e4952bfd91d0421d558`.
+- Path: `/root/agent-annotations-goal11-INDM3X/artifacts/release-candidate/gchust-agent-annotations-0.1.0-alpha.0.tgz`
+- SHA-256: `47371b05e09d0b84e4e50bf256e3e475a22e55f503a1ac5ea435cf5462955ed2`
+- Size: `117528` bytes
+- Files: `26`
+- Exact browser copy hash: identical SHA-256; `/root/agent-annotations-goal11-INDM3X/artifacts/release-candidate/browser-consumer/gchust-agent-annotations.tgz`
+- Full `tar -tf | sort` list:
 
 ```text
-git push was NOT performed; npm publish was NOT performed.
+package/API.md
+package/CHANGELOG.md
+package/LICENSE
+package/README.md
+package/THIRD_PARTY_NOTICES.md
+package/dist/cli/index.d.mts
+package/dist/cli/index.mjs
+package/dist/client/index.d.ts
+package/dist/client/index.js
+package/dist/core-CHf3wBTf.js
+package/dist/core/index.d.ts
+package/dist/core/index.js
+package/dist/extension/index.d.ts
+package/dist/extension/index.js
+package/dist/index-kW-tUw7k.d.ts
+package/dist/metadata-uduXdvB7.mjs
+package/dist/mutation-DuaR3BHP.js
+package/dist/testing/index.d.ts
+package/dist/testing/index.js
+package/dist/types/index.d.ts
+package/dist/types/index.js
+package/dist/vite/client.d.ts
+package/dist/vite/client.js
+package/dist/vite/index.d.mts
+package/dist/vite/index.mjs
+package/package.json
 ```
+
+The tarball audit found no source, test, fixture, script, source map, internal
+declaration path, or `workspace:` leak.
+
+## Consumers and production scan
+
+The browser consumer is `/root/agent-annotations-goal11-INDM3X/artifacts/release-candidate/browser-consumer`.
+It was installed once by `release:verify` from the exact tarball. The repeat
+gate only removed its runtime evidence directory before each foreground test;
+it did not install, pack, or reinstall. The five logs all begin with the same
+candidate SHA and each reported 20 passing tests:
+
+| Run | Exit | Result | Log |
+|---:|---:|---|---|
+| 1 | 0 | 20 passed, first pass | `artifacts/release-candidate/repeat-e2e-1.log` |
+| 2 | 0 | 20 passed, first pass | `artifacts/release-candidate/repeat-e2e-2.log` |
+| 3 | 0 | 20 passed, first pass | `artifacts/release-candidate/repeat-e2e-3.log` |
+| 4 | 0 | 20 passed, first pass | `artifacts/release-candidate/repeat-e2e-4.log` |
+| 5 | 0 | 20 passed, first pass | `artifacts/release-candidate/repeat-e2e-5.log` |
+
+The browser consumer production build was run once. The scan of its `dist/`
+returned zero occurrences for every forbidden marker:
+
+```text
+mountAgentAnnotations=0
+virtual:agent-annotations=0
+__agent-annotations=0
+agent-annotations-root=0
+react-dom/server=0
+```
+
+The fresh no-React core/CLI consumer is
+`/root/agent-annotations-goal11-INDM3X/artifacts/release-candidate/core-consumer/consumer`.
+It installed the same exact tarball once, imported `@gchust/agent-annotations/core`,
+and ran the public CLI under Node 20.20.2 and Node 24.19.0. Both core imports
+and both CLI `--help` checks passed. `node_modules/react` and
+`node_modules/react-dom` are absent; exact React package directories and exact
+React lockfile snapshots are zero; the only matching store package is
+`react-grab@0.1.50`. The installed package has runtime dependencies
+`magic-string` and `react-grab`; React, ReactDOM, and Vite appear only as peer
+metadata.
+
+## Remote CI and registry facts
+
+The exact first-run remote run was queried independently:
+
+- Run `32640448134`, URL `https://github.com/gchust/agent-annotations/actions/runs/32640448134`, event `push`, attempt `1`, head SHA `d24718380734c6407ee0c790d98815aaf67143b5`, conclusion `success`.
+- Ubuntu Node 20: job `97196617544`, success, attempt 1.
+- Ubuntu Node 24: job `97196617578`, success, attempt 1.
+- Windows Node 20: job `97196617582`, success, attempt 1.
+- Windows Node 24: job `97196617554`, success, attempt 1.
+- Release verify Ubuntu Node 20: job `97196617527`, success, attempt 1. Its log records the exact candidate SHA, release verification PASS, and repeat runs 1/5 through 5/5 all PASS.
+- Raw job logs are preserved under `logs/ci-job-*.log`; the API job identity is in `reports/remote-jobs.json`.
+
+Independent release facts:
+
+- `package.json`: name `@gchust/agent-annotations`, version `0.1.0-alpha.0`, `publishConfig.access=public`.
+- `CHANGELOG.md`: exactly one current `0.1.0-alpha.0 - 2026-08-22` heading.
+- `npm view @gchust/agent-annotations@0.1.0-alpha.0 version --json`: exit `1`, `E404 Not Found`; this exact version is unpublished. It is recorded as an honest registry fact, not as a substituted consumer source.
+
+## Goal and acceptance mappings
+
+### G11
+
+- **G11-001 PASS**: Product SHA is `d247183...`; candidate artifact and this evidence are separate. Archive and product-ref reports are external; the eventual evidence commit is not the product SHA.
+- **G11-002 PASS**: Fresh archive, frozen install, typecheck, 478-test suite, architecture, docs, build, package/tarball audits, and release verify all exited 0 on first run.
+- **G11-003 PASS**: Core/CLI and browser consumers used the same 64-character candidate SHA; the browser copy hash equals the packed hash.
+- **G11-004 PASS**: One install, one pack, and five consecutive first-pass browser runs; no retry, repack, or reinstall.
+- **G11-005 PASS**: Real browser production `dist/` scan found all five forbidden markers absent.
+- **G11-006 PASS**: All five exact-SHA CI jobs in run `32640448134` succeeded on attempt 1.
+- **G11-007 PASS**: F-001 through F-050 are mapped below to current source tests, packed browser tests, release logs, or exact CI/registry evidence.
+- **G11-008 PASS**: External paths, commands, exit codes, artifact identity, environment, unpublished registry state, and local-branch limitation are recorded without claiming publication.
+
+### F-001 through F-050
+
+| ID | Result and concrete evidence |
+|---|---|
+| F-001 | PASS — `tests/client/runtime-evidence-status.test.ts` “does not report a browser update when an accepted task changes the referenced sources”; `logs/03-test.log`. |
+| F-002 | PASS — same suite “preserves the applied baseline ... clears it for a failed browser report”; packed `status.spec.ts`; repeat logs. |
+| F-003 | PASS — `tests/server/vite.test.ts` asserts `vite:afterUpdate`; mount/status tests exercise initial mount and full reload. |
+| F-004 | PASS — packed `fixtures/packed-react-vite/tests/status.spec.ts` CSS HMR wait and `browserUpdateRevision`; five exact runs. |
+| F-005 | PASS — `tests/cli/cli.test.ts` unavailable referenced-source wait and browser-state fixtures assert `referencedSourceRevision: null`. |
+| F-006 | PASS — packed `source-benchmark.spec.ts` prints distinct source baseline; core handoff tests assert both fields. |
+| F-007 | PASS — CLI tests reject `--source-revision`, `--browser-source-revision`; `tests/server/browser-state.test.ts` rejects v1. |
+| F-008 | PASS — `runtime-markers-capture.test.ts` query-free page context; packed status query sentinel is absent from persisted state. |
+| F-009 | PASS — packed status and vertical privacy assertions cover Browser State, Handoff, Diagnostics, and evidence. |
+| F-010 | PASS — `runtime-markers-capture.test.ts` strict host page-context validation and fallback. |
+| F-011 | PASS — packed `status.spec.ts` uses two runtimes/routes and verifies distinct state files; Vite tests cover heartbeat isolation. |
+| F-012 | PASS — packed status ambiguity returns `ambiguous_browser_runtime`; CLI exit is checked. |
+| F-013 | PASS — packed vertical handoff includes exact runtime, route, annotation, and runtime-scoped wait/status commands. |
+| F-014 | PASS — `runtime-controllers.test.ts` isolates every host callback/disposer; host UI tests continue cleanup after dispose failure. |
+| F-015 | PASS — guarded host test records identity failure while ordinary Pick/Marker flows remain usable. |
+| F-016 | PASS — validated transport tests and server store revision-conflict tests require matching task identity and advancing revision. |
+| F-017 | PASS — evidence-status tests validate `writeEvidence` once, annotation existence, conflict retry, and revision update. |
+| F-018 | PASS — invalid transport task and invalid subscribed task tests fail before UI/state publication. |
+| F-019 | PASS — runtime evidence-status tests redact update/add mutations before custom transport calls. |
+| F-020 | PASS — `tests/server/store.test.ts` final persistence redaction is idempotent across comments, extensions, refs, and completion evidence. |
+| F-021 | PASS — controller cache test checks every iframe target; packed nested/multi-target tests recover all targets. |
+| F-022 | PASS — marker controller and packed multi-target test use one shared resolution snapshot for marker, highlight, summary, and tracking. |
+| F-023 | PASS — packed nested iframe/open-shadow and dynamic DOM tests recover after population/reload. |
+| F-024 | PASS — selector/inspection tests and packed reliability test explicitly keep cross-origin unsupported. |
+| F-025 | PASS — marker capture unit geometry tests and packed reliability highlight/scroll/resize checks. |
+| F-026 | PASS — packed frozen-popover test samples the visible popover in saved PNG; screenshot tests freeze prepared DOM before render. |
+| F-027 | PASS — runtime evidence-status test persists/closes composer before delayed screenshot resolves. |
+| F-028 | PASS — packed privacy screenshot records sanitized input/password/textarea/contenteditable pixels; no raw media/form values. |
+| F-029 | PASS — CLI status tests select exact runtime, route, and annotation. |
+| F-030 | PASS — CLI status `--check` tests exact target health and packed status removes/restores the target. |
+| F-031 | PASS — CLI diagnostics baseline tests block only diagnostics newer than `--diagnostics-since`. |
+| F-032 | PASS — handoff unit and packed copy assert Browser Update Revision baseline and wait command. |
+| F-033 | PASS — handoff tests and packed copy assert raw comment is absent from completion instructions. |
+| F-034 | PASS — CLI tests cover valid UTF-8 summary files, unreadable files, invalid UTF-8, empty/oversize, and mutually exclusive flags. |
+| F-035 | PASS — packed vertical test performs browser annotation, generated handoff, wait/status checks, summary-file completion, and verification. |
+| F-036 | PASS — architecture audit rejects legacy heartbeat; server Vite tests accept only complete Browser State v2 heartbeat. |
+| F-037 | PASS — Vite test asserts `/source` returns 404; architecture audit rejects route code. |
+| F-038 | PASS — `tests/client/runtime.test.ts` checks one public commit per mutation/route/toolbar action. |
+| F-039 | PASS — same runtime test checks 100 pointer moves add zero public commits; host UI test keeps render counter flat. |
+| F-040 | PASS — architecture/core export tests and no-React consumer prove `/core` has no React/Vite/Node runtime dependency. |
+| F-041 | PASS — real browser production scan: all five markers count zero. |
+| F-042 | PASS — release logs show one candidate pack JSON record and one `.tgz` in the release directory. |
+| F-043 | PASS — package audit, tarball audit, core consumer, browser copy, and all five runs record SHA `47371b05...`. |
+| F-044 | PASS — exact run jobs `97196617544` and `97196617578`, Ubuntu Node 20/24, success. |
+| F-045 | PASS — exact run jobs `97196617582` and `97196617554`, Windows Node 20/24, success. |
+| F-046 | PASS — exact release job `97196617527` success, including exact candidate release verify and five repeats. |
+| F-047 | PASS — local and CI repeat logs show five first-pass runs, all green, with no retry/reinstall/repack. |
+| F-048 | PASS — package version, changelog heading, and public publishConfig agree; npm exact-version query returns E404, accurately recording unpublished state. |
+| F-049 | PASS — clean archive root has no intermediate implementation file; tarball contains only the 26 whitelisted files. |
+| F-050 | PASS — this document records reproducible commands, exact exits, paths, hashes, complete tarball list, limitations, and no fabricated publication claim. |
+
+## Self-audit and handoff
+
+- `git diff --check` was run before writing this document and again after it was written.
+- `git diff --name-only` must contain only `RELEASE-CANDIDATE-EVIDENCE.md`; no generated external artifacts are inside the product worktree.
+- Evidence commit is intentionally separate from the audited product SHA and is reported by the final handoff after commit.
+- Remaining risks: the exact npm version is not published; browser repeat and local clean-room tests are Linux/Node 22 evidence, while Windows/Node 20/24 evidence is the exact remote CI run; the stale local `main` branch ref remains untouched and is not the live remote `main` ref.
