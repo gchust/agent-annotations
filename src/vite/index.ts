@@ -258,15 +258,17 @@ export default function agentAnnotations(
           try {
             if (source.startsWith("file:")) {
               candidate = fileURLToPath(source);
-            } else if (/^[a-zA-Z][a-zA-Z\d+.-]*:|^\/\//.test(source)) {
-              return;
             } else if (path.isAbsolute(source)) {
               candidate = source;
+            } else if (/^[a-zA-Z][a-zA-Z\d+.-]*:|^\/\//.test(source)) {
+              return;
             } else {
               let base = path.dirname(file);
               if (sourceRoot) {
                 if (sourceRoot.startsWith("file:")) {
                   base = fileURLToPath(sourceRoot);
+                } else if (path.isAbsolute(sourceRoot)) {
+                  base = sourceRoot;
                 } else if (/^[a-zA-Z][a-zA-Z\d+.-]*:|^\/\//.test(sourceRoot)) {
                   return;
                 } else {

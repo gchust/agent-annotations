@@ -84,6 +84,9 @@ describe("serve-only Vite plugin", () => {
       file: a,
       sourceRoot: undefined,
     });
+    const rootedMap = { ...map, sources: [path.basename(a)], sourceRoot: path.dirname(a) };
+    transform.call({ getCombinedSourcemap: () => rootedMap }, "code", a, { ssr: false });
+    expect(rootedMap).toMatchObject({ sources: [pathToFileURL(realpathSync(a)).href], sourceRoot: undefined });
     expect(transform.call({ getCombinedSourcemap: () => ({ ...map, sources: ["../../../outside.tsx"] }) }, "code", `${a}?direct#fragment`)).toBeUndefined();
     expect(transform.call({ getCombinedSourcemap: () => map }, "code", path.join(root, "node_modules/pkg/Card.tsx"), { ssr: false })).toBeUndefined();
     expect(transform.call({ getCombinedSourcemap: () => map }, "code", a, { ssr: true })).toBeUndefined();
