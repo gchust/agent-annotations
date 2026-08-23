@@ -241,6 +241,7 @@ test("multi target summary, highlights, and iframe tracking share dynamic refres
         highlights.nth(0).boundingBox(),
         highlights.nth(1).boundingBox(),
       ]);
+      if ([...targetBoxes, ...highlightBoxes].some((box) => box === null)) return null;
       return highlightBoxes.map((box, index) => ({
         x: Math.round(box!.x - targetBoxes[index]!.x),
         y: Math.round(box!.y - targetBoxes[index]!.y),

@@ -5,6 +5,7 @@ import path from "node:path";
 import { expect, test } from "@playwright/test";
 
 const runtimeRoot = path.resolve(".agent-annotations");
+const taskPath = path.join(runtimeRoot, "tasks/active-task.json");
 const shadow = (page: import("@playwright/test").Page, selector: string) =>
   page.locator(`#agent-annotations-root >> ${selector}`);
 const cli = (...args: string[]) => execFileSync("pnpm", ["exec", "agent-annotations", ...args], {
@@ -64,13 +65,19 @@ test("keeps two browser runtimes isolated through HMR and page close", async ({ 
 test("browser status health and HMR-applied source revision ordering", async ({ page }) => {
   await page.goto("/");
   // Capture an annotation whose source is a component file that hot-updates.
+  await expect(shadow(page, ".aa-dock")).toBeVisible();
+  const initialAnnotations = JSON.parse(readFileSync(taskPath, "utf8")).annotations.length;
   await page.keyboard.press("Control+Alt+P");
+  await expect(shadow(page, '[aria-label^="Pick"]')).toHaveAttribute("aria-pressed", "true");
   await page.locator("#duplicate-a").click();
+  await expect(shadow(page, '[aria-label="Annotation comment"]')).toBeVisible();
   await shadow(page, '[aria-label="Annotation comment"]').fill("Status fixture");
   await shadow(page, 'button[aria-label="Save annotation"]').click();
+  await expect.poll(() => JSON.parse(readFileSync(taskPath, "utf8")).annotations.length).toBe(initialAnnotations + 1);
   // The annotation introduces its first referenced source. A full reload is
   // the trusted update that establishes the corresponding source snapshot.
   await page.reload();
+  await expect(shadow(page, ".aa-dock")).toBeVisible();
 
   // Propagation is asynchronous (heartbeats every 5s): poll the full health
   // contract instead of assuming the latest save is already reported.

@@ -1,5 +1,6 @@
 import {
   closeSync,
+  existsSync,
   linkSync,
   mkdirSync,
   openSync,
@@ -86,10 +87,13 @@ const claimStaleLock = async (
   try {
     linkSync(lockPath, claimPath);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") {
       return "retry"; // The lock vanished: another process recovered it.
     }
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    if (code !== "EEXIST" && !(process.platform === "win32" && code === "EPERM" && existsSync(claimPath))) {
+      throw error;
+    }
     // Another process already holds the claim: it must target the same stale
     // lock and be fresh; a stale claim is only a hard link, so taking it over
     // never touches the lock at the path.
