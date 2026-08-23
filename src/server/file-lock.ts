@@ -175,7 +175,8 @@ export const acquireFileLock = async (
         }
       };
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "EEXIST" && !(process.platform === "win32" && code === "EPERM")) throw error;
       const inspected = inspectLock(lockPath);
       if (inspected && inspected.recoverable) {
         const claimed = await claimStaleLock(lockPath, inspected.content);
