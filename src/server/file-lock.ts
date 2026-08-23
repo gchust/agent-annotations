@@ -1,6 +1,5 @@
 import {
   closeSync,
-  existsSync,
   linkSync,
   mkdirSync,
   openSync,
@@ -91,7 +90,7 @@ const claimStaleLock = async (
     if (code === "ENOENT") {
       return "retry"; // The lock vanished: another process recovered it.
     }
-    if (code !== "EEXIST" && !(process.platform === "win32" && code === "EPERM" && existsSync(claimPath))) {
+    if (code !== "EEXIST" && !(process.platform === "win32" && code === "EPERM")) {
       throw error;
     }
     // Another process already holds the claim: it must target the same stale

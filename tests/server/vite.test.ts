@@ -32,7 +32,7 @@ describe("serve-only Vite plugin", () => {
     const resolveId = plugin.resolveId as Function;
     const load = plugin.load as Function;
     expect(plugin.apply).toBe("serve");
-    expect(plugin.transform).toMatchObject({ order: "pre" });
+    expect(plugin.transform).toMatchObject({ order: "post" });
     expect(resolveId.call({} as never, "virtual:agent-annotations/client", undefined, {} as never)).toBe("\0virtual:agent-annotations/client");
     const loaded = load.call({} as never, "\0virtual:agent-annotations/client", {} as never);
     expect(String(loaded)).toContain("/tmp/demo/extension.ts");
@@ -68,31 +68,28 @@ describe("serve-only Vite plugin", () => {
     const { parent, root, a, b } = fixture();
     const plugin = agentAnnotations({ root });
     const transform = (plugin.transform as { handler: Function }).handler;
-    const code = "export const Card = () => null;\n";
-    const result = transform.call({} as never, code, a, { ssr: false });
-    expect(result).toEqual({
-      code,
-      map: {
-        version: 3,
-        file: a,
-        sources: [pathToFileURL(a).href],
-        sourcesContent: [code],
-        names: [],
-        mappings: expect.any(String),
-      },
+    const map = {
+      version: 3,
+      names: ["Card"],
+      sources: ["Card.tsx"],
+      sourcesContent: ["export const Card = () => null;"],
+      mappings: "AAAA",
+    };
+    const result = transform.call({ getCombinedSourcemap: () => map }, "code", a, { ssr: false });
+    expect(result).toBeUndefined();
+    expect(map).toMatchObject({
+      mappings: "AAAA",
+      names: ["Card"],
+      sources: [pathToFileURL(realpathSync(a)).href],
+      file: a,
+      sourceRoot: undefined,
     });
-    expect((result as { map: { mappings: string } }).map.mappings.length).toBeGreaterThan(0);
-    expect(transform.call({} as never, "code", b, { ssr: false })).toMatchObject({
-      map: { sources: [pathToFileURL(b).href], file: b },
-    });
-    expect(transform.call({} as never, "code", `${a}?direct#fragment`, { ssr: false })).toMatchObject({
-      map: { sources: [pathToFileURL(a).href], file: a },
-    });
-    expect(transform.call({} as never, "code", path.join(root, "node_modules/pkg/Card.tsx"), { ssr: false })).toBeUndefined();
-    expect(transform.call({} as never, "code", a, { ssr: true })).toBeUndefined();
+    expect(transform.call({ getCombinedSourcemap: () => ({ ...map, sources: ["../../../outside.tsx"] }) }, "code", `${a}?direct#fragment`)).toBeUndefined();
+    expect(transform.call({ getCombinedSourcemap: () => map }, "code", path.join(root, "node_modules/pkg/Card.tsx"), { ssr: false })).toBeUndefined();
+    expect(transform.call({ getCombinedSourcemap: () => map }, "code", a, { ssr: true })).toBeUndefined();
     const outside = path.join(parent, "outside.ts");
     writeFileSync(outside, "outside");
-    expect(transform.call({} as never, "code", outside, { ssr: false })).toBeUndefined();
+    expect(transform.call({ getCombinedSourcemap: () => map }, "code", outside, { ssr: false })).toBeUndefined();
   });
 
   it("injects the virtual client under the resolved Vite base", () => {
@@ -196,7 +193,7 @@ describe("serve-only Vite plugin", () => {
       for (const file of [a, b]) {
         const module = await server.environments.client.moduleGraph.ensureEntryFromUrl(file);
         const transformed = await server.pluginContainer.transform(readFileSync(file, "utf8"), module.id!);
-        expect(transformed?.map).toMatchObject({ sources: [pathToFileURL(file).href] });
+        expect(transformed?.map).toMatchObject({ sources: [pathToFileURL(realpathSync(file)).href] });
       }
     } finally {
       await server.close();
