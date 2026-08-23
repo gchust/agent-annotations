@@ -213,6 +213,28 @@ describe("file task store", () => {
     expect(stores[0]!.read()!.taskId).toBe(tasks[0]!.taskId);
   });
 
+  it("never steals a fresh stale-lock claim with an old shared mtime", async () => {
+    const store = new FileTaskStore(root(), 100);
+    const task = await store.readOrCreate();
+    const lockPath = path.join(store.root, "tasks", ".write.lock");
+    const claimPath = `${lockPath}.claim`;
+    writeFileSync(lockPath, JSON.stringify({
+      pid: 999_999_999,
+      createdAt: new Date(Date.now() - 60_000).toISOString(),
+      owner: "stale-owner",
+    }));
+    const backdated = new Date(Date.now() - 60_000);
+    utimesSync(lockPath, backdated, backdated);
+    linkSync(lockPath, claimPath);
+
+    await expect(store.mutate({
+      taskId: task.taskId,
+      expectedRevision: task.taskRevision,
+      operations: [{ op: "add", annotation: annotationFixture() }],
+    })).rejects.toMatchObject({ code: "write_busy" });
+    expect(statSync(claimPath).ino).toBe(statSync(lockPath).ino);
+  });
+
   it("recovers a stale lock despite an orphaned claim from a different inode", async () => {
     const store = new FileTaskStore(root(), 500);
     const task = await store.readOrCreate();

@@ -7,7 +7,6 @@ import {
   rmSync,
   statSync,
   unlinkSync,
-  utimesSync,
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
@@ -100,7 +99,7 @@ const claimStaleLock = async (
       const claimStat = statSync(claimPath);
       const lockStat = statSync(lockPath);
       if (claimStat.ino === lockStat.ino) {
-        if (Date.now() - claimStat.mtimeMs >= MALFORMED_LOCK_GRACE_MS) {
+        if (Date.now() - claimStat.ctimeMs >= MALFORMED_LOCK_GRACE_MS) {
           unlinkSync(claimPath);
           return "retry";
         }
@@ -115,10 +114,9 @@ const claimStaleLock = async (
       return "retry"; // The claim or the lock vanished.
     }
   }
-  // I own the claim: mark it fresh, then verify it links the exact inspected
-  // stale lock before touching the lock path.
+  // I own the claim: creating the hard link refreshed the inode ctime. Verify
+  // it links the exact inspected stale lock before touching the lock path.
   try {
-    utimesSync(claimPath, new Date(), new Date());
     const claimStat = statSync(claimPath);
     const lockStat = statSync(lockPath);
     if (claimStat.ino !== lockStat.ino || readFileSync(claimPath, "utf8") !== inspected) {
