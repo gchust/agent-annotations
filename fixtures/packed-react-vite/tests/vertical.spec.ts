@@ -118,7 +118,7 @@ test("packed browser to file to CLI to browser loop, HMR and session security", 
   const handoff = await page.evaluate(() => navigator.clipboard.readText());
   expect(handoff).toContain("- route: /#/customers");
   expect(handoff).toContain("agent-annotations validate-task --json");
-  expect(handoff).toContain("--summary-file agent-annotations-summary-");
+  expect(handoff).toContain("--summary-file .agent-annotations/agent-annotations-summary-");
   expect(handoff).not.toContain("agent-annotations wait ");
   expect(handoff).not.toContain("agent-annotations status ");
   expect(handoff).not.toContain("--summary 'Make target purple'");

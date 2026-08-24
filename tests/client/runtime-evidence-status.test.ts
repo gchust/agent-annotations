@@ -1251,7 +1251,7 @@ describe("runtime-evidence-status", () => {
       expect(output).toContain("Run the project-relevant typecheck and tests");
       expect(output).toContain("agent-annotations validate-task --json");
       expect(output).toContain(
-        "agent-annotations complete ann-1 --verified --summary-file agent-annotations-summary-ann-1.txt"
+        "agent-annotations complete ann-1 --verified --summary-file .agent-annotations/agent-annotations-summary-ann-1.txt"
       );
       expect(output).not.toContain("agent-annotations wait ");
       expect(output).not.toContain("agent-annotations status ");
@@ -1417,7 +1417,7 @@ describe("runtime-evidence-status", () => {
       expect(output).not.toContain("Bearer ab");
       expect(output).toContain("echo Bearer [REDACTED]");
       const completionLine = output.split("\n").find((line) => line.startsWith("- completion:"))!;
-      expect(completionLine).toBe("- completion: agent-annotations complete ann-1 --verified --summary-file agent-annotations-summary-ann-1.txt");
+      expect(completionLine).toBe("- completion: agent-annotations complete ann-1 --verified --summary-file .agent-annotations/agent-annotations-summary-ann-1.txt");
       expect(completionLine).not.toContain("quote");
     } finally {
       mounted.unmount();

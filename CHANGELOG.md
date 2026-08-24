@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.3 - 2026-08-24
+
+- Kept completed annotations visible with their original marker color and a
+  compact check badge, and refreshed the page after the full task completes.
+- Added Enter-to-save for annotation comments while preserving Shift+Enter
+  for newlines.
+- Removed sampled-element highlights from region annotations so the region
+  outline remains the authoritative visual selection.
+- Moved generated implementation-summary placeholders into the ignored
+  `.agent-annotations` runtime directory.
+
 ## 0.1.2 - 2026-08-24
 
 - Expanded the annotation toolbar by default, exited capture mode after saving,

@@ -122,8 +122,9 @@ const formatSource = (source: NonNullable<AgentAnnotationsTarget["inspection"]["
     source.componentName ? ` (${singleLine(source.componentName)})` : ""
   }`;
 
-// Plain filename placeholders stay runnable across shells without quoting.
-const summaryFile = (annotationId: string): string => `agent-annotations-summary-${annotationId}.txt`;
+// Runtime-relative placeholders stay inside the ignored runtime directory.
+const summaryFile = (annotationId: string): string =>
+  `.agent-annotations/agent-annotations-summary-${annotationId}.txt`;
 
 const completionCommand = (command: string, annotationId: string): string =>
   `${command} complete ${annotationId} --verified --summary-file ${summaryFile(annotationId)}`;

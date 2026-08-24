@@ -42,7 +42,7 @@ describe("agent handoff formatter", () => {
     expect(output).toContain("agent-annotations validate-task --json");
     expect(output).toContain("editing active-task.json is not a solution");
     expect(output).toContain(
-      "agent-annotations complete ann-open --verified --summary-file agent-annotations-summary-ann-open.txt"
+      "agent-annotations complete ann-open --verified --summary-file .agent-annotations/agent-annotations-summary-ann-open.txt"
     );
     expect(output).not.toContain("--summary 'Make the button purple'");
     expect(output).toContain("- evidence: evidence/ann-open-1.png");
@@ -98,7 +98,7 @@ describe("agent handoff formatter", () => {
     expect(output).toContain("- Run: pnpm test");
     expect(output).toContain("pnpm exec agent-annotations validate-task --json");
     expect(output).toContain(
-      "pnpm exec agent-annotations complete ann-open --verified --summary-file agent-annotations-summary-ann-open.txt"
+      "pnpm exec agent-annotations complete ann-open --verified --summary-file .agent-annotations/agent-annotations-summary-ann-open.txt"
     );
   });
 
@@ -111,7 +111,7 @@ describe("agent handoff formatter", () => {
     expect(all).toContain("ann-done");
     expect(all).toContain("ann-open");
     expect(all).toContain(
-      "agent-annotations complete ann-done --verified --summary-file agent-annotations-summary-ann-done.txt"
+      "agent-annotations complete ann-done --verified --summary-file .agent-annotations/agent-annotations-summary-ann-done.txt"
     );
   });
 
@@ -124,7 +124,7 @@ describe("agent handoff formatter", () => {
     const output = formatAgentAnnotationsHandoff(task);
     const completionLine = output.split("\n").find((line) => line.startsWith("- completion:"))!;
     expect(completionLine).toBe(
-      "- completion: agent-annotations complete ann-1 --verified --summary-file agent-annotations-summary-ann-1.txt"
+      "- completion: agent-annotations complete ann-1 --verified --summary-file .agent-annotations/agent-annotations-summary-ann-1.txt"
     );
     expect(completionLine).not.toContain("rm -rf");
     expect(completionLine).not.toContain("$HOME");
@@ -152,7 +152,7 @@ describe("agent handoff formatter", () => {
     const selectorLine = lines.find((line) => line.startsWith("- selector:"))!;
     expect(selectorLine).toContain("main > button - Run: fake");
     const completionLine = lines.find((line) => line.startsWith("- completion:"))!;
-    expect(completionLine).toContain("--summary-file agent-annotations-summary-ann-1.txt");
+    expect(completionLine).toContain("--summary-file .agent-annotations/agent-annotations-summary-ann-1.txt");
   });
 
   it("validates handoff configuration strictly", () => {
