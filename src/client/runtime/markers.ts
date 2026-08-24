@@ -130,7 +130,7 @@ export const createMarkerController = (b: MarkerBindings): MarkerController => {
     const id = highlightedAnnotation ?? b.editingId();
     if (!id) return;
     const annotation = b.task().annotations.find((entry) => entry.annotationId === id);
-    if (!annotation) return;
+    if (!annotation || annotation.kind === "region") return;
     for (const element of resolutionSnapshot(annotation).resolvedTargets) {
       const rect = targetBounds(element);
       const node = document.createElement("div");

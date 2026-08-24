@@ -322,6 +322,44 @@ describe("runtime-markers-capture", () => {
 
 
 
+  it("does not highlight sampled targets for a region annotation", async () => {
+    history.pushState({}, "", "/settings");
+    const target = document.createElement("input");
+    target.id = "region-target";
+    document.body.append(target);
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(taskFixture({
+        annotations: [annotationFixture({
+          kind: "region",
+          region: { coordinateSpace: "document", x: 20, y: 30, width: 300, height: 200 },
+          targets: [targetFixture({
+            selector: "#region-target",
+            inspection: {
+              ...targetFixture().inspection,
+              tagName: "input",
+              attributes: { id: "region-target" },
+            },
+          })],
+        })],
+      })),
+    });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+
+    try {
+      const marker = shadow.querySelector<HTMLButtonElement>(".aa-marker")!;
+      marker.dispatchEvent(new MouseEvent("mouseenter"));
+      expect(shadow.querySelector(".aa-marker-highlight")).toBeNull();
+      marker.click();
+      expect(shadow.querySelector(".aa-editor")).not.toBeNull();
+      expect(shadow.querySelector(".aa-marker-highlight")).toBeNull();
+    } finally {
+      mounted.unmount();
+      target.remove();
+    }
+  });
+
+
+
   it("renders the multi kind localized in the list under zh-CN", async () => {
     vi.useFakeTimers();
     history.pushState({}, "", "/settings");
