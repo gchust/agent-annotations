@@ -54,7 +54,6 @@ export type CaptureBindings = {
 
 export type CaptureController = {
   setMarkersVisible(visible: boolean): void;
-  clearTransientSelection(): void;
   setCollapsed(next: boolean): void;
   toggleCollapsed(): void;
   cancelCapture(): void;
@@ -216,7 +215,6 @@ export const createCaptureController = (b: CaptureBindings): CaptureController =
     setMarkersVisible,
     setCollapsed,
     toggleCollapsed,
-    clearTransientSelection,
     cancelCapture,
     startCapture,
     closeEditor,

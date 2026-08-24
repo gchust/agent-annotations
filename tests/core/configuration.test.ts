@@ -8,8 +8,8 @@ import {
 describe("builtins configuration", () => {
   it("accepts empty, boolean flags, and strict shortcut overrides", () => {
     expect(validateAgentAnnotationsBuiltinsConfig(undefined)).toEqual({});
-    expect(validateAgentAnnotationsBuiltinsConfig({ pick: false, list: true }))
-      .toEqual({ pick: false, list: true });
+    expect(validateAgentAnnotationsBuiltinsConfig({ pick: false, clear: true, list: true }))
+      .toEqual({ pick: false, clear: true, list: true });
     expect(validateAgentAnnotationsBuiltinsConfig({
       shortcuts: {
         pick: { key: "X", code: "KeyX", primary: true, alt: true, shift: false },

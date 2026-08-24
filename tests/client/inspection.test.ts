@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 const primitives = vi.hoisted(() => ({
   elementsAtPoint: vi.fn<(...args: unknown[]) => Element[]>(() => []),
   freeze: vi.fn(),
+  selector: vi.fn<(element: Element) => string>(() => "#save"),
   unfreeze: vi.fn(),
 }));
 
@@ -18,7 +19,7 @@ vi.mock("react-grab/primitives", () => ({
     htmlPreview: "<button>Save</button>", stack: [], componentName: "SaveButton",
     filePath: "/src/App.tsx", lineNumber: 12, columnNumber: 4, styles: "color: red;",
   })),
-  getElementSelector: vi.fn(() => "#save"),
+  getElementSelector: primitives.selector,
   getElementsAtPoint: primitives.elementsAtPoint,
   isElementGrabbable: vi.fn(() => true),
   unfreeze: primitives.unfreeze,
@@ -48,6 +49,29 @@ describe("React Grab inspection boundary", () => {
         source: { filePath: "/src/App.tsx", lineNumber: 12, columnNumber: 5 },
       },
     });
+  });
+
+  it("repairs an upstream ancestor selector and restores its legacy target exactly", async () => {
+    document.body.innerHTML = `
+      <aside aria-label="About this application">
+        <div><p>Keep authentication reliable.</p></div>
+      </aside>`;
+    const paragraph = document.querySelector("p")!;
+    const ancestorSelector = '[aria-label="About this application"]';
+    primitives.selector.mockReturnValueOnce(ancestorSelector);
+
+    const target = await inspectTarget(paragraph);
+    expect(target.selector).toBe(
+      `${ancestorSelector} > div:nth-child(1) > p:nth-child(1)`
+    );
+    expect(resolveTargetResult(target.selector)).toEqual({
+      status: "resolved",
+      element: paragraph,
+    });
+    expect(resolvePersistedTarget(
+      { ...target, selector: ancestorSelector },
+      { appRoot: document.body }
+    )).toEqual({ status: "resolved", element: paragraph });
   });
 
   it("uses bounded point stacks for Area and never scans the DOM", () => {

@@ -37,7 +37,9 @@ test("keyboard-only Pick, Multi, Copy, List, and Collapse flows with visual evid
   expect(emptyHandoff).toContain("agent-annotations validate-task --json");
   expect(emptyHandoff).not.toContain("agent-annotations wait ");
   expect(emptyHandoff).not.toContain("agent-annotations status ");
-  // The dock starts collapsed by default.
+  // The dock starts expanded by default; collapse it to exercise the compact chrome.
+  await expect(shadow(page, ".aa-dock")).toHaveAttribute("data-collapsed", "false");
+  await page.keyboard.press("Control+Alt+K");
   await expect(shadow(page, ".aa-dock")).toHaveAttribute("data-collapsed", "true");
   await expect(shadow(page, ".aa-collapsed-count")).toBeVisible();
   await page.screenshot({ path: shot("collapsed") });
@@ -79,8 +81,8 @@ test("keyboard-only Pick, Multi, Copy, List, and Collapse flows with visual evid
   await page.keyboard.press("Enter");
   await expect.poll(() => annotations()).toBe(1);
   await expect(shadow(page, ".aa-composer")).toHaveCount(0);
-  // Pick remains armed after the save.
-  await expect(shadow(page, '[aria-label^="Pick"]')).toHaveAttribute("aria-pressed", "true");
+  // Saving exits capture mode.
+  await expect(shadow(page, '[aria-label^="Pick"]')).toHaveAttribute("aria-pressed", "false");
 
   // Keyboard-only Multi: hotkey, two keyboard targets, Tab to the visible Finish action.
   await page.keyboard.press("Control+Alt+M");
@@ -101,7 +103,7 @@ test("keyboard-only Pick, Multi, Copy, List, and Collapse flows with visual evid
   await page.keyboard.press("Enter");
   await expect.poll(() => annotations()).toBe(2);
   await expect(finish).toHaveCount(0);
-  await expect(shadow(page, '[aria-label^="Multi"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(shadow(page, '[aria-label^="Multi"]')).toHaveAttribute("aria-pressed", "false");
 
   // Keyboard-only Copy: the open annotations land on the clipboard untouched.
   await page.keyboard.press("Control+Alt+C");
@@ -118,8 +120,16 @@ test("keyboard-only Pick, Multi, Copy, List, and Collapse flows with visual evid
   expect(clipboard).not.toContain("diagnostics baseline");
   await expect.poll(() => annotations()).toBe(2);
   await expect(shadow(page, '[aria-label^="Pick"]')).toHaveAttribute("aria-pressed", "false");
-  await expect(shadow(page, '[aria-label^="Multi"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(shadow(page, '[aria-label^="Multi"]')).toHaveAttribute("aria-pressed", "false");
   await expect(shadow(page, '[aria-label^="Markers"]')).toHaveAttribute("aria-pressed", "true");
+
+  // Clear All uses the built-in confirmation panel; cancel preserves the task.
+  await shadow(page, '[aria-label="Clear all annotations"]').click();
+  await expect(shadow(page, '.aa-panel[aria-label="Clear all annotations"]')).toBeVisible();
+  await expect(shadow(page, ".aa-confirm")).toContainText("Clear all 2 annotations?");
+  await shadow(page, '.aa-confirm [aria-label="Cancel"]').click();
+  await expect(shadow(page, '.aa-panel[aria-label="Clear all annotations"]')).toHaveCount(0);
+  await expect.poll(() => annotations()).toBe(2);
 
   // Keyboard-only List with the confirmed Remove completed control.
   await page.keyboard.press("Control+Alt+L");
@@ -158,10 +168,7 @@ test("keyboard-only Pick, Multi, Copy, List, and Collapse flows with visual evid
   const draggedLeft = dockBox!.x;
   await page.reload();
   await expect(shadow(page, ".aa-dock")).toBeVisible();
-  // A reload resets to the default collapsed initial state; expand again
-  // before any drag/tooltip checks that need the visible toolbar.
-  await expect(shadow(page, ".aa-dock")).toHaveAttribute("data-collapsed", "true");
-  await page.keyboard.press("Control+Alt+K");
+  // A reload resets to the default expanded initial state.
   await expect(shadow(page, ".aa-dock")).toHaveAttribute("data-collapsed", "false");
   const restored = await shadow(page, ".aa-dock").boundingBox();
   expect(restored!.x).toBeCloseTo(draggedLeft, 0);
@@ -269,8 +276,9 @@ test("dark system theme and cleanup preserve open annotations and their evidence
   await page.keyboard.press("Control+Alt+L");
   const remove = shadow(page, '[aria-label^="Remove completed"]');
   await expect(remove).toHaveAttribute("aria-label", "Remove completed (1)");
-  page.once("dialog", (dialog) => dialog.accept());
   await remove.click();
+  await expect(shadow(page, ".aa-confirm")).toContainText("Remove 1 completed annotation?");
+  await shadow(page, '.aa-confirm [aria-label="Remove"]').click();
   await expect.poll(() => annotations()).toBe(openBefore.length);
   await expect(remove).toHaveAttribute("aria-label", "Remove completed (0)");
   await expect(remove).toBeDisabled();

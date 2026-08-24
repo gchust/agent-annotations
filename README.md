@@ -41,8 +41,9 @@ The package root exports the host-neutral `agent-annotations.task.v1` core and
 from `@gchust/agent-annotations/types`; `MemoryTaskTransport` is available only
 from `@gchust/agent-annotations/testing` for tests and playgrounds.
 
-The toolbar starts collapsed by default; a capture shortcut (Pick/Multi/Area)
-expands the dock and starts the capture instead of failing silently. The
+The toolbar starts expanded by default. When it is collapsed, a capture
+shortcut (Pick/Multi/Area) expands the dock and starts the capture instead of
+failing silently. Saving an annotation exits capture mode. The
 initial UI and the built-in actions are configurable on the Vite plugin and on
 `mountAgentAnnotations()`:
 
@@ -52,6 +53,7 @@ agentAnnotations({
   builtins: {
     multi: false,
     area: false,
+    clear: false,
     markers: false,
     help: false,
     list: false,
@@ -63,8 +65,8 @@ agentAnnotations({
 // No builtins at all: only third-party extensions are mounted.
 agentAnnotations({ builtins: false });
 
-// Explicit initial UI state (default: { collapsed: true, markersVisible: true }).
-agentAnnotations({ initialState: { collapsed: false } });
+// Explicit initial UI state (default: { collapsed: false, markersVisible: true }).
+agentAnnotations({ initialState: { collapsed: true } });
 ```
 
 Unconfigured builtins stay enabled; disabling one removes its toolbar entry,
@@ -124,7 +126,7 @@ authority.
 ```ts
 agentAnnotations({
   builtins: { help: false },                       // toggle built-in actions
-  initialState: { collapsed: false, markersVisible: true },
+  initialState: { collapsed: true, markersVisible: true },
   screenshotEvidence: "auto",                      // "auto" | "manual" | "off"
   diagnostics: { console: true, network: true },   // both default true
 });

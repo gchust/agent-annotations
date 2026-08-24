@@ -11,6 +11,7 @@ const useStudio = (studio: StudioPublicApi): void => {
   studio.subscribe((snapshot) => snapshot.captureMode);
   studio.commands.capture.startPick();
   void studio.commands.annotations.copyOpen();
+  void studio.commands.annotations.removeAll();
   studio.commands.markers.focus("annotation-id");
   const summary = studio.commands.annotations.targetSummary("annotation-id");
   if (summary.reason === "identity mismatch") void summary.resolved;

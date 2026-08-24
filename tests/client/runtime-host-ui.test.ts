@@ -117,29 +117,29 @@ describe("runtime-host-ui", () => {
 
 
 
-  it("starts collapsed by default with the count chrome and explicit initialState support", async () => {
+  it("starts expanded by default with explicit initialState support", async () => {
     const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport() });
     const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
     try {
-      expect(mounted.api.getSnapshot().collapsed).toBe(true);
+      expect(mounted.api.getSnapshot().collapsed).toBe(false);
       expect(mounted.api.getSnapshot().markersVisible).toBe(true);
-      expect(shadow.querySelector(".aa-dock")?.getAttribute("data-collapsed")).toBe("true");
-      expect(shadow.querySelector(".aa-collapsed-count")).not.toBeNull();
+      expect(shadow.querySelector(".aa-dock")?.getAttribute("data-collapsed")).toBe("false");
+      expect(shadow.querySelector(".aa-collapsed-count")).toBeNull();
       // initialState can never auto-enter a capture mode: the snapshot is
       // idle immediately after mount.
       expect(mounted.api.getSnapshot().captureMode).toBe("idle");
     } finally {
       mounted.unmount();
     }
-    const expanded = await mountAgentAnnotations({
+    const collapsed = await mountAgentAnnotations({
       transport: new MemoryTaskTransport(),
-      initialState: { collapsed: false, markersVisible: false },
+      initialState: { collapsed: true, markersVisible: false },
     });
     try {
-      expect(expanded.api.getSnapshot().collapsed).toBe(false);
-      expect(expanded.api.getSnapshot().markersVisible).toBe(false);
+      expect(collapsed.api.getSnapshot().collapsed).toBe(true);
+      expect(collapsed.api.getSnapshot().markersVisible).toBe(false);
     } finally {
-      expanded.unmount();
+      collapsed.unmount();
     }
   });
 
@@ -174,6 +174,7 @@ describe("runtime-host-ui", () => {
   it("mounts with builtins:false and a custom extension, expanding from the collapsed count", async () => {
     const mounted = await mountAgentAnnotations({
       transport: new MemoryTaskTransport(),
+      initialState: { collapsed: true },
       builtins: false,
       extensions: [defineClientExtension({
         id: "only-third-party",
@@ -190,7 +191,6 @@ describe("runtime-host-ui", () => {
     });
     const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
     try {
-      // Default collapsed: no list builtin, the count expands the dock.
       expect(mounted.api.getSnapshot().collapsed).toBe(true);
       const count = shadow.querySelector<HTMLElement>(".aa-collapsed-count")!;
       expect(count.getAttribute("data-action-id")).toBe("agent-annotations.builtin:expand");
@@ -387,12 +387,50 @@ describe("runtime-host-ui", () => {
     for (const label of ["Annotations", "Shortcut help"]) {
       shadow.querySelector<HTMLButtonElement>(`[aria-label^="${label}"]`)!.click();
       const panel = shadow.querySelector<HTMLElement>(".aa-panel")!;
-      expect({ left: panel.style.left, top: panel.style.top }).toEqual({
+      expect({ left: panel.style.left, top: panel.style.top, bottom: panel.style.bottom }).toEqual({
         left: "390px",
-        top: "422px",
+        top: "auto",
+        bottom: "178px",
       });
     }
     mounted.unmount();
+  });
+
+  it("keeps an above-dock panel visible when its local content grows", async () => {
+    vi.spyOn(window, "innerWidth", "get").mockReturnValue(1000);
+    vi.spyOn(window, "innerHeight", "get").mockReturnValue(800);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this.classList.contains("aa-dock")) return new DOMRect(290, 730, 420, 50);
+      if (this.classList.contains("aa-panel")) {
+        const height = this.querySelectorAll(".aa-list-item").length > 0 ? 480 : 120;
+        const bottom = this.style.bottom && this.style.bottom !== "auto"
+          ? 800 - Number.parseFloat(this.style.bottom)
+          : (Number.parseFloat(this.style.top) || 0) + height;
+        return new DOMRect(Number.parseFloat(this.style.left) || 0, bottom - height, 360, height);
+      }
+      return new DOMRect();
+    });
+    const task = taskFixture({
+      status: "completed",
+      annotations: [
+        annotationFixture({ annotationId: "done-1", status: "completed", completedAt: "2026-08-24T00:00:00.000Z" }),
+        annotationFixture({ annotationId: "done-2", status: "completed", completedAt: "2026-08-24T00:01:00.000Z" }),
+      ],
+    });
+    const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport(task) });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      mounted.api.commands.panels.open("agent-annotations.builtin:list");
+      const panel = shadow.querySelector<HTMLElement>(".aa-panel")!;
+      expect(panel.style.top).toBe("auto");
+      shadow.querySelectorAll<HTMLButtonElement>(".aa-panel button")[1]!.click();
+      const panelRect = panel.getBoundingClientRect();
+      const dockRect = shadow.querySelector<HTMLElement>(".aa-dock")!.getBoundingClientRect();
+      expect(panelRect.top).toBeGreaterThanOrEqual(0);
+      expect(panelRect.bottom).toBeLessThanOrEqual(dockRect.top - 8);
+    } finally {
+      mounted.unmount();
+    }
   });
 
 
@@ -1436,6 +1474,7 @@ describe("runtime-host-ui", () => {
         "Multi (Ctrl+Alt+M)",
         "Area (Ctrl+Alt+A)",
         "Copy (Ctrl+Alt+C)",
+        "Clear all annotations",
         "Markers (Ctrl+Alt+V)",
         "Shortcut help (Shift+/)",
         "Annotations (Ctrl+Alt+L)",
@@ -1496,10 +1535,12 @@ describe("runtime-host-ui", () => {
       annotations: Array.from({ length: 50 }, (_, index) =>
         annotationFixture({ annotationId: `ann-${index}` })),
     });
-    const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport(fifty) });
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(fifty),
+      initialState: { collapsed: true },
+    });
     const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
     try {
-      // The dock starts collapsed by default: the count is already visible.
       const count = shadow.querySelector<HTMLElement>(".aa-collapsed-count")!;
       expect(count.textContent).toBe("50");
       expect(count.getAttribute("aria-label")).toBe("50 open annotations");
@@ -1521,10 +1562,12 @@ describe("runtime-host-ui", () => {
 
 
   it("shows the annotation icon at zero open annotations when collapsed", async () => {
-    const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport() });
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(),
+      initialState: { collapsed: true },
+    });
     const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
     try {
-      // The dock starts collapsed by default: the count is already visible.
       const count = shadow.querySelector<HTMLElement>(".aa-collapsed-count")!;
       expect(count.querySelector("svg")).not.toBeNull();
       expect(count.textContent?.trim()).toBe("");
@@ -1679,10 +1722,12 @@ describe("runtime-host-ui", () => {
 
   it("returns focus to the collapsed count after the list panel closes", async () => {
     vi.useFakeTimers();
-    const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport(taskFixture()) });
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(taskFixture()),
+      initialState: { collapsed: true },
+    });
     const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
     try {
-      // The dock starts collapsed by default: the count is already visible.
       const count = shadow.querySelector<HTMLElement>(".aa-collapsed-count")!;
       expect(count.getAttribute("data-action-id")).toBe("agent-annotations.builtin:list");
       count.click();
@@ -1766,7 +1811,7 @@ describe("runtime-host-ui", () => {
 
 
 
-  it("keeps pick armed and clears only transient selection after a successful save", async () => {
+  it("returns pick capture to idle after a successful save", async () => {
     const target = document.createElement("button");
     document.body.append(target);
     primitives.getElementAtPoint.mockReturnValue(target);
@@ -1777,14 +1822,13 @@ describe("runtime-host-ui", () => {
       document.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 5, clientY: 5 }));
       const composer = shadow.querySelector<HTMLElement>('[aria-label="Annotation composer"]')!;
       const textarea = composer.querySelector<HTMLTextAreaElement>("textarea")!;
-      textarea.value = "Keep pick";
+      textarea.value = "Single pick";
       composer.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
       await new Promise((resolve) => setTimeout(resolve, 0));
-      expect(mounted.api.getSnapshot().captureMode).toBe("pick");
+      expect(mounted.api.getSnapshot().captureMode).toBe("idle");
       expect(shadow.querySelector('[aria-label="Annotation composer"]')).toBeNull();
-      // Still armed: the next click opens a fresh composer.
       document.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 5, clientY: 5 }));
-      expect(shadow.querySelector('[aria-label="Annotation composer"]')).not.toBeNull();
+      expect(shadow.querySelector('[aria-label="Annotation composer"]')).toBeNull();
     } finally {
       mounted.unmount();
       target.remove();
@@ -1793,7 +1837,7 @@ describe("runtime-host-ui", () => {
 
 
 
-  it("clears only transient selection after a successful multi save and stays armed", async () => {
+  it("returns multi capture to idle after a successful save", async () => {
     const a = document.createElement("button");
     const b = document.createElement("button");
     document.body.append(a, b);
@@ -1810,12 +1854,11 @@ describe("runtime-host-ui", () => {
       textarea.value = "Multi save";
       composer.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
       await new Promise((resolve) => setTimeout(resolve, 0));
-      expect(mounted.api.getSnapshot().captureMode).toBe("multi");
+      expect(mounted.api.getSnapshot().captureMode).toBe("idle");
       expect(shadow.querySelector(".aa-multi-complete")).toBeNull();
-      // Still armed with an empty selection: two new clicks bring the chip back.
       document.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 5 }));
       document.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 90, clientY: 5 }));
-      expect(shadow.querySelector(".aa-multi-complete")).not.toBeNull();
+      expect(shadow.querySelector(".aa-multi-complete")).toBeNull();
     } finally {
       mounted.unmount();
       a.remove();
@@ -1875,7 +1918,7 @@ describe("runtime-host-ui", () => {
 
 
   it("removes completed annotations from the list only after confirmation and keeps open ones", async () => {
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const confirm = vi.spyOn(window, "confirm");
     const task = taskFixture({
       annotations: [
         annotationFixture({ annotationId: "open-1" }),
@@ -1890,12 +1933,13 @@ describe("runtime-host-ui", () => {
       const remove = shadow.querySelector<HTMLButtonElement>('[aria-label^="Remove completed"]')!;
       expect(remove.getAttribute("aria-label")).toBe("Remove completed (2)");
       remove.click();
-      expect(confirm).toHaveBeenCalledOnce();
       await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(shadow.querySelector(".aa-confirm")?.textContent)
+        .toContain("Remove 2 completed annotations?");
+      expect(confirm).not.toHaveBeenCalled();
       expect(mounted.api.getSnapshot().task.annotations.map((entry) => entry.annotationId))
         .toEqual(["open-1", "done-1", "done-2"]);
-      confirm.mockReturnValue(true);
-      remove.click();
+      shadow.querySelector<HTMLButtonElement>('[aria-label="Remove"]')!.click();
       await new Promise((resolve) => setTimeout(resolve, 0));
       const remaining = mounted.api.getSnapshot().task.annotations;
       expect(remaining.map((entry) => entry.annotationId)).toEqual(["open-1"]);
@@ -1903,6 +1947,50 @@ describe("runtime-host-ui", () => {
       const disabled = shadow.querySelector<HTMLButtonElement>('[aria-label^="Remove completed"]')!;
       expect(disabled.disabled).toBe(true);
       expect(disabled.getAttribute("aria-label")).toBe("Remove completed (0)");
+    } finally {
+      mounted.unmount();
+    }
+  });
+
+  it("clears every annotation in one confirmed toolbar mutation", async () => {
+    const confirm = vi.spyOn(window, "confirm");
+    const transport = new MemoryTaskTransport(taskFixture({
+      annotations: [
+        annotationFixture({ annotationId: "ann-1" }),
+        annotationFixture({ annotationId: "ann-2" }),
+      ],
+    }));
+    const mutate = vi.spyOn(transport, "mutate");
+    const mounted = await mountAgentAnnotations({ transport });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      const clear = shadow.querySelector<HTMLButtonElement>('[aria-label="Clear all annotations"]')!;
+      expect(clear.disabled).toBe(false);
+      clear.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(shadow.querySelector('.aa-panel[aria-label="Clear all annotations"] h2')?.textContent)
+        .toBe("Clear all annotations");
+      expect(shadow.querySelector(".aa-confirm")?.textContent)
+        .toContain("Clear all 2 annotations?");
+      expect(confirm).not.toHaveBeenCalled();
+      expect(mutate).not.toHaveBeenCalled();
+
+      shadow.querySelector<HTMLButtonElement>(".aa-confirm .aa-button")!.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(shadow.querySelector('.aa-panel[aria-label="Clear all annotations"]')).toBeNull();
+      expect(mutate).not.toHaveBeenCalled();
+
+      shadow.querySelector<HTMLButtonElement>('[aria-label="Clear all annotations"]')!.click();
+      shadow.querySelector<HTMLButtonElement>('[aria-label="Clear"]')!.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(mutate).toHaveBeenCalledOnce();
+      expect(mutate.mock.calls[0]![0].operations).toEqual([
+        { op: "remove", annotationId: "ann-1" },
+        { op: "remove", annotationId: "ann-2" },
+      ]);
+      expect(mounted.api.getSnapshot().task.annotations).toEqual([]);
+      expect(shadow.querySelector<HTMLButtonElement>('[aria-label="Clear all annotations"]')!.disabled)
+        .toBe(true);
     } finally {
       mounted.unmount();
     }

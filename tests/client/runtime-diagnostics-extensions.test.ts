@@ -774,6 +774,7 @@ describe("runtime-diagnostics-extensions", () => {
   it("expands from the collapsed count when the list builtin is disabled", async () => {
     const mounted = await mountAgentAnnotations({
       transport: new MemoryTaskTransport(),
+      initialState: { collapsed: true },
       builtins: { list: false },
     });
     const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;

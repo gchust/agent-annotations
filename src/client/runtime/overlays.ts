@@ -67,7 +67,6 @@ export type OverlayBindings = {
   focusAnnotation(id: string): void;
   closeEditor(): void;
   captureEvidence(annotationId: string): Promise<void>;
-  clearTransientSelection(): void;
   prepareScreenshotEvidence(
     input: ScreenshotEvidenceInput & { overlays: readonly ScreenshotRect[] }
   ): (ScreenshotEvidenceInput & { snapshot: PreparedViewportSnapshot }) | null;
@@ -317,8 +316,7 @@ export const createOverlayController = (b: OverlayBindings): OverlayController =
             overlays,
           });
         }
-        b.clearTransientSelection();
-        b.render();
+        b.cancelCapture();
         b.setStatus(b.localized("Annotation saved"));
         if (evidenceInput) b.scheduleScreenshotEvidence(evidenceInput);
       } catch (error) {

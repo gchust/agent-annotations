@@ -21,6 +21,7 @@ test("external extension shares the public registry and survives HMR", async ({ 
     "agent-annotations.builtin:multi",
     "agent-annotations.builtin:area",
     "agent-annotations.builtin:copy",
+    "agent-annotations.builtin:clear",
     "demo.extension:demo-copy-json",
     "agent-annotations.builtin:visibility",
     "agent-annotations.builtin:help",
@@ -76,7 +77,7 @@ test("external extension shares the public registry and survives HMR", async ({ 
 
   await shadow(page, '[data-action-id="agent-annotations.builtin:copy"]').click();
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText()))
-    .toContain("# Agent Annotations Task");
+    .toContain("# Agent Annotations Handoff");
   await page.locator("main").click();
   await page.keyboard.press("Control+Alt+KeyJ");
   await expect.poll(() => page.evaluate(() => window.__demoExtension?.actionCount)).toBe(1);

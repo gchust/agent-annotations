@@ -16,6 +16,7 @@ const BUILTIN_ACTION_IDS: readonly AgentAnnotationsBuiltinActionId[] = [
   "multi",
   "area",
   "copy",
+  "clear",
   "markers",
   "help",
   "list",

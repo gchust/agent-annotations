@@ -17,7 +17,7 @@ import {
 const plugin = agentAnnotations({
   clientExtensions: ["./src/annotation-extension.ts"],
   builtins: { help: false },
-  initialState: { collapsed: false, markersVisible: true },
+  initialState: { collapsed: true, markersVisible: true },
   screenshotEvidence: "auto",
   diagnostics: { console: true, network: true },
 });

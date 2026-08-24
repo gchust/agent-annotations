@@ -14,11 +14,9 @@ const base = process.env.AGENT_ANNOTATIONS_PACKED_BASE ?? "/app/";
 test("runtime mounts, routes, and persists a session under the active base", async ({ page }) => {
   await page.goto(`${base}`);
   await expect(shadow(page, ".aa-dock")).toBeVisible();
-  await expect(shadow(page, ".aa-collapsed-count")).toBeVisible();
+  await expect(shadow(page, ".aa-dock")).toHaveAttribute("data-collapsed", "false");
   const session = JSON.parse(readFileSync(path.join(runtimeRoot, "session.json"), "utf8"));
   expect(session).toHaveProperty("token");
-  // A capture hotkey still works under the base.
-  await page.keyboard.press("Control+Alt+K");
-  await expect(shadow(page, ".aa-dock")).toHaveAttribute("data-collapsed", "false");
+  // The expanded toolbar renders under the base.
   await expect(shadow(page, '[aria-label^="Pick"]')).toBeVisible();
 });

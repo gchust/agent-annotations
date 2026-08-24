@@ -109,7 +109,6 @@ test("completed annotation opens from All anchored to its list item and returns 
     await page.reload();
     cli("complete", "ann-a", "--verified", "--summary", "Playwright verified");
     await page.reload();
-    await page.keyboard.press("Control+Alt+K"); // expand the dock
     await page.keyboard.press("Control+Alt+L"); // open the list
     await expect(shadow(page, '[aria-label="Annotation list"]')).toBeVisible();
     // Switch to All so the completed annotation is listed (default is Open).
@@ -141,7 +140,6 @@ test("unresolved annotation shows the reason in the list and anchors its editor 
   writeUnresolved();
   try {
     await page.reload();
-    await page.keyboard.press("Control+Alt+K");
     await page.keyboard.press("Control+Alt+L");
     await expect(shadow(page, '[aria-label="Annotation list"]')).toBeVisible();
     await expect(shadow(page, ".aa-list-item")).toContainText("0/1 targets");
@@ -174,9 +172,8 @@ test("zh-CN locale renders the builtin chrome and list in Chinese", async ({ bro
   writeTwoOpen();
   try {
     await page.reload();
-    // The dock starts collapsed: assert presence, then expand for visibility.
+    // The dock starts expanded and localized.
     await expect(shadow(page, '[aria-label^="拾取"]')).toHaveCount(1);
-    await page.keyboard.press("Control+Alt+K");
     await expect(shadow(page, ".aa-dock")).toHaveAttribute("data-collapsed", "false");
     await expect(shadow(page, '[aria-label^="拾取"]')).toBeVisible();
     await page.screenshot({ path: shot("zh-cn") });

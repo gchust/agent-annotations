@@ -14,6 +14,7 @@ import {
   CloseIcon,
   CollapseIcon,
   CopyIcon,
+  DeleteIcon,
   HelpIcon,
   MarkersIcon,
   MultiIcon,
@@ -48,6 +49,58 @@ const translate = (
   );
 };
 
+const Confirmation = ({
+  message,
+  cancelLabel,
+  confirmLabel,
+  onCancel,
+  onConfirm,
+}: {
+  message: string;
+  cancelLabel: string;
+  confirmLabel: string;
+  onCancel(): void;
+  onConfirm(): Promise<void>;
+}) => {
+  const [pending, setPending] = useState(false);
+  return createElement(
+    "div",
+    { className: "aa-confirm" },
+    createElement("p", null, message),
+    createElement(
+      "div",
+      { className: "aa-actions" },
+      createElement(
+        "button",
+        {
+          type: "button",
+          className: "aa-button",
+          disabled: pending,
+          "aria-label": cancelLabel,
+          onClick: onCancel,
+        },
+        createElement(CloseIcon, { size: 14 }),
+        cancelLabel
+      ),
+      createElement(
+        "button",
+        {
+          type: "button",
+          className: "aa-button aa-danger",
+          disabled: pending,
+          "aria-label": confirmLabel,
+          onClick: () => {
+            setPending(true);
+            void onConfirm().then(onCancel, () => setPending(false));
+          },
+        },
+        createElement(DeleteIcon, { size: 14 }),
+        confirmLabel
+      )
+    )
+  );
+};
+
 const HelpPanel: PanelContribution["render"] = ({ studio, close }) =>
   createElement(
     "div",
@@ -79,6 +132,7 @@ const HelpPanel: PanelContribution["render"] = ({ studio, close }) =>
 
 const AnnotationList: PanelContribution["render"] = ({ studio, close }) => {
   const [filter, setFilter] = useState<"open" | "all">("open");
+  const [confirmingRemoval, setConfirmingRemoval] = useState(false);
   const snapshot = studio.getSnapshot();
   const completedCount = snapshot.task.annotations
     .filter((annotation) => annotation.status === "completed").length;
@@ -198,28 +252,45 @@ const AnnotationList: PanelContribution["render"] = ({ studio, close }) => {
         ];
       })
     ),
-    createElement(
-      "div",
-      { className: "aa-filter" },
-      createElement(
-        "button",
-        {
-          type: "button",
-          className: "aa-button aa-danger",
-          disabled: completedCount === 0,
-          "aria-label": translate(studio, "Remove completed", { count: completedCount }),
-          onClick: () => {
-            const wording = completedCount === 1
-              ? translate(studio, "Confirm remove completed one")
-              : translate(studio, "Confirm remove completed", { count: completedCount });
-            if (!window.confirm(wording)) return;
-            studio.commands.annotations.removeCompleted();
-          },
-        },
-        translate(studio, "Remove completed", { count: completedCount })
-      )
-    )
+    confirmingRemoval && completedCount > 0
+      ? createElement(Confirmation, {
+          message: completedCount === 1
+            ? translate(studio, "Confirm remove completed one")
+            : translate(studio, "Confirm remove completed", { count: completedCount }),
+          cancelLabel: translate(studio, "Cancel"),
+          confirmLabel: translate(studio, "Remove"),
+          onCancel: () => setConfirmingRemoval(false),
+          onConfirm: () => studio.commands.annotations.removeCompleted(),
+        })
+      : createElement(
+          "div",
+          { className: "aa-filter" },
+          createElement(
+            "button",
+            {
+              type: "button",
+              className: "aa-button aa-danger",
+              disabled: completedCount === 0,
+              "aria-label": translate(studio, "Remove completed", { count: completedCount }),
+              onClick: () => setConfirmingRemoval(true),
+            },
+            translate(studio, "Remove completed", { count: completedCount })
+          )
+        )
   );
+};
+
+const ClearAnnotationsPanel: PanelContribution["render"] = ({ studio, close }) => {
+  const count = studio.getSnapshot().task.annotations.length;
+  return createElement(Confirmation, {
+    message: count === 1
+      ? translate(studio, "Confirm clear one")
+      : translate(studio, "Confirm clear all", { count }),
+    cancelLabel: translate(studio, "Cancel"),
+    confirmLabel: translate(studio, "Clear"),
+    onCancel: close,
+    onConfirm: () => studio.commands.annotations.removeAll(),
+  });
 };
 
 const baseToolbar: Record<
@@ -230,6 +301,7 @@ const baseToolbar: Record<
   multi: { id: "multi", group: "capture", order: 20, label: "Multi", icon: MultiIcon, kind: "toggle", shortcut: shortcut("M", "KeyM"), isPressed: ({ captureMode }) => captureMode === "multi", execute: ({ studio }) => studio.commands.capture.startMulti() },
   area: { id: "area", group: "capture", order: 30, label: "Area", icon: AreaIcon, kind: "toggle", shortcut: shortcut("A", "KeyA"), isPressed: ({ captureMode }) => captureMode === "area", execute: ({ studio }) => studio.commands.capture.startArea() },
   copy: { id: "copy", group: "handoff", order: 10, label: "Copy", icon: CopyIcon, kind: "action", shortcut: shortcut("C", "KeyC"), execute: ({ studio }) => studio.commands.annotations.copyOpen() },
+  clear: { id: "clear", group: "handoff", order: 20, label: "Clear all annotations", icon: DeleteIcon, kind: "panel", panelId: "clear-confirm", isEnabled: ({ task }) => task.annotations.length > 0, isPressed: ({ openPanel }) => openPanel === "agent-annotations.builtin:clear-confirm" },
   markers: { id: "visibility", group: "view", order: 10, label: "Markers", icon: MarkersIcon, kind: "toggle", shortcut: shortcut("V", "KeyV"), isPressed: ({ markersVisible }) => markersVisible, execute: ({ studio }) => studio.getSnapshot().markersVisible ? studio.commands.markers.hide() : studio.commands.markers.show() },
   help: { id: "help", group: "view", order: 20, label: "Shortcut help", icon: HelpIcon, kind: "panel", shortcut: shortcut("/", "Slash", false, false, true), panelId: "help", isPressed: ({ openPanel }) => openPanel === "agent-annotations.builtin:help" },
   list: { id: "list", group: "view", order: 30, label: "Annotations", icon: AnnotationsIcon, kind: "panel", shortcut: shortcut("L", "KeyL"), panelId: "list", isPressed: ({ openPanel }) => openPanel === "agent-annotations.builtin:list" },
@@ -257,7 +329,7 @@ export const createBuiltinClientExtension = (
   const toolbar: ToolbarContribution[] = [];
   const panels: PanelContribution[] = [];
   for (const id of [
-    "pick", "multi", "area", "copy", "markers", "help", "list", "collapse",
+    "pick", "multi", "area", "copy", "clear", "markers", "help", "list", "collapse",
   ] as const) {
     if (!enabled(id)) continue;
     const base = baseToolbar[id];
@@ -266,6 +338,9 @@ export const createBuiltinClientExtension = (
   }
   if (enabled("list")) {
     panels.push({ id: "list", title: "Annotation list", render: AnnotationList });
+  }
+  if (enabled("clear")) {
+    panels.push({ id: "clear-confirm", title: "Clear all annotations", render: ClearAnnotationsPanel });
   }
   if (enabled("help")) {
     panels.push({ id: "help", title: "Shortcut help", render: HelpPanel });

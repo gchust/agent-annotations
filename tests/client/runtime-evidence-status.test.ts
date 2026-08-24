@@ -191,7 +191,7 @@ describe("runtime-evidence-status", () => {
     collapse.click();
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(mounted.api.getSnapshot().collapsed).toBe(true);
-    expect(shadow.querySelectorAll(".aa-action:not([data-toggle=true])")).toHaveLength(7);
+    expect(shadow.querySelectorAll(".aa-action:not([data-toggle=true])")).toHaveLength(8);
     expect(shadow.querySelector(".aa-dock")?.getAttribute("data-collapsed")).toBe("true");
     shadow
       .querySelector<HTMLButtonElement>('[aria-label^="Collapse toolbar"]')!
@@ -983,7 +983,7 @@ describe("runtime-evidence-status", () => {
       });
       // The failing extension was isolated; the runtime stays mounted and
       // reports its browser status.
-      expect(mounted.api.getSnapshot().collapsed).toBe(true);
+      expect(mounted.api.getSnapshot().collapsed).toBe(false);
       await vi.advanceTimersByTimeAsync(0);
       expect(fetchMock).toHaveBeenCalledWith(
         "/__agent-annotations/heartbeat",

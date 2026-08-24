@@ -115,7 +115,7 @@ export async function mountAgentAnnotations(
     throw error;
   }
   let captureMode: AgentAnnotationsCaptureMode = "idle";
-  let collapsed = initialState.collapsed ?? true;
+  let collapsed = initialState.collapsed ?? false;
   let markersVisible = initialState.markersVisible ?? true;
   let openPanel: StudioPublicSnapshot["openPanel"] = null;
   let selected: Element[] = [];
@@ -641,7 +641,6 @@ export async function mountAgentAnnotations(
     focusAnnotation: (id) => focusAnnotation(id),
     closeEditor: () => closeEditor(),
     captureEvidence,
-    clearTransientSelection: () => clearTransientSelection(),
     prepareScreenshotEvidence: (input) => prepareScreenshotEvidence(input),
     scheduleScreenshotEvidence: (input) => scheduleScreenshotEvidence(input),
     setStatus: (message) => setStatus(message),
@@ -716,7 +715,6 @@ export async function mountAgentAnnotations(
     setMarkersVisible,
     setCollapsed,
     toggleCollapsed,
-    clearTransientSelection,
     cancelCapture,
     startCapture,
     closeEditor,
@@ -746,6 +744,13 @@ export async function mountAgentAnnotations(
         complete: (id) => mutateCommand([{ op: "complete", annotationId: id }]),
         reopen: (id) => mutateCommand([{ op: "reopen", annotationId: id }]),
         remove: (id) => mutateCommand([{ op: "remove", annotationId: id }]),
+        removeAll: () => {
+          const operations = task.annotations.map(({ annotationId }) => ({
+            op: "remove" as const,
+            annotationId,
+          }));
+          return operations.length ? mutateCommand(operations) : Promise.resolve();
+        },
         removeCompleted: () => mutateCommand([{ op: "removeCompleted" }]),
         captureEvidence,
         targetSummary: (annotationId) => {
@@ -1157,10 +1162,13 @@ export async function mountAgentAnnotations(
         ? (dockRect.top >= innerHeight - dockRect.bottom ? "above" : "below")
         : contribution.placement ?? "above",
     });
+    const placedAbove = placement.top + panelRect.height <= dockRect.top;
     Object.assign(panel.style, {
       left: `${placement.left}px`,
-      top: `${placement.top}px`,
-      bottom: "auto",
+      top: placedAbove ? "auto" : `${placement.top}px`,
+      bottom: placedAbove
+        ? `${innerHeight - placement.top - panelRect.height}px`
+        : "auto",
     });
   };
   hostElement.dataset.markerRefreshes = "0";

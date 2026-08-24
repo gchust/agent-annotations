@@ -475,6 +475,7 @@ describe("runtime-markers-capture", () => {
           })],
         })],
       })),
+      initialState: { collapsed: true },
     });
     const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
     try {
@@ -483,7 +484,7 @@ describe("runtime-markers-capture", () => {
       expect(shadow.querySelector(".aa-editor")).not.toBeNull();
       expect(shadow.querySelector(".aa-marker-highlight")).not.toBeNull();
       // Escape closes the editor, clears the highlight, and refocuses the
-      // visible collapsed-count control (default collapsed dock).
+      // visible collapsed-count control (explicit collapsed state).
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
       await vi.advanceTimersByTimeAsync(20);
       expect(shadow.querySelector(".aa-editor")).toBeNull();
@@ -510,6 +511,7 @@ describe("runtime-markers-capture", () => {
     history.pushState({}, "", "/settings");
     const mounted = await mountAgentAnnotations({
       transport: new MemoryTaskTransport(completedTask),
+      initialState: { collapsed: true },
     });
     const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
     try {
@@ -1106,8 +1108,7 @@ describe("runtime-markers-capture", () => {
         width: 90,
         height: 90,
       });
-      // Area stays armed after the save with only transient state cleared.
-      expect(mounted.api.getSnapshot().captureMode).toBe("area");
+      expect(mounted.api.getSnapshot().captureMode).toBe("idle");
       expect(shadow.querySelector(".aa-composer")).toBeNull();
       expect(shadow.querySelector(".aa-area")).toBeNull();
       expect(annotation.targets).toHaveLength(3);

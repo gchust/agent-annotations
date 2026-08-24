@@ -373,6 +373,7 @@ export type AgentAnnotationsBuiltinActionId =
   | "multi"
   | "area"
   | "copy"
+  | "clear"
   | "markers"
   | "help"
   | "list"
@@ -383,6 +384,7 @@ export type AgentAnnotationsBuiltinsConfig = {
   multi?: boolean;
   area?: boolean;
   copy?: boolean;
+  clear?: boolean;
   markers?: boolean;
   help?: boolean;
   list?: boolean;
@@ -437,6 +439,7 @@ export interface StudioPublicApi {
       complete(id: string): Promise<void>;
       reopen(id: string): Promise<void>;
       remove(id: string): Promise<void>;
+      removeAll(): Promise<void>;
       removeCompleted(): Promise<void>;
       captureEvidence(annotationId: string): Promise<void>;
       // Resolution summary for the list: resolved/total plus a stable message

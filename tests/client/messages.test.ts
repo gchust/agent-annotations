@@ -23,7 +23,7 @@ describe("builtin message dictionary", () => {
 
   it("covers every contract-mandated surface with both locales", () => {
     const required = [
-      "Pick", "Multi", "Area", "Copy", "Markers", "Shortcut help", "Annotations",
+      "Pick", "Multi", "Area", "Copy", "Clear all annotations", "Clear", "Markers", "Shortcut help", "Annotations",
       "Collapse toolbar", "Expand toolbar", "Drag toolbar", "Annotation list",
       "Annotation composer", "Annotation comment", "Describe the requested change",
       "Cancel", "Save annotation", "Pick annotation", "Multi annotation",
@@ -31,8 +31,9 @@ describe("builtin message dictionary", () => {
       "Annotation editor", "Save comment", "Complete", "Reopen", "Delete", "Close",
       "Comment saved", "Capture screenshot", "Screenshot captured", "Screenshot failed",
       "Manual copy fallback", "Copied open annotations", "Panel failed to render",
-      "Open", "All", "open", "completed", "Remove completed",
+      "Open", "All", "open", "completed", "Remove completed", "Remove",
       "Confirm remove completed one", "Confirm remove completed",
+      "Confirm clear one", "Confirm clear all",
       "unresolved", "identity mismatch", "identity unverifiable", "iframe unsupported",
       "targets", "openAnnotations", "evidence",
       "Route", "element", "multi", "region",

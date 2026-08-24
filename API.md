@@ -33,6 +33,9 @@ package, Node consumer, and browser consumer checks do not repack it.
   highlights every resolved target of an annotation without opening the editor
   (the built-in annotation list uses both for its per-item resolution rows and
   focus preview; `null` clears the highlight).
+- `StudioPublicApi.commands.annotations.removeAll()` removes every annotation in
+  one mutation. The built-in `Clear all annotations` toolbar action opens the
+  package confirmation panel first and is disabled when the task is empty.
 - `TaskTransport` requires `read`/`mutate` and may add `writeEvidence`,
   `subscribe`, and `appendDiagnostics` (browser diagnostics are persisted
   through `HttpTaskTransport` and bounded/redacted server-side).
@@ -157,10 +160,12 @@ controlled Node integrations.
   listeners and restores the patched methods on unmount.
 - `mountAgentAnnotations` accepts `builtins?: false | AgentAnnotationsBuiltinsConfig`
   (per-action booleans plus `shortcuts` overrides, all JSON-safe validated) and
-  `initialState?: { collapsed?, markersVisible? }` (default collapsed, markers
+  `initialState?: { collapsed?, markersVisible? }` (default expanded, markers
   visible). With `builtins: false` only third-party extensions mount; disabled
   builtins contribute no toolbar entry, panel, or shortcut, and shortcut
   overrides still pass the registry's conflict validation.
+- Saving a Pick, Multi, or Area annotation exits capture mode. Destructive
+  built-in actions use package confirmation UI rather than browser dialogs.
 - `StudioPublicApi` exposes snapshots, subscriptions, and commands only. It does
   not expose React setters, reducers, live DOM, or inspection internals.
   `getSnapshot()` deep-clones and deeply freezes the public payload (task,

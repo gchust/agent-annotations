@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.2 - 2026-08-24
+
+- Expanded the annotation toolbar by default, exited capture mode after saving,
+  and added a confirmed action for clearing all annotations.
+- Replaced browser confirmation dialogs with built-in confirmation panels.
+- Corrected screenshot marker placement and exact target selectors, including
+  recovery for legacy ancestor selectors that uniquely identify a descendant.
+- Kept dynamically growing toolbar panels visible and clear of the draggable
+  dock.
+
 ## 0.1.1 - 2026-08-24
 
 - Simplified the default Code-Agent handoff to four steps: edit source,

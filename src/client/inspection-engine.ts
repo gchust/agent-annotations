@@ -132,6 +132,54 @@ const attributesOf = (
   return entries;
 };
 
+const childSegment = (element: Element): string => {
+  const parent = element.parentElement;
+  const index = parent ? Array.from(parent.children).indexOf(element) + 1 : 1;
+  return `${element.tagName.toLowerCase()}:nth-child(${index})`;
+};
+
+const exactLocalSelector = (element: Element): string => {
+  const root = element.getRootNode() as Document | ShadowRoot;
+  const segments: string[] = [];
+  for (let current: Element | null = element; current; current = current.parentElement) {
+    segments.unshift(childSegment(current));
+    const selector = segments.join(" > ");
+    const matches = root.querySelectorAll(selector);
+    if (matches.length === 1 && matches[0] === element) return selector;
+  }
+  throw new Error("Could not create an exact selector for the selected element");
+};
+
+const exactStructuralSelector = (element: Element): string => {
+  const local = exactLocalSelector(element);
+  const root = element.getRootNode();
+  if (root.nodeType === Node.DOCUMENT_FRAGMENT_NODE && "host" in root) {
+    return `${exactStructuralSelector((root as ShadowRoot).host)} >>> ${local}`;
+  }
+  const frame = element.ownerDocument.defaultView?.frameElement;
+  return frame ? `${exactStructuralSelector(frame)} >>iframe>> ${local}` : local;
+};
+
+const selectorForExactElement = (element: Element, selector: string): string => {
+  const resolved = resolveTargetResult(selector);
+  if (resolved.status === "resolved" && resolved.element === element) return selector;
+  if (resolved.status === "resolved" && resolved.element.contains(element)) {
+    const segments: string[] = [];
+    for (let current: Element | null = element;
+      current && current !== resolved.element;
+      current = current.parentElement) {
+      segments.unshift(childSegment(current));
+    }
+    const repaired = `${selector} > ${segments.join(" > ")}`;
+    const repairResult = resolveTargetResult(repaired);
+    if (repairResult.status === "resolved" && repairResult.element === element) return repaired;
+  }
+  const fallback = exactStructuralSelector(element);
+  const fallbackResult = resolveTargetResult(fallback);
+  if (fallbackResult.status === "resolved" && fallbackResult.element === element) return fallback;
+  throw new Error("React Grab selector did not resolve the selected element");
+};
+
 export const targetAtPoint = (x: number, y: number): Element | null =>
   getElementAtPoint(x, y, { filter: isCandidate });
 
@@ -147,8 +195,9 @@ export async function inspectTarget(
   host?: HostIntegration
 ): Promise<AgentAnnotationsTarget> {
   const context = await getElementContext(element);
-  const selector = getElementSelector(element);
-  if (!selector) throw new Error("React Grab returned an empty selector");
+  const upstreamSelector = getElementSelector(element);
+  if (!upstreamSelector) throw new Error("React Grab returned an empty selector");
+  const selector = selectorForExactElement(element, upstreamSelector);
   const sourceStack = context.stack
     .map((frame) => source(frame))
     .filter((frame): frame is AgentAnnotationsSourceLocation => frame !== null)
@@ -236,45 +285,32 @@ export const resolveTarget = (selector: string): Element | null => {
   return result.status === "resolved" ? result.element : null;
 };
 
-// Resolves a persisted target only when both the unique React Grab selector
-// AND the persisted identity evidence match the live element:
-//   selector (must be unique) → tagName → persisted id → persisted host:
-//   identity fields → weak role + accessibleName (only when no strong
-//   identity exists). No fuzzy matching, no nth-child migration, no neighbor
-//   or component-name fallback: any mismatch is explicit, and an old task
-//   without any provable identity is identity_unverifiable instead of being
-//   silently treated as resolved.
-export const resolvePersistedTarget = (
-  target: AgentAnnotationsTarget,
-  options: { appRoot: Document | ShadowRoot | Element; host?: HostIntegration }
-): TargetResolution => {
-  const selectorResult = resolveTargetResult(target.selector, options.appRoot);
-  if (selectorResult.status !== "resolved") return selectorResult;
-  const element = selectorResult.element;
-  const inspection = target.inspection;
+type TargetIdentityFailure = {
+  status: "identity_mismatch" | "identity_unverifiable";
+  reason: string;
+};
 
+const targetIdentityFailure = (
+  element: Element,
+  inspection: AgentAnnotationsInspection,
+  host?: HostIntegration
+): TargetIdentityFailure | null => {
   if (inspection.tagName && element.tagName.toLowerCase() !== inspection.tagName) {
     return { status: "identity_mismatch", reason: "element tag changed" };
   }
 
   const attributes = inspection.attributes ?? {};
   const persistedId = attributes.id;
-  if (persistedId !== undefined) {
-    // The id is compared under the same normalization used at capture.
-    if (text(element.id, 500) !== persistedId) {
-      return { status: "identity_mismatch", reason: "element id changed" };
-    }
+  if (persistedId !== undefined && text(element.id, 500) !== persistedId) {
+    return { status: "identity_mismatch", reason: "element id changed" };
   }
 
   const hostKeys = Object.keys(attributes).filter((key) =>
     key.startsWith(HOST_IDENTITY_PREFIX)
   );
   if (hostKeys.length > 0) {
-    // Rebuild the live host identity through the exact capture normalization
-    // (including empty-entry skip and first-wins collision handling) before
-    // comparing every persisted host: field.
     const live: Record<string, string> = {};
-    addHostIdentityEntries(live, options.host?.identity?.(element));
+    addHostIdentityEntries(live, host?.identity?.(element));
     for (const key of hostKeys) {
       if (live[key] !== attributes[key]) {
         return { status: "identity_mismatch", reason: "host identity changed" };
@@ -282,17 +318,12 @@ export const resolvePersistedTarget = (
     }
   }
 
-  const hasStrongIdentity = persistedId !== undefined || hostKeys.length > 0;
-  if (!hasStrongIdentity) {
-    // Old tasks without id/host evidence: exact weak identity only.
+  if (persistedId === undefined && hostKeys.length === 0) {
     const persistedRole = attributes.role ?? (inspection.role || undefined);
     const persistedName =
       attributes["aria-label"] ?? (inspection.accessibleName || undefined);
     if (!persistedRole && !persistedName) {
-      return {
-        status: "identity_unverifiable",
-        reason: "no persisted identity evidence",
-      };
+      return { status: "identity_unverifiable", reason: "no persisted identity evidence" };
     }
     if (persistedRole && roleOf(element) !== persistedRole) {
       return { status: "identity_mismatch", reason: "element role changed" };
@@ -302,7 +333,34 @@ export const resolvePersistedTarget = (
     }
   }
 
-  return { status: "resolved", element };
+  return null;
+};
+
+// Resolves a persisted target only when both the unique React Grab selector
+// AND the persisted identity evidence match the live element:
+//   selector (must be unique) → tagName → persisted id → persisted host:
+//   identity fields → weak role + accessibleName (only when no strong
+//   identity exists). A legacy React Grab ancestor-selector bug is recovered
+//   only when exactly one descendant has the complete persisted identity.
+//   Every other mismatch stays explicit.
+export const resolvePersistedTarget = (
+  target: AgentAnnotationsTarget,
+  options: { appRoot: Document | ShadowRoot | Element; host?: HostIntegration }
+): TargetResolution => {
+  const selectorResult = resolveTargetResult(target.selector, options.appRoot);
+  if (selectorResult.status !== "resolved") return selectorResult;
+  const element = selectorResult.element;
+  const inspection = target.inspection;
+  const directFailure = targetIdentityFailure(element, inspection, options.host);
+  if (!directFailure) return { status: "resolved", element };
+  if (inspection.tagName) {
+    const exactDescendants = Array.from(element.getElementsByTagName(inspection.tagName))
+      .filter((candidate) => !targetIdentityFailure(candidate, inspection, options.host));
+    if (exactDescendants.length === 1) {
+      return { status: "resolved", element: exactDescendants[0]! };
+    }
+  }
+  return directFailure;
 };
 
 export const targetBounds = (element: Element): AgentAnnotationsRect => boundsOf(element);

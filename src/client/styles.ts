@@ -51,4 +51,7 @@ button:focus-visible,textarea:focus-visible { outline:2px solid #8b5cf6; outline
 .aa-targets { margin-top:4px; }
 .aa-muted { color:var(--aa-muted); font-size:11px; }
 .aa-filter { display:flex; gap:6px; margin-bottom:8px; }
+.aa-confirm { display:grid; gap:10px; padding-top:4px; }
+.aa-confirm p { margin:0; color:var(--aa-text); }
+.aa-confirm .aa-button { display:inline-flex; gap:6px; }
 `;

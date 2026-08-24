@@ -19,9 +19,7 @@ test("complete generic Pick/Multi/Area annotation closed loop", async ({ page, c
     buttons.every((button) => !!button.querySelector("svg") && !button.textContent?.trim())
   )).toBe(true);
 
-  // The dock starts collapsed by default: expand and collapse through the
-  // Ctrl+Alt+K hotkey (the visible Collapse button only exists when expanded).
-  await page.keyboard.press("Control+Alt+K");
+  // The dock starts expanded by default and still toggles through Ctrl+Alt+K.
   await expect(shadow(page, ".aa-dock")).toHaveAttribute("data-collapsed", "false");
   await page.screenshot({ path: `${artifactDir}/toolbar-expanded.png` });
   await page.keyboard.press("Control+Alt+K");
@@ -108,7 +106,7 @@ test("complete generic Pick/Multi/Area annotation closed loop", async ({ page, c
   await expect(shadow(page, '[aria-label="Annotation editor"]')).toBeVisible();
 
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-  await shadow(page, 'button[aria-label^="Copy"]').click();
+  await page.keyboard.press("Control+Alt+C");
   await expect(shadow(page, '[role="status"]')).toContainText("Copied open annotations");
   const clipboard = await page.evaluate(() => navigator.clipboard.readText());
   expect(clipboard).not.toContain("Make the plain button purple");
@@ -117,7 +115,7 @@ test("complete generic Pick/Multi/Area annotation closed loop", async ({ page, c
   await shadow(page, '[aria-label="Annotation editor"] button[aria-label="Reopen"]').click();
 
   await page.evaluate(() => Object.defineProperty(navigator, "clipboard", { configurable: true, value: undefined }));
-  await shadow(page, 'button[aria-label^="Copy"]').click();
+  await page.keyboard.press("Control+Alt+C");
   await expect(shadow(page, '[aria-label="Manual copy fallback"]')).toBeVisible();
   await page.screenshot({ path: `${artifactDir}/copy-fallback.png` });
   await shadow(page, '[aria-label="Manual copy fallback"] button[aria-label="Close"]').click();

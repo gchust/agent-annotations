@@ -117,6 +117,7 @@ export function cloneScreenshotRoot(root: Element): Element {
   }
   for (let index = 0; index < sources.length; index += 1) sanitize(sources[index]!, clones[index]!);
   clone.querySelector("#agent-annotations-root")?.remove();
+  for (const noscript of clone.querySelectorAll("noscript")) noscript.remove();
   clone.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
   return clone;
 }

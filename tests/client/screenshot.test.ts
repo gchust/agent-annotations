@@ -47,6 +47,13 @@ describe("best-effort screenshot evidence", () => {
     expect(clone.querySelector("#after")?.textContent).toBe("After");
   });
 
+  it("removes noscript fallback content from the screenshot clone", () => {
+    document.body.innerHTML = "<noscript>You need to enable JavaScript.</noscript><main>Ready</main>";
+    const clone = cloneScreenshotRoot(document.body);
+    expect(clone.querySelector("noscript")).toBeNull();
+    expect(clone.textContent).toBe("Ready");
+  });
+
   it("lays out a large viewport at native dimensions before scaling and applies scroll translation", () => {
     expect(computeScreenshotScale(1920, 1080)).toBeCloseTo(5 / 6);
     const svg = buildScreenshotSvg("<main />", 1920, 1080, 1600, 900, 30, 700);
