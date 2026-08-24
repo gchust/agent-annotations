@@ -47,7 +47,6 @@ import {
   IGNORE_ATTRIBUTE,
   createSafePageContext,
   isEditable,
-  now,
   type RegisteredToolbarContribution,
 } from "./annotated.js";
 import { StudioChrome, type ChromeBindings } from "./chrome.js";
@@ -542,19 +541,12 @@ export async function mountAgentAnnotations(
         throw error;
       }
     }
-    // The built-in default Copy is the Agent Handoff contract: instructions,
-    // the browser update generation baseline and referenced-source evidence,
-    // plus exact completion commands. A final generic text redaction over the
-    // complete output keeps config/instruction interpolation from leaking.
+    // The built-in default Copy is the Agent Handoff contract: source edit,
+    // immediate completion, project checks, and task validation.
     const output = formatAgentAnnotationsHandoff(redacted, {
       command: handoff.command,
       verificationCommands: handoff.verificationCommands,
       includeCompleted: handoff.includeCompleted || filter === "all",
-      browserUpdateRevision: browserStatusController.browserUpdateRevision(),
-      referencedSourceRevision: browserStatusController.referencedSourceRevision(),
-      runtimeId,
-      routeKey,
-      generatedAt: now(),
     });
     // Final generic text redaction over the complete output. The task and the
     // bounded handoff config already bound the output, so this second pass

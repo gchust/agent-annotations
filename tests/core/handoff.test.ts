@@ -6,9 +6,6 @@ import {
 } from "../../src/core/index.js";
 import { annotationFixture, targetFixture, taskFixture } from "./test-data.js";
 
-const sha = "ab".repeat(32);
-const generatedAt = "2026-08-12T12:10:00.000Z";
-
 const annotated = () => taskFixture({
   taskRevision: 4,
   annotations: [
@@ -27,23 +24,21 @@ const annotated = () => taskFixture({
 });
 
 describe("agent handoff formatter", () => {
-  it("emits browser update and referenced-source baselines with exact completion commands", () => {
+  it("emits the streamlined workflow with exact completion commands", () => {
     const output = formatAgentAnnotationsHandoff(annotated(), {
       browserUpdateRevision: 7,
-      referencedSourceRevision: sha,
+      referencedSourceRevision: "ab".repeat(32),
       runtimeId: "runtime-customers",
       routeKey: "/settings",
-      generatedAt,
     });
     expect(output).toContain(`# Agent Annotations Handoff ${annotated().taskId}`);
     expect(output).toContain(`- task revision: 4`);
-    expect(output).toContain("- browser update revision baseline: 7");
-    expect(output).toContain(`- referenced source revision: ${sha}`);
-    expect(output).toContain("- browser runtime: runtime-customers");
-    expect(output).toContain("- browser route: /settings");
-    expect(output).toContain(`- generated at: ${generatedAt}`);
-    expect(output).toContain("agent-annotations wait --browser-update-revision 7 --runtime runtime-customers --json");
-    expect(output).toContain(`agent-annotations status --runtime runtime-customers --annotation ann-open --fail-on-diagnostics --diagnostics-since ${generatedAt} --check --json`);
+    const instructions = output.split("## Instructions\n\n")[1]!.split("\n\n## Annotations")[0]!;
+    expect(instructions.match(/^- /gm)).toHaveLength(4);
+    expect(instructions.indexOf("complete command below")).toBeLessThan(
+      instructions.indexOf("typecheck and tests")
+    );
+    expect(output).toContain("Run the project-relevant typecheck and tests");
     expect(output).toContain("agent-annotations validate-task --json");
     expect(output).toContain("editing active-task.json is not a solution");
     expect(output).toContain(
@@ -53,6 +48,12 @@ describe("agent handoff formatter", () => {
     expect(output).toContain("- evidence: evidence/ann-open-1.png");
     expect(output).not.toContain("ann-done");
     expect(output).not.toContain("data:image");
+    expect(output).not.toContain("agent-annotations wait ");
+    expect(output).not.toContain("agent-annotations status ");
+    expect(output).not.toContain("browser update revision");
+    expect(output).not.toContain("referenced source revision");
+    expect(output).not.toContain("diagnostics baseline");
+    expect(output).not.toContain("generated at");
   });
   it("includes only syntactically safe evidence refs and excludes unsafe ones", () => {
     const task = taskFixture({
@@ -71,7 +72,7 @@ describe("agent handoff formatter", () => {
         ],
       })],
     });
-    const output = formatAgentAnnotationsHandoff(task, { browserUpdateRevision: 7 });
+    const output = formatAgentAnnotationsHandoff(task);
     expect(output).toContain("- evidence: evidence/ann-1.png");
     expect(output).toContain("- evidence: evidence/subdir/file.png");
     for (const unsafe of [
@@ -87,44 +88,24 @@ describe("agent handoff formatter", () => {
     expect(output.match(/- evidence: /g) ?? []).toHaveLength(2);
   });
 
-  it("reports unavailable baselines without inventing values", () => {
-    const output = formatAgentAnnotationsHandoff(annotated());
-    expect(output).toContain("- browser update revision baseline: browser update revision unavailable");
-    expect(output).toContain("- referenced source revision: referenced source revision unavailable");
-    expect(output).not.toContain("wait --browser-update-revision");
-    expect(output).toContain("agent-annotations status --annotation ann-open --check --json");
-    expect(output).toContain("agent-annotations complete ann-open --verified");
-    // An invalid revision is never invented.
-    const malformed = formatAgentAnnotationsHandoff(annotated(), {
-      browserUpdateRevision: 1.5,
-      referencedSourceRevision: "not-a-sha",
-    });
-    expect(malformed).toContain("browser update revision unavailable");
-    expect(malformed).toContain("referenced source revision unavailable");
-  });
-
   it("honors custom command and verification commands", () => {
     const output = formatAgentAnnotationsHandoff(annotated(), {
       command: "pnpm exec agent-annotations",
       verificationCommands: ["pnpm typecheck", "pnpm test"],
-      browserUpdateRevision: 7,
-      referencedSourceRevision: sha,
-      generatedAt,
     });
     expect(output).toContain("- command: pnpm exec agent-annotations");
     expect(output).toContain("- Run: pnpm typecheck");
     expect(output).toContain("- Run: pnpm test");
-    expect(output).toContain("pnpm exec agent-annotations wait --browser-update-revision 7");
+    expect(output).toContain("pnpm exec agent-annotations validate-task --json");
     expect(output).toContain(
       "pnpm exec agent-annotations complete ann-open --verified --summary-file agent-annotations-summary-ann-open.txt"
     );
   });
 
   it("includes completed annotations only when explicitly requested", () => {
-    const open = formatAgentAnnotationsHandoff(annotated(), { browserUpdateRevision: 7 });
+    const open = formatAgentAnnotationsHandoff(annotated());
     expect(open).not.toContain("ann-done");
     const all = formatAgentAnnotationsHandoff(annotated(), {
-      browserUpdateRevision: 7,
       includeCompleted: true,
     });
     expect(all).toContain("ann-done");
@@ -140,7 +121,7 @@ describe("agent handoff formatter", () => {
         comment: "Fix $(rm -rf /) `touch /tmp/x` $HOME and 'quotes'\n\n\nwith many newlines",
       })],
     });
-    const output = formatAgentAnnotationsHandoff(task, { browserUpdateRevision: 7 });
+    const output = formatAgentAnnotationsHandoff(task);
     const completionLine = output.split("\n").find((line) => line.startsWith("- completion:"))!;
     expect(completionLine).toBe(
       "- completion: agent-annotations complete ann-1 --verified --summary-file agent-annotations-summary-ann-1.txt"
@@ -163,7 +144,7 @@ describe("agent handoff formatter", () => {
         })],
       })],
     });
-    const output = formatAgentAnnotationsHandoff(task, { browserUpdateRevision: 7 });
+    const output = formatAgentAnnotationsHandoff(task);
     const lines = output.split("\n");
     expect(lines.some((line) => line.startsWith("- Run:"))).toBe(false);
     const commentLine = lines.find((line) => line.startsWith("Comment:"))!;

@@ -117,10 +117,10 @@ test("packed browser to file to CLI to browser loop, HMR and session security", 
   await page.keyboard.press("Control+Alt+C");
   const handoff = await page.evaluate(() => navigator.clipboard.readText());
   expect(handoff).toContain("- route: /#/customers");
-  expect(handoff).toContain(`--runtime ${selectedRuntimeId}`);
-  expect(handoff).toContain(`--annotation ${id}`);
-  expect(handoff).toContain("--fail-on-diagnostics --diagnostics-since");
+  expect(handoff).toContain("agent-annotations validate-task --json");
   expect(handoff).toContain("--summary-file agent-annotations-summary-");
+  expect(handoff).not.toContain("agent-annotations wait ");
+  expect(handoff).not.toContain("agent-annotations status ");
   expect(handoff).not.toContain("--summary 'Make target purple'");
   expect(handoff).not.toContain(privacySentinel);
 
@@ -150,33 +150,27 @@ test("packed browser to file to CLI to browser loop, HMR and session security", 
   }, { timeout: 15_000 }).toBe(true);
   await page.evaluate(() => window.__demoExtension?.studio?.commands.markers.show());
 
-  // Diagnostics before a Handoff baseline are informational. A new 500 after
-  // that baseline blocks only when the generated command opts in.
-  const oldStatusLine = handoff.split("\n").find((line) =>
-    line.startsWith("- status:") && line.includes(`--annotation ${id} `)
-  )!;
-  const oldStatusArgs = oldStatusLine.slice("- status: agent-annotations ".length).split(" ");
-  expect(JSON.parse(cli(...oldStatusArgs))).toMatchObject({ diagnosticsAfterBaseline: 0, annotationResolved: true });
+  // Diagnostics before an explicit CLI baseline are informational. A new 500
+  // after that baseline blocks only when status opts in.
+  const statusArgs = [
+    "status", "--runtime", selectedRuntimeId, "--annotation", id,
+    "--fail-on-diagnostics", "--diagnostics-since", new Date().toISOString(), "--check", "--json",
+  ];
+  expect(JSON.parse(cli(...statusArgs))).toMatchObject({ diagnosticsAfterBaseline: 0, annotationResolved: true });
   await page.route("**/goal-07-500", (route) => route.fulfill({ status: 500, body: "failed" }));
   await page.evaluate(() => fetch("/goal-07-500"));
-  await expect.poll(() => cliFailure(...oldStatusArgs).status).toBe(1);
-  expect(JSON.parse(cliFailure(...oldStatusArgs).stdout).diagnosticsAfterBaseline).toBeGreaterThan(0);
+  await expect.poll(() => cliFailure(...statusArgs).status).toBe(1);
+  expect(JSON.parse(cliFailure(...statusArgs).stdout).diagnosticsAfterBaseline).toBeGreaterThan(0);
 
-  // Generate a fresh baseline, run its exact status command, then complete
-  // from its summary-file placeholder with implementation+verification proof.
+  // Complete from the handoff's summary-file placeholder after task validation.
   await page.keyboard.press("Control+Alt+C");
   const completionHandoff = await page.evaluate(() => navigator.clipboard.readText());
-  const statusLine = completionHandoff.split("\n").find((line) =>
-    line.startsWith("- status:") && line.includes(`--annotation ${id} `)
-  )!;
-  const statusArgs = statusLine.slice("- status: agent-annotations ".length).split(" ");
-  await expect.poll(() => JSON.parse(cli(...statusArgs)).annotationResolved, { timeout: 15_000 }).toBe(true);
   const completionLine = completionHandoff.split("\n").find((line) =>
     line.startsWith("- completion:") && line.includes(`complete ${id} `)
   )!;
   const completionArgs = completionLine.slice("- completion: agent-annotations ".length).split(" ");
   const summaryFile = path.resolve(completionArgs.at(-1)!);
-  const completionSummary = "Implemented exact annotation health and verified unresolved recovery plus diagnostics baselines.";
+  const completionSummary = "Implemented the annotation change and verified project checks plus task validation.";
   writeFileSync(summaryFile, completionSummary);
   await page.keyboard.press("Control+Alt+KeyJ");
   await expect.poll(() => page.evaluate(() => window.__demoExtension?.actionCount)).toBe(1);

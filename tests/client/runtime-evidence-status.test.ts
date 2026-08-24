@@ -47,7 +47,11 @@ vi.mock("../../src/client/screenshot.js", () => ({
   renderPreparedSnapshotPng: screenshot.renderPreparedSnapshotPng,
 }));
 
-import { mountAgentAnnotations, RevisionConflictError } from "../../src/client/index.js";
+import {
+  agentAnnotationsVersion,
+  mountAgentAnnotations,
+  RevisionConflictError,
+} from "../../src/client/index.js";
 import { createSafePageContext } from "../../src/client/runtime/annotated.js";
 import { browserSessionStorageKey } from "../../src/client/runtime/browser-session.js";
 import { defineClientExtension } from "../../src/extension/index.js";
@@ -896,7 +900,7 @@ describe("runtime-evidence-status", () => {
       const body = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string);
       expect(body).toMatchObject({
         schema: "agent-annotations.browser-state.v2",
-        clientVersion: "0.1.0-alpha.0",
+        clientVersion: agentAnnotationsVersion,
         taskId: expect.any(String),
         taskRevision: 0,
         browserUpdateRevision: 0,
@@ -1244,14 +1248,16 @@ describe("runtime-evidence-status", () => {
       const fallback = shadow.querySelector<HTMLTextAreaElement>(".aa-copy-fallback textarea")!;
       const output = fallback.value;
       expect(output).toContain("# Agent Annotations Handoff");
-      expect(output).toContain("- browser update revision baseline: 0");
-      expect(output).toContain("- referenced source revision: referenced source revision unavailable");
-      expect(output).toContain("wait --browser-update-revision 0 --runtime ");
-      expect(output).toMatch(/agent-annotations status --runtime [^ ]+ --annotation ann-1 --fail-on-diagnostics --diagnostics-since [^ ]+ --check --json/);
+      expect(output).toContain("Run the project-relevant typecheck and tests");
       expect(output).toContain("agent-annotations validate-task --json");
       expect(output).toContain(
         "agent-annotations complete ann-1 --verified --summary-file agent-annotations-summary-ann-1.txt"
       );
+      expect(output).not.toContain("agent-annotations wait ");
+      expect(output).not.toContain("agent-annotations status ");
+      expect(output).not.toContain("browser update revision");
+      expect(output).not.toContain("referenced source revision");
+      expect(output).not.toContain("diagnostics baseline");
       expect(output).not.toContain("--summary 'Make the button purple'");
       expect(output).toContain("- evidence: evidence/ann-1.png");
       expect(output).not.toContain("data:image");
@@ -1286,7 +1292,7 @@ describe("runtime-evidence-status", () => {
 
 
 
-  it("preserves the applied baseline across task-only updates and clears it for a failed browser report", async () => {
+  it("preserves applied browser state across task-only updates and clears it for a failed report", async () => {
     vi.useFakeTimers();
     let revisionResponse: Promise<Response> | null = null;
     const fetchMock = vi.fn<typeof fetch>((input: RequestInfo | URL) => {
@@ -1312,11 +1318,9 @@ describe("runtime-evidence-status", () => {
         browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
       });
       await vi.advanceTimersByTimeAsync(0);
-      const fallbackValue = () => {
-        const textarea = document.getElementById("agent-annotations-root")!
-          .shadowRoot!.querySelector<HTMLTextAreaElement>(".aa-copy-fallback textarea");
-        return textarea?.value ?? "";
-      };
+      const heartbeats = () => fetchMock.mock.calls.filter((call) => String(call[0]).endsWith("/heartbeat"));
+      const heartbeat = () => JSON.parse(heartbeats().at(-1)![1]!.body as string);
+      const revisionFetches = () => fetchMock.mock.calls.filter((call) => String(call[0]).endsWith("/revision"));
       // A baseline is reported through the trusted hook.
       revisionResponse = Promise.resolve(
         new Response(JSON.stringify({
@@ -1328,23 +1332,20 @@ describe("runtime-evidence-status", () => {
       );
       mounted.reportBrowserUpdate();
       await vi.advanceTimersByTimeAsync(0);
-      await mounted.api.commands.annotations.copyOpen();
-      await vi.advanceTimersByTimeAsync(0);
-      expect(fallbackValue()).toContain("- browser update revision baseline: 1");
-      expect(fallbackValue()).toContain(`- referenced source revision: ${"ab".repeat(32)}`);
-      const heartbeats = () => fetchMock.mock.calls.filter((call) => String(call[0]).endsWith("/heartbeat"));
-      const generation = JSON.parse(heartbeats().at(-1)![1]!.body as string).browserUpdateRevision;
-      const revisionFetches = () => fetchMock.mock.calls.filter((call) => String(call[0]).endsWith("/revision"));
+      expect(heartbeat()).toMatchObject({
+        browserUpdateRevision: 1,
+        referencedSourceRevision: "ab".repeat(32),
+      });
+      const generation = heartbeat().browserUpdateRevision;
       expect(revisionFetches()).toHaveLength(1);
       // A same-source task update cannot advance the browser generation or
       // replace the trusted source snapshot.
       publish({ ...initial, taskRevision: 1 });
       await vi.advanceTimersByTimeAsync(0);
-      await mounted.api.commands.annotations.copyOpen();
-      await vi.advanceTimersByTimeAsync(0);
-      expect(fallbackValue()).toContain("- browser update revision baseline: 1");
-      expect(fallbackValue()).toContain(`- referenced source revision: ${"ab".repeat(32)}`);
-      expect(JSON.parse(heartbeats().at(-1)![1]!.body as string).browserUpdateRevision).toBe(generation);
+      expect(heartbeat()).toMatchObject({
+        browserUpdateRevision: generation,
+        referencedSourceRevision: "ab".repeat(32),
+      });
       expect(revisionFetches()).toHaveLength(1);
       // A trusted browser update advances the generation, but a response for
       // another task revision cannot install its source snapshot.
@@ -1359,11 +1360,7 @@ describe("runtime-evidence-status", () => {
       ));
       mounted.reportBrowserUpdate();
       await vi.advanceTimersByTimeAsync(0);
-      await mounted.api.commands.annotations.copyOpen();
-      await vi.advanceTimersByTimeAsync(0);
-      expect(fallbackValue()).toContain("- browser update revision baseline: 2");
-      expect(fallbackValue()).toContain("- referenced source revision: referenced source revision unavailable");
-      expect(fallbackValue()).toContain("wait --browser-update-revision 2");
+      expect(heartbeat()).toMatchObject({ browserUpdateRevision: 2, referencedSourceRevision: null });
       // A task update racing an in-flight trusted report invalidates the
       // response, so the newer task cannot inherit a disk hash it never ran.
       let resolveStale!: (value: Response) => void;
@@ -1375,7 +1372,7 @@ describe("runtime-evidence-status", () => {
         referencedSourceFiles: [],
       }), { status: 200 }));
       await vi.advanceTimersByTimeAsync(0);
-      expect(JSON.parse(heartbeats().at(-1)![1]!.body as string).referencedSourceRevision).toBeNull();
+      expect(heartbeat().referencedSourceRevision).toBeNull();
       // A later successful refresh restores the new baseline.
       revisionResponse = Promise.resolve(
         new Response(JSON.stringify({
@@ -1387,11 +1384,10 @@ describe("runtime-evidence-status", () => {
       );
       mounted.reportBrowserUpdate();
       await vi.advanceTimersByTimeAsync(0);
-      await mounted.api.commands.annotations.copyOpen();
-      await vi.advanceTimersByTimeAsync(0);
-      expect(fallbackValue()).toContain("- browser update revision baseline: 4");
-      expect(fallbackValue()).toContain(`- referenced source revision: ${"cd".repeat(32)}`);
-      expect(fallbackValue()).toContain("wait --browser-update-revision 4");
+      expect(heartbeat()).toMatchObject({
+        browserUpdateRevision: 4,
+        referencedSourceRevision: "cd".repeat(32),
+      });
       mounted.unmount();
     } finally {
       vi.unstubAllGlobals();

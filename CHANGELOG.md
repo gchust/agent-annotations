@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.1 - 2026-08-24
+
+- Simplified the default Code-Agent handoff to four steps: edit source,
+  complete immediately, run project checks, and validate the task file.
+- Removed browser revision, runtime synchronization, generated `wait`/`status`
+  commands, and diagnostics baselines from copied handoffs. The standalone
+  CLI commands remain available.
+
 ## 0.1.0-alpha.0 - 2026-08-22
 
 - Unified release verification around one build and one checksummed tarball;

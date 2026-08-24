@@ -2,7 +2,7 @@
   "name": "@gchust/agent-annotations",
   "displayName": "Agent Annotations",
   "description": "Developer-only visual annotations handed to Code Agents in React/Vite applications",
-  "version": "0.1.0-alpha.0",
+  "version": "0.1.1",
   "license": "MIT",
   "repository": {
     "type": "git",

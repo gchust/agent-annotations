@@ -242,23 +242,18 @@ current-route heartbeat. Diagnostics stay informational unless
 baseline; then `--check` also fails for newer entries.
 
 The default `Copy` action emits a Code-Agent handoff instead of a data dump:
-instructions, the browser update generation baseline and supplementary
-referenced-source revision (or explicit unavailable values — a SHA is never invented), and an exact
-runtime, route, annotation, generation time, and diagnostics baseline. Each
-completion command uses a UTF-8 `--summary-file` placeholder and never copies
-the user's comment into completion evidence. The loop is:
+annotation context plus source-edit, immediate-completion, project-check, and
+task-validation instructions. Each completion command uses a UTF-8 `--summary-file`
+placeholder and never copies the user's comment into completion evidence. The
+loop is:
 
 ```text
 # 1. the agent edits real source files (never active-task.json)
-# 2. wait until the browser actually applied the change
-agent-annotations wait --browser-update-revision <generation> --json
-# 3. the full runtime is synchronized and healthy
-agent-annotations status --runtime <runtime-id> --annotation <annotation-id> --fail-on-diagnostics --diagnostics-since <ISO> --check --json
-# 4. the task file itself is valid
-agent-annotations validate-task --json
-# 5. only after verification passes, complete the annotation
-# write implementation + verification evidence to the generated summary path
+# 2. as soon as relevant source changed, summarize the implementation and complete
 agent-annotations complete <annotation-id> --verified --summary-file <path>
+# 3. run the project-relevant typecheck and tests
+# 4. confirm the completed task file itself is valid
+agent-annotations validate-task --json
 ```
 
 The handoff is configurable and strictly bounded (`handoff: { command,

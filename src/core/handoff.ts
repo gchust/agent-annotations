@@ -1,7 +1,4 @@
-import {
-  AGENT_ANNOTATIONS_ID_PATTERN,
-  parseAgentAnnotationsTask,
-} from "./schema.js";
+import { parseAgentAnnotationsTask } from "./schema.js";
 import {
   agentAnnotationsAnnotationDisplayNumber,
   selectAgentAnnotations,
@@ -31,7 +28,6 @@ const DEFAULT_COMMAND = "agent-annotations";
 const MAX_COMMAND = 512;
 const MAX_VERIFICATION_COMMANDS = 10;
 const MAX_VERIFICATION_ITEM = 512;
-const SHA256 = /^[0-9a-f]{64}$/;
 // Line-boundary controls: C0 (U+0000-U+001F), C1 (U+007F-U+009F), and the
 // Unicode line/paragraph separators U+2028/U+2029. Non-global on purpose:
 // safeEvidenceRef and the config validator call .test() on it, and a global
@@ -135,9 +131,7 @@ const completionCommand = (command: string, annotationId: string): string =>
 const formatAnnotation = (
   task: AgentAnnotationsTask,
   command: string,
-  annotation: AgentAnnotation,
-  runtimeId: string | null,
-  generatedAt: string | null
+  annotation: AgentAnnotation
 ): string[] => {
   const displayNumber =
     agentAnnotationsAnnotationDisplayNumber(task.annotations, annotation.annotationId) ?? 1;
@@ -147,7 +141,6 @@ const formatAnnotation = (
     `Comment: ${singleLine(annotation.comment) || "(empty)"}`,
     "",
     `- route: ${singleLine(annotation.pageContext.routeKey)} (${singleLine(annotation.pageContext.title)})`,
-    `- status: ${annotation.status}`,
   ];
   if (annotation.region) {
     lines.push(
@@ -187,16 +180,14 @@ const formatAnnotation = (
     );
   }
   lines.push(
-    `- diagnostics baseline: ${generatedAt ?? "diagnostics baseline unavailable"}`,
-    `- status: ${command} status${runtimeId ? ` --runtime ${runtimeId}` : ""} --annotation ${annotation.annotationId}${generatedAt ? ` --fail-on-diagnostics --diagnostics-since ${generatedAt}` : ""} --check --json`,
     `- summary file: ${summaryFile(annotation.annotationId)}`,
     `- completion: ${completionCommand(command, annotation.annotationId)}`
   );
   return [...lines, ""];
 };
 
-// Pure default handoff formatter: browser update generation is the primary
-// verification baseline; the referenced-source hash is supplementary evidence.
+// Pure default handoff formatter for source edits, project checks, task
+// validation, and completion.
 export function formatAgentAnnotationsHandoff(
   input: unknown,
   options: AgentAnnotationsHandoffOptions = {}
@@ -208,27 +199,6 @@ export function formatAgentAnnotationsHandoff(
     includeCompleted: options.includeCompleted,
   });
   const command = config.command;
-  const browserUpdateRevision = typeof options.browserUpdateRevision === "number" &&
-    Number.isSafeInteger(options.browserUpdateRevision) &&
-    options.browserUpdateRevision >= 0
-    ? options.browserUpdateRevision
-    : null;
-  const referencedSourceRevision = options.referencedSourceRevision !== null &&
-    typeof options.referencedSourceRevision === "string" &&
-    SHA256.test(options.referencedSourceRevision)
-    ? options.referencedSourceRevision
-    : null;
-  const runtimeId = typeof options.runtimeId === "string" && AGENT_ANNOTATIONS_ID_PATTERN.test(options.runtimeId)
-    ? options.runtimeId
-    : null;
-  const routeKey = typeof options.routeKey === "string" && options.routeKey.length > 0 &&
-    options.routeKey.length <= 500 && !options.routeKey.includes("?") && !CONTROL.test(options.routeKey)
-    ? options.routeKey
-    : null;
-  const generatedAt = typeof options.generatedAt === "string" && !Number.isNaN(Date.parse(options.generatedAt)) &&
-    new Date(options.generatedAt).toISOString() === options.generatedAt
-    ? options.generatedAt
-    : null;
   const annotations = selectAgentAnnotations(
     task.annotations,
     config.includeCompleted ? "all" : "open"
@@ -237,33 +207,22 @@ export function formatAgentAnnotationsHandoff(
     `# Agent Annotations Handoff ${task.taskId}`,
     "",
     `- task revision: ${task.taskRevision}`,
-    `- generated at: ${generatedAt ?? "generation time unavailable"}`,
     `- schema: ${task.schema}`,
-    `- browser update revision baseline: ${browserUpdateRevision ?? "browser update revision unavailable"}`,
-    `- browser runtime: ${runtimeId ?? "browser runtime unavailable"}`,
-    `- browser route: ${routeKey ?? "browser route unavailable"}`,
-    `- referenced source revision: ${referencedSourceRevision ?? "referenced source revision unavailable"}`,
     `- command: ${command}`,
     "",
     "## Instructions",
     "",
     "- Modify the real application source code; editing active-task.json is not a solution.",
-    ...(browserUpdateRevision !== null
-      ? [`- Run ${command} wait --browser-update-revision ${browserUpdateRevision}${runtimeId ? ` --runtime ${runtimeId}` : ""} --json and wait until the browser reports a newer applied update.`]
-      : []),
+    `- As soon as the relevant source is modified, write a UTF-8 implementation summary and run the exact ${command} complete command below.`,
     "- Run the project-relevant typecheck and tests.",
-    ...config.verificationCommands.map((verification) => `- Run: ${verification}`),
+    ...config.verificationCommands.map((verification) => `  - Run: ${verification}`),
     `- Run ${command} validate-task --json to confirm the task file itself is valid.`,
-    "- For each annotation, run its exact status command below; route, target health, synchronization, and diagnostics since generation must pass.",
-    "- Write a UTF-8 summary file describing both the implementation and the verification performed; do not copy the original comment as completion evidence.",
-    `- Only after every verification passes, run the exact ${command} complete command below.`,
-    "- If verification fails, do not mark anything complete; keep the error and report it.",
     "",
     `## Annotations (${annotations.length})`,
     "",
   ];
   for (const annotation of annotations) {
-    lines.push(...formatAnnotation(task, command, annotation, runtimeId, generatedAt));
+    lines.push(...formatAnnotation(task, command, annotation));
   }
   return lines.join("\n");
 }
