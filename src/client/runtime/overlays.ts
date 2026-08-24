@@ -130,6 +130,18 @@ export const createOverlayController = (b: OverlayBindings): OverlayController =
     return node;
   };
 
+  const submitTextareaOnEnter = (
+    textarea: HTMLTextAreaElement,
+    form: HTMLFormElement,
+    submitter: HTMLButtonElement
+  ) => {
+    textarea.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
+      event.preventDefault();
+      if (!event.repeat && !submitter.disabled) form.requestSubmit(submitter);
+    });
+  };
+
   const hideTooltip = () => {
     if (tooltipTimer !== null) b.cancelTimer(tooltipTimer);
     tooltipTimer = null;
@@ -178,7 +190,6 @@ export const createOverlayController = (b: OverlayBindings): OverlayController =
     const resolved: Element[] = [];
     if (!b.markersVisible()) return resolved;
     b.task().annotations.forEach((annotation, index) => {
-      if (annotation.status === "completed") return;
       if (annotation.pageContext.routeKey !== b.routeKey()) return;
       if (annotation.region) {
         addOutline({
@@ -191,11 +202,11 @@ export const createOverlayController = (b: OverlayBindings): OverlayController =
       const snapshot = b.markers.resolutionSnapshot(annotation);
       const targetInRoot = snapshot.anchor;
       resolved.push(...snapshot.resolvedTargets);
-      const rect = targetInRoot ? targetBounds(targetInRoot) : null;
-      const anchor = rect
-        ? { x: rect.x - 8, y: rect.y - 8 }
-        : annotation.region
-          ? { x: annotation.region.x - scrollX + annotation.region.width - 14, y: annotation.region.y - scrollY + 4 }
+      const rect = snapshot.anchorBounds;
+      const anchor = annotation.region
+        ? { x: annotation.region.x - scrollX + annotation.region.width - 14, y: annotation.region.y - scrollY + 4 }
+        : rect
+          ? { x: rect.x - 8, y: rect.y - 8 }
           : null;
       const marker = document.createElement("button");
       marker.type = "button";
@@ -214,6 +225,12 @@ export const createOverlayController = (b: OverlayBindings): OverlayController =
           : `${ariaLabel} · ${targets}`;
       }
       marker.textContent = String(index + 1);
+      if (annotation.status === "completed") {
+        const complete = document.createElement("span");
+        complete.className = "aa-marker-complete";
+        complete.append(createIconSvg(SaveIcon));
+        marker.append(complete);
+      }
       marker.hidden = !anchor;
       if (anchor) Object.assign(marker.style, { left: `${anchor.x}px`, top: `${anchor.y}px` });
       marker.addEventListener("click", () => b.focusAnnotation(annotation.annotationId));
@@ -258,6 +275,7 @@ export const createOverlayController = (b: OverlayBindings): OverlayController =
     const cancel = iconButton(b.localized("Cancel"), CloseIcon, b.cancelCapture);
     cancel.className = "aa-button aa-icon-button";
     const save = submitButton(b.localized("Save annotation"), SaveIcon);
+    submitTextareaOnEnter(textarea, surface, save);
     actions.append(cancel, save);
     surface.append(title, textarea, actions);
     surface.addEventListener("submit", async (event) => {
@@ -403,6 +421,7 @@ export const createOverlayController = (b: OverlayBindings): OverlayController =
     const actions = document.createElement("div");
     actions.className = "aa-actions";
     const save = submitButton(b.localized("Save comment"), SaveIcon);
+    submitTextareaOnEnter(textarea, surface, save);
     if (b.screenshotMode() !== "off" && b.canWriteEvidence()) {
       const capture = iconButton(
         b.localized("Capture screenshot"),

@@ -153,14 +153,19 @@ test("browser status health and HMR-applied source revision ordering", async ({ 
   const baselineGeneration = baselineStatus.browserUpdateRevision;
   const before = readFileSync(card, "utf8");
   try {
-    // A transform error keeps the old module running. Completing the task is
-    // task-only work and cannot advance either browser-applied field.
+    // A transform error keeps the old module running. The task mutation itself
+    // cannot advance either browser-applied field; its completion reload runs
+    // after the repaired module has applied.
     writeFileSync(card, `${before}\nexport const broken = ;\n`);
     await page.locator("vite-error-overlay").waitFor();
     const failedBaseline = statusJson();
     expect(failedBaseline.browserUpdateRevision).toBe(baselineGeneration);
     expect(failedBaseline.browserReferencedSourceRevision).toBe(baseline);
     const task = JSON.parse(readFileSync(path.join(runtimeRoot, "tasks/active-task.json"), "utf8"));
+    const completionReload = page.waitForEvent("framenavigated", {
+      predicate: (frame) => frame === page.mainFrame(),
+      timeout: 15_000,
+    });
     cli("complete", task.annotations[0].annotationId, "--verified", "--summary", "Failed HMR remains unapplied");
     await expect.poll(() => statusJson().taskSynchronized, { timeout: 15_000 }).toBe(true);
     const failedUpdate = statusJson();
@@ -182,10 +187,13 @@ test("browser status health and HMR-applied source revision ordering", async ({ 
     // happened after the HMR update actually applied.
     const text = await page.locator("#duplicate-a").evaluate((element) => element.textContent);
     expect(text).toBe("Duplicate A APPLIED");
-    // After the HMR applied, the disk and browser revisions agree again.
+    await completionReload;
+    await expect(shadow(page, ".aa-dock")).toBeVisible();
+    await expect.poll(() => statusJson().referencedSourceSynchronized, { timeout: 15_000 }).toBe(true);
+    // The repaired HMR and the completion reload each advance the browser once.
     const applied = JSON.parse(cli("status", "--check", "--json"));
     expect(applied.referencedSourceSynchronized).toBe(true);
-    expect(applied.browserUpdateRevision).toBe(failedBaseline.browserUpdateRevision + 1);
+    expect(applied.browserUpdateRevision).toBe(failedBaseline.browserUpdateRevision + 2);
     expect(applied.browserReferencedSourceRevision).toBe(statusJson().referencedSourceRevision);
     // An unrelated module's HMR update is visibly applied (the extension
     // re-setups) but never moves the referenced-source applied revision.

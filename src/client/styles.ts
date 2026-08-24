@@ -25,7 +25,8 @@ button:focus-visible,textarea:focus-visible { outline:2px solid #8b5cf6; outline
 .aa-help-row,.aa-list-item { display:flex; gap:8px; justify-content:space-between; align-items:flex-start; padding:6px; border-radius:8px; background:var(--aa-muted-bg); }
 .aa-chip { display:inline-grid; place-items:center; min-width:22px; height:22px; padding:0 5px; border-radius:999px; background:var(--aa-accent); color:white; font-weight:700; }
 .aa-marker { position:fixed; z-index:2147483005; min-width:28px; min-height:28px; border-radius:999px; background:var(--aa-accent); color:white; font-weight:700; pointer-events:auto; }
-.aa-marker[data-status=completed] { background:#16a34a; }
+.aa-marker-complete { position:absolute; right:-2px; bottom:-2px; display:grid; place-items:center; width:11px; height:11px; border-radius:999px; color:#fff; background:var(--aa-accent); box-shadow:0 0 0 1px var(--aa-bg); pointer-events:none; }
+.aa-marker-complete .aa-icon { width:9px; height:9px; }
 .aa-outline { position:fixed; z-index:2147483003; border:2px solid #8b5cf6; background:#7c3aed22; pointer-events:none; }
 .aa-outline[data-region=true] { border-style:dashed; border-color:#22d3ee; background:#22d3ee22; }
 .aa-composer,.aa-editor { left:8px; top:8px; width:min(310px,calc(100vw - 16px)); display:grid; gap:8px; }

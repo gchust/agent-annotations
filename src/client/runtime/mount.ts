@@ -188,6 +188,7 @@ export async function mountAgentAnnotations(
     annotationHealth: () => annotationHealth(),
     resetResolutionSnapshots: () => resetHeartbeatResolutionSnapshots(),
     scheduleTimer,
+    reloadPage: () => window.location.reload(),
   });
   const {
     runtimeId,

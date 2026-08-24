@@ -4,7 +4,12 @@ import {
   targetBounds,
   type TargetResolution,
 } from "../inspection-engine.js";
-import type { AgentAnnotation, AgentAnnotationsTask, HostIntegration } from "../../types/index.js";
+import type {
+  AgentAnnotation,
+  AgentAnnotationsRect,
+  AgentAnnotationsTask,
+  HostIntegration,
+} from "../../types/index.js";
 
 export type MarkerTargetSummary = {
   resolved: number;
@@ -17,6 +22,7 @@ export type MarkerResolutionSnapshot = {
   resolutions: readonly TargetResolution[];
   resolvedTargets: readonly Element[];
   anchor: Element | null;
+  anchorBounds: AgentAnnotationsRect | null;
   summary: MarkerTargetSummary;
 };
 
@@ -71,6 +77,20 @@ export const createMarkerController = (b: MarkerBindings): MarkerController => {
     const firstUnresolved = resolutions.find((resolution) =>
       resolution.status !== "resolved" || !b.isInAppRoot(resolution.element)
     );
+    const anchor = resolvedTargets[0] ?? null;
+    // Completed annotations remain useful after a page change. When their
+    // target no longer resolves, retain the capture-time viewport position
+    // converted back through the capture scroll offset.
+    const anchorBounds = anchor
+      ? targetBounds(anchor)
+      : annotation.status === "completed" && annotation.targets?.[0]
+        ? {
+            x: annotation.targets[0].bounds.x + annotation.pageContext.scroll.x - scrollX,
+            y: annotation.targets[0].bounds.y + annotation.pageContext.scroll.y - scrollY,
+            width: annotation.targets[0].bounds.width,
+            height: annotation.targets[0].bounds.height,
+          }
+        : null;
     const reason = firstUnresolved && resolvedTargets.length < targets.length
       ? firstUnresolved.status === "identity_mismatch"
         ? "identity mismatch"
@@ -84,7 +104,8 @@ export const createMarkerController = (b: MarkerBindings): MarkerController => {
       annotationId: annotation.annotationId,
       resolutions,
       resolvedTargets,
-      anchor: resolvedTargets[0] ?? null,
+      anchor,
+      anchorBounds,
       summary: { resolved: resolvedTargets.length, total: targets.length, reason },
     };
     snapshots.set(annotation.annotationId, snapshot);
@@ -192,18 +213,18 @@ export const createMarkerController = (b: MarkerBindings): MarkerController => {
       const resolved: Element[] = [];
       let summaryChanged = false;
       for (const annotation of b.task().annotations) {
-        if (annotation.status !== "open" || annotation.pageContext.routeKey !== b.routeKey()) continue;
+        if (annotation.pageContext.routeKey !== b.routeKey()) continue;
         const marker = Array.from(b.overlayMount().querySelectorAll<HTMLElement>(".aa-marker"))
           .find((node) => node.dataset.annotationId === annotation.annotationId);
         if (!marker && annotation.annotationId !== b.editingId()) continue;
         const previousSummary = previousSummaries.get(annotation.annotationId);
         const snapshot = resolutionSnapshot(annotation);
         resolved.push(...snapshot.resolvedTargets);
-        const rect = snapshot.anchor ? targetBounds(snapshot.anchor) : null;
-        const anchor = rect
-          ? { x: rect.x - 8, y: rect.y - 8 }
-          : annotation.region
-            ? { x: annotation.region.x - scrollX + annotation.region.width - 14, y: annotation.region.y - scrollY + 4 }
+        const rect = snapshot.anchorBounds;
+        const anchor = annotation.region
+          ? { x: annotation.region.x - scrollX + annotation.region.width - 14, y: annotation.region.y - scrollY + 4 }
+          : rect
+            ? { x: rect.x - 8, y: rect.y - 8 }
             : null;
         if (marker) {
           marker.hidden = !anchor;
@@ -231,10 +252,10 @@ export const createMarkerController = (b: MarkerBindings): MarkerController => {
     });
   };
 
-  const activeAnnotations = () => b.task().annotations.filter((annotation) =>
-    annotation.status === "open" && annotation.pageContext.routeKey === b.routeKey()
+  const routeAnnotations = () => b.task().annotations.filter((annotation) =>
+    annotation.pageContext.routeKey === b.routeKey()
   );
-  const hasUnresolvedFrameTarget = (): boolean => activeAnnotations().some((annotation) => {
+  const hasUnresolvedFrameTarget = (): boolean => routeAnnotations().some((annotation) => {
     const snapshot = resolutionSnapshot(annotation);
     return annotation.targets?.some((target, index) =>
       target.selector.includes(">>iframe>>") &&
@@ -242,7 +263,7 @@ export const createMarkerController = (b: MarkerBindings): MarkerController => {
         !b.isInAppRoot(snapshot.resolutions[index].element))
     );
   });
-  const hasUnresolvedRealmTarget = (): boolean => activeAnnotations().some((annotation) => {
+  const hasUnresolvedRealmTarget = (): boolean => routeAnnotations().some((annotation) => {
     const snapshot = resolutionSnapshot(annotation);
     return annotation.targets?.some((target, index) =>
       (target.selector.includes(">>iframe>>") || target.selector.includes(">>>")) &&
@@ -251,13 +272,13 @@ export const createMarkerController = (b: MarkerBindings): MarkerController => {
     );
   });
   const needsRealmTracking = () => (b.markersVisible() || !!b.editingId()) &&
-    activeAnnotations().some((annotation) => annotation.targets?.some(({ selector }) =>
+    routeAnnotations().some((annotation) => annotation.targets?.some(({ selector }) =>
       selector.includes(">>iframe>>") || selector.includes(">>>")
     ));
 
   const watchPersistedRealms = (observeSetup: boolean) => {
     const root = b.appRoot();
-    for (const annotation of activeAnnotations()) {
+    for (const annotation of routeAnnotations()) {
       for (const target of annotation.targets ?? []) {
         const tokens = target.selector.split(/(>>>|>>iframe>>)/).map((value) => value.trim()).filter(Boolean);
         for (let index = 1; index < tokens.length; index += 2) {
@@ -298,7 +319,7 @@ export const createMarkerController = (b: MarkerBindings): MarkerController => {
     trackedMarkerTargets = new WeakSet(targets);
     trackedMarkerTargetList = [...targets];
     const hasElementComposer = b.hasElementComposer();
-    const watchMarkers = b.markersVisible() && activeAnnotations().length > 0;
+    const watchMarkers = b.markersVisible() && routeAnnotations().length > 0;
     if (!watchMarkers && !b.editingId() && !hasElementComposer) return;
     if (watchRealms) watchPersistedRealms(hasUnresolvedRealmTarget());
     markerObserver = new MutationObserver(() => {

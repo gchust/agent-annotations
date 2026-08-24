@@ -1350,12 +1350,47 @@ describe("runtime-host-ui", () => {
     }
   });
 
-
-
-  it("keeps the region rectangle when a region target identity mismatches", async () => {
+  it("keeps a completed marker at its saved bounds when its target changes", async () => {
     vi.useFakeTimers();
     history.pushState({}, "", "/settings");
-    document.body.innerHTML = '<main><button id="actual">Wrong</button></main>';
+    document.body.innerHTML = '<main><button id="actual" aria-label="Wrong">Wrong</button></main>';
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(taskFixture({
+        status: "completed",
+        annotations: [annotationFixture({
+          status: "completed",
+          completedAt: "2026-08-24T00:00:00.000Z",
+          targets: [targetFixture({
+            bounds: { x: 420, y: 260, width: 120, height: 32 },
+            selector: "main > button",
+            inspection: {
+              ...targetFixture().inspection,
+              attributes: { id: "expected", role: "button", "aria-label": "Save" },
+            },
+          })],
+        })],
+      })),
+    });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      const marker = shadow.querySelector<HTMLElement>(".aa-marker")!;
+      expect(marker.hidden).toBe(false);
+      expect({ left: marker.style.left, top: marker.style.top }).toEqual({
+        left: "412px",
+        top: "252px",
+      });
+    } finally {
+      mounted.unmount();
+    }
+  });
+
+
+
+  it("anchors a region marker to its rectangle instead of a sampled page container", async () => {
+    vi.useFakeTimers();
+    history.pushState({}, "", "/settings");
+    document.body.innerHTML = '<main><button id="expected" aria-label="Save">Save</button></main>';
+    primitives.getElementBounds.mockReturnValue({ x: 0, y: 0, width: 1000, height: 800 });
     const task = taskFixture({
       annotations: [annotationFixture({
         kind: "region",
@@ -1376,9 +1411,18 @@ describe("runtime-host-ui", () => {
       expect(outline).not.toBeNull();
       expect(outline?.style.left).toBe("40px");
       expect(outline?.style.top).toBe("50px");
+      const marker = shadow.querySelector<HTMLElement>(".aa-marker")!;
+      expect({ left: marker.style.left, top: marker.style.top }).toEqual({
+        left: "326px",
+        top: "54px",
+      });
       window.dispatchEvent(new Event("resize"));
       await vi.runAllTimersAsync();
       expect(shadow.querySelector('[data-region="true"]')).not.toBeNull();
+      expect({ left: marker.style.left, top: marker.style.top }).toEqual({
+        left: "326px",
+        top: "54px",
+      });
     } finally {
       mounted.unmount();
     }

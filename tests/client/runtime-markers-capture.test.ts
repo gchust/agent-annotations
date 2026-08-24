@@ -738,7 +738,8 @@ describe("runtime-markers-capture", () => {
 
 
 
-  it("does not render markers for completed annotations", async () => {
+  it("renders completed annotations with completed marker styling", async () => {
+    history.pushState({}, "", "/settings");
     const mounted = await mountAgentAnnotations({
       transport: new MemoryTaskTransport(taskFixture({
         status: "completed",
@@ -749,8 +750,11 @@ describe("runtime-markers-capture", () => {
         }],
       })),
     });
-    expect(document.getElementById("agent-annotations-root")!.shadowRoot!.querySelector(".aa-marker"))
-      .toBeNull();
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    const marker = shadow.querySelector<HTMLElement>(".aa-marker");
+    expect(marker?.dataset.status).toBe("completed");
+    expect(marker?.textContent).toBe("1");
+    expect(marker?.querySelectorAll(".aa-marker-complete path")).toHaveLength(1);
     mounted.unmount();
   });
 
@@ -848,6 +852,52 @@ describe("runtime-markers-capture", () => {
         left: "682px",
         top: "572px",
       });
+    } finally {
+      mounted.unmount();
+      target.remove();
+    }
+  });
+
+
+
+  it("submits annotation text with Enter and preserves Shift+Enter for newlines", async () => {
+    const target = document.createElement("button");
+    document.body.append(target);
+    const transport = new MemoryTaskTransport();
+    const mounted = await mountAgentAnnotations({ transport });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+
+    try {
+      mounted.api.commands.capture.startPick();
+      target.click();
+      const composer = shadow.querySelector<HTMLFormElement>(".aa-composer")!;
+      const textarea = composer.querySelector<HTMLTextAreaElement>("textarea")!;
+      textarea.value = "First line";
+
+      const newline = new KeyboardEvent("keydown", {
+        key: "Enter", shiftKey: true, bubbles: true, cancelable: true,
+      });
+      textarea.dispatchEvent(newline);
+      expect(newline.defaultPrevented).toBe(false);
+      expect(shadow.querySelector(".aa-composer")).not.toBeNull();
+
+      textarea.value += "\nSecond line";
+      const submit = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+      textarea.dispatchEvent(submit);
+      expect(submit.defaultPrevented).toBe(true);
+      await vi.waitFor(() => expect(shadow.querySelector(".aa-composer")).toBeNull());
+      const annotation = (await transport.read()).annotations[0]!;
+      expect(annotation.comment).toBe("First line\nSecond line");
+
+      mounted.api.commands.markers.focus(annotation.annotationId);
+      const editor = shadow.querySelector<HTMLFormElement>(".aa-editor")!;
+      const edited = editor.querySelector<HTMLTextAreaElement>("textarea")!;
+      edited.value = "Edited comment";
+      edited.dispatchEvent(new KeyboardEvent("keydown", {
+        key: "Enter", bubbles: true, cancelable: true,
+      }));
+      await vi.waitFor(() => expect(shadow.querySelector(".aa-editor")).toBeNull());
+      expect((await transport.read()).annotations[0]?.comment).toBe("Edited comment");
     } finally {
       mounted.unmount();
       target.remove();

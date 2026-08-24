@@ -188,9 +188,25 @@ test("packed browser to file to CLI to browser loop, HMR and session security", 
   await expect.poll(() => page.evaluate(() =>
     window.__demoExtension?.studio?.getSnapshot().task.annotations[0]?.status
   )).toBe("completed");
-  await expect(shadow(page, '[aria-label="Annotation 1: edit"]')).toHaveCount(0);
+  const completedMarker = shadow(page, '[aria-label="Annotation 1: edit"]');
+  await expect(completedMarker).toHaveAttribute("data-status", "completed");
+  await expect(completedMarker).toHaveCSS("background-color", "rgb(109, 40, 217)");
+  await expect(completedMarker).toHaveText("1");
+  await expect(completedMarker.locator(".aa-marker-complete")).toBeVisible();
   expect(JSON.parse(cli("validate-task", "--json"))).toMatchObject({ ok: true, taskRevision: beforeComplete + 1 });
-  expect(cli("reopen", id)).toContain(`taskRevision ${beforeComplete + 2}`);
+  const remainingId = completedTask.annotations.find((entry: { status: string }) => entry.status === "open").annotationId;
+  const autoReload = page.waitForEvent("framenavigated", {
+    predicate: (frame) => frame === page.mainFrame(),
+    timeout: 15_000,
+  });
+  expect(cli("complete", remainingId, "--verified", "--summary", "Verified remaining annotation"))
+    .toContain(`taskRevision ${beforeComplete + 2}`);
+  await autoReload;
+  await expect(page.locator("#agent-annotations-root")).toHaveCount(1);
+  await expect.poll(() => page.evaluate(() =>
+    window.__demoExtension?.studio?.getSnapshot().task.status
+  )).toBe("completed");
+  expect(cli("reopen", id)).toContain(`taskRevision ${beforeComplete + 3}`);
   await expect.poll(() => page.evaluate(() =>
     document.getElementById("agent-annotations-root")?.shadowRoot
       ?.querySelector('[aria-label="Annotation 1: edit"]')?.getAttribute("data-status")
