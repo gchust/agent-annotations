@@ -1248,7 +1248,8 @@ describe("runtime-evidence-status", () => {
       const fallback = shadow.querySelector<HTMLTextAreaElement>(".aa-copy-fallback textarea")!;
       const output = fallback.value;
       expect(output).toContain("# Agent Annotations Handoff");
-      expect(output).toContain("Run the project-relevant typecheck and tests");
+      expect(output).toContain("run only the smallest check relevant to the changed files");
+      expect(output).toContain("if it reports annotation not found, continue without retrying");
       expect(output).toContain("agent-annotations validate-task --json");
       expect(output).toContain(
         "agent-annotations complete ann-1 --verified --summary-file .agent-annotations/agent-annotations-summary-ann-1.txt"

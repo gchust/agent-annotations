@@ -174,6 +174,18 @@ describe("public CLI processes", () => {
     expect(persisted).toContain("[REDACTED]");
   });
 
+  it("treats completion of an absent annotation as an idempotent skip", () => {
+    const root = fixture();
+    expect(run(root, ["complete", "ann-missing", "--verified", "--summary", "already absent"]))
+      .toBe("skipped ann-missing (annotation not found)\n");
+    expect(JSON.parse(run(root, ["print", "--json"]))).toMatchObject({
+      taskRevision: 0,
+      annotations: [{ annotationId: "ann-1", status: "open" }],
+    });
+    expect(runExpectingFailure(root, ["reopen", "ann-missing"]).stderr)
+      .toContain('annotation "ann-missing" not found');
+  });
+
   it("reads UTF-8 completion summaries from files with strict validation", () => {
     const completeFrom = (contents: string | Uint8Array, name = "summary.txt") => {
       const root = fixture();

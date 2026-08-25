@@ -111,7 +111,8 @@ test("keyboard-only Pick, Multi, Copy, List, and Collapse flows with visual evid
   expect(clipboard).toContain("Keyboard pick");
   expect(clipboard).toContain("Keyboard multi");
   expect(clipboard).toContain("# Agent Annotations Handoff");
-  expect(clipboard).toContain("Run the project-relevant typecheck and tests");
+  expect(clipboard).toContain("run only the smallest check relevant to the changed files");
+  expect(clipboard).toContain("if it reports annotation not found, continue without retrying");
   expect(clipboard).toContain("agent-annotations validate-task --json");
   expect(clipboard).toContain("agent-annotations complete ");
   expect(clipboard).toContain("--verified --summary-file");

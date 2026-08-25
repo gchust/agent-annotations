@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.5 - 2026-08-25
+
+- Made copied handoffs prioritize the smallest relevant check instead of the
+  full test suite, while preserving explicitly configured verification commands.
+- Made completion idempotent when an annotation has already disappeared, so
+  stale handoffs can continue without retries; `reopen` remains strict.
+
 ## 0.1.4 - 2026-08-25
 
 - Added optional host-provided brand colors for annotation accents, including

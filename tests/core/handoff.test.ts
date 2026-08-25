@@ -36,9 +36,12 @@ describe("agent handoff formatter", () => {
     const instructions = output.split("## Instructions\n\n")[1]!.split("\n\n## Annotations")[0]!;
     expect(instructions.match(/^- /gm)).toHaveLength(4);
     expect(instructions.indexOf("complete command below")).toBeLessThan(
-      instructions.indexOf("typecheck and tests")
+      instructions.indexOf("Keep verification fast")
     );
-    expect(output).toContain("Run the project-relevant typecheck and tests");
+    expect(output).toContain("Use the annotations below as the work list");
+    expect(output).toContain("if it reports annotation not found, continue without retrying");
+    expect(output).toContain("run only the smallest check relevant to the changed files");
+    expect(output).toContain("do not run the full test suite unless explicitly requested");
     expect(output).toContain("agent-annotations validate-task --json");
     expect(output).toContain("editing active-task.json is not a solution");
     expect(output).toContain(

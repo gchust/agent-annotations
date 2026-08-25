@@ -170,6 +170,10 @@ const mutate = async (command: "complete" | "reopen", args: string[], runtimeRoo
   const current = task(runtimeRoot);
   const { annotationId, operation } = parseMutationArgs(command, args);
   if (!current.annotations.some((annotation) => annotation.annotationId === annotationId)) {
+    if (command === "complete") {
+      process.stdout.write(`skipped ${annotationId} (annotation not found)\n`);
+      return;
+    }
     fail(`annotation "${annotationId}" not found`);
   }
   const next = await new FileTaskStore(runtimeRoot).mutate({

@@ -217,7 +217,9 @@ agent-annotations evidence [--json|--prune [--json]]
 parser and reports the task id, revision, schema, and valid state; it never
 claims anything about the browser or the running dev server. `--json` prints
 exactly one parseable JSON value on stdout; without it the CLI prints stable
-human-readable text; errors go to stderr with stable exit codes.
+human-readable text; errors go to stderr with stable exit codes. Completing an
+annotation that is no longer present is an idempotent success reported as
+`skipped`; `reopen` remains strict.
 
 `status [--json] [--check]` reports task validity, session presence, all fresh
 browser runtimes, the selected runtime, browser
@@ -253,15 +255,19 @@ loop is:
 # 1. the agent edits real source files (never active-task.json)
 # 2. as soon as relevant source changed, summarize the implementation and complete
 agent-annotations complete <annotation-id> --verified --summary-file <path>
-# 3. run the project-relevant typecheck and tests
+# 3. run only the smallest relevant check; skip the full suite unless requested
 # 4. confirm the completed task file itself is valid
 agent-annotations validate-task --json
 ```
 
-The handoff is configurable and strictly bounded (`handoff: { command,
-verificationCommands, includeCompleted }` on the Vite plugin and
-`mountAgentAnnotations()`); it only formats text and never executes
-anything. The default includes open annotations only.
+The copied annotations remain the work list even if runtime state changes while
+the edit is in progress. A missing annotation at completion is non-fatal and is
+not retried. The handoff is configurable and strictly bounded (`handoff: {
+command, verificationCommands, includeCompleted }` on the Vite plugin and
+`mountAgentAnnotations()`); it only formats text and never executes anything.
+Explicit `verificationCommands` still run as requested. The default includes
+open annotations only and asks for the smallest relevant check, not a full test
+suite.
 
 The workspace root and the runtime data directory are resolved separately.
 `--root`/`AGENT_ANNOTATIONS_ROOT` set the workspace root; `--dir`/

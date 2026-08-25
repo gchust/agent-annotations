@@ -53,10 +53,10 @@ package, Node consumer, and browser consumer checks do not repack it.
 - `createAgentAnnotationsTask`, `parseAgentAnnotationsTask`,
   `validateAgentAnnotationsTask`, and `isAgentAnnotationsTask` own schema v1.
 - `formatAgentAnnotationsHandoff(task, options)` is the default Copy output:
-  a pure Code-Agent execution contract (instructions, browser-applied source
-  revision baseline or exactly `source revision unavailable`, evidence refs,
-  pinned runtime/route/annotation/diagnostics baselines, and exact
-  `complete --verified --summary-file` commands per annotation).
+  a pure Code-Agent execution contract containing a snapshot work list,
+  evidence refs, fast focused-verification guidance, and exact
+  `complete --verified --summary-file` commands per annotation. A missing
+  annotation at completion is treated as an already-closed, non-fatal result.
   `validateAgentAnnotationsHandoffConfig(input)` strictly bounds the
   JSON-safe `handoff` option (`command`, `verificationCommands`,
   `includeCompleted`) and rejects unknown keys, control characters, and
@@ -226,6 +226,9 @@ The `agent-annotations` bin exposes `list`, `complete`, `reopen`, `print`,
 orphan sweep of `<runtimeRoot>/evidence` (only unreferenced regular files,
 never symlinks, with a grace window for newly written evidence) and reports
 deleted/skipped/error counts plus safe relative refs.
+`complete` exits successfully with a `skipped` message when its annotation is
+already absent, making stale handoff completion idempotent; `reopen` still
+reports a missing annotation as an error.
 `validate-task` strictly validates the persisted task file with
 `parseAgentAnnotationsTask()` and reports task id, revision, schema, and valid
 state; it does not claim anything about browser or dev-server state. Commands
