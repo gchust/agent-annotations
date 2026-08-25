@@ -1029,6 +1029,42 @@ describe("runtime-host-ui", () => {
     expect(mediaListeners.size).toBe(0);
   });
 
+  it("applies, updates, and clears the host brand color", async () => {
+    let brandColor: string | undefined = "#1677FF";
+    let notify!: () => void;
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(),
+      extensions: [defineClientExtension({
+        id: "brand-host",
+        apiVersion: 1,
+        host: {
+          brandColor: () => brandColor,
+          subscribe: (listener) => {
+            notify = listener;
+            return () => undefined;
+          },
+        },
+      })],
+    });
+    const style = document.getElementById("agent-annotations-root")!.style;
+    expect(style.getPropertyValue("--aa-accent")).toBe("#1677ff");
+    expect(style.getPropertyValue("--aa-accent-text")).toBe("#000000");
+
+    brandColor = "#6d28d9";
+    notify();
+    expect(style.getPropertyValue("--aa-accent")).toBe("#6d28d9");
+    expect(style.getPropertyValue("--aa-accent-hover")).toMatch(/^#[\da-f]{6}$/);
+    expect(style.getPropertyValue("--aa-accent-text")).toBe("#ffffff");
+
+    brandColor = undefined;
+    notify();
+    expect(style.getPropertyValue("--aa-accent")).toBe("");
+    expect(style.getPropertyValue("--aa-accent-hover")).toBe("");
+    expect(style.getPropertyValue("--aa-accent-text")).toBe("");
+    expect(style.getPropertyValue("--aa-accent-label")).toBe("");
+    mounted.unmount();
+  });
+
 
 
   it("preserves capture mode, open panel, and drafts across theme and locale changes", async () => {

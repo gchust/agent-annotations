@@ -315,6 +315,7 @@ describe("ClientExtensionRegistry", () => {
       { host: { navigate: "bad" } as never },
       { host: { subscribe: "bad" as never } },
       { host: { theme: "bad" as never } },
+      { host: { brandColor: "bad" as never } },
       { host: { appRoot: "bad" as never } },
       { setup: "bad" as never },
     ];

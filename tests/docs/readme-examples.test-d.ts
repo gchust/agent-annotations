@@ -30,6 +30,7 @@ const localeHost = defineClientExtension({
   apiVersion: 1,
   host: {
     locale: () => "zh-CN",
+    brandColor: () => "#1677ff",
     messages: { "Pick": "Select" },
   },
 });

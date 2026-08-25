@@ -51,6 +51,14 @@ export const createGuardedHostIntegration = (
       if (value !== "light" && value !== "dark" && value !== "system") throw new TypeError("invalid host theme");
       return value;
     }) : undefined,
+    brandColor: source.brandColor ? () => call<string | undefined>("brandColor", undefined, () => {
+      const value = source.brandColor!();
+      if (value === undefined) return undefined;
+      if (typeof value !== "string" || !/^#[\da-f]{6}$/i.test(value)) {
+        throw new TypeError("host brandColor must be #RRGGBB");
+      }
+      return value.toLowerCase();
+    }) : undefined,
     appRoot: source.appRoot ? () => call("appRoot", document.body, () => {
       const value = source.appRoot!();
       if (!value || typeof value !== "object" || (value.nodeType !== 1 && value.nodeType !== 9)) {
@@ -161,7 +169,26 @@ export const createHostController = (b: HostBindings): HostController => {
       : theme;
   };
   const applyTheme = (): void => {
-    b.hostElement().dataset.theme = effectiveTheme();
+    const hostElement = b.hostElement();
+    hostElement.dataset.theme = effectiveTheme();
+    const brandColor = b.host()?.brandColor?.();
+    for (const property of ["--aa-accent", "--aa-accent-hover", "--aa-accent-text", "--aa-accent-label"]) {
+      hostElement.style.removeProperty(property);
+    }
+    if (!brandColor) return;
+    const rgb = [1, 3, 5].map((offset) => parseInt(brandColor.slice(offset, offset + 2), 16));
+    const luminance = rgb
+      .map((channel) => channel / 255)
+      .map((channel) => channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4)
+      .reduce((total, channel, index) => total + channel * [0.2126, 0.7152, 0.0722][index]!, 0);
+    const text = luminance > 0.179 ? "#000000" : "#ffffff";
+    const hoverTarget = text === "#000000" ? 255 : 0;
+    const hover = `#${rgb.map((channel) => Math.round(channel * 0.88 + hoverTarget * 0.12)
+      .toString(16).padStart(2, "0")).join("")}`;
+    hostElement.style.setProperty("--aa-accent", brandColor);
+    hostElement.style.setProperty("--aa-accent-hover", hover);
+    hostElement.style.setProperty("--aa-accent-text", text);
+    hostElement.style.setProperty("--aa-accent-label", "var(--aa-text)");
   };
   const refreshSystemThemeListener = (): void => {
     const needsSystem = b.hostTheme() === "system";
@@ -208,11 +235,9 @@ export const createHostController = (b: HostBindings): HostController => {
     const nextTheme = b.host()?.theme?.() ?? "light";
     if (nextTheme !== b.hostTheme()) {
       b.setHostTheme(nextTheme);
-      refreshSystemThemeListener();
-      applyTheme();
-    } else {
-      refreshSystemThemeListener();
     }
+    refreshSystemThemeListener();
+    applyTheme();
     const nextLocale = b.host()?.locale?.() ?? (document.documentElement.lang || "en-US");
     const nextMessages = {
       ...localeMessages(nextLocale),

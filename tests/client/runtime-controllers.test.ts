@@ -306,6 +306,7 @@ describe("runtime controllers (focused factory contracts)", () => {
     const source = {
       locale: fault("locale"),
       theme: fault("theme"),
+      brandColor: () => "red",
       appRoot: fault("appRoot"),
       pageContext: fault("pageContext"),
       routeKey: fault("routeKey"),
@@ -322,6 +323,7 @@ describe("runtime controllers (focused factory contracts)", () => {
     const host = createGuardedHostIntegration("faulty.host", source, (method) => failures.push(method));
     expect(host.locale?.()).toBe(document.documentElement.lang || "en-US");
     expect(host.theme?.()).toBe("light");
+    expect(host.brandColor?.()).toBeUndefined();
     expect(host.appRoot?.()).toBe(document.body);
     expect(host.pageContext?.()).toEqual({});
     expect(host.routeKey?.()).toBeUndefined();
@@ -333,7 +335,7 @@ describe("runtime controllers (focused factory contracts)", () => {
     expect(dispose).toBeTypeOf("function");
     expect(() => dispose?.()).not.toThrow();
     expect(failures).toEqual([
-      "locale", "theme", "appRoot", "pageContext", "routeKey", "identity",
+      "locale", "theme", "brandColor", "appRoot", "pageContext", "routeKey", "identity",
       "messages", "navigate", "subscribe", "subscribe.dispose",
     ]);
   });

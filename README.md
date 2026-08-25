@@ -300,6 +300,7 @@ const localeHost = defineClientExtension({
   apiVersion: 1,
   host: {
     locale: () => "zh-CN",
+    brandColor: () => "#1677ff",
     messages: { "Pick": "Select" }, // overrides the built-in key
   },
 });
@@ -314,6 +315,11 @@ The public snapshot's `messages` are merged as
 builtin dictionary → registry messages → host `messages`, so a host can
 override any built-in key (`host.messages` above). With the Vite plugin,
 register the host extension through `clientExtensions` instead.
+
+`host.theme()` selects `"light"`, `"dark"`, or `"system"`; optional
+`host.brandColor()` supplies an opaque `#RRGGBB` accent. A host `subscribe()`
+notification re-reads both values, and returning `undefined` restores the
+default accent.
 
 A locale switch re-renders in place: the Studio never remounts and an open
 composer/editor draft survives. Multi-target annotations show `resolved/total`

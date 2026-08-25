@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.4 - 2026-08-25
+
+- Added optional host-provided brand colors for annotation accents, including
+  live updates and readable foreground colors in light and dark themes.
+
 ## 0.1.3 - 2026-08-24
 
 - Kept completed annotations visible with their original marker color and a

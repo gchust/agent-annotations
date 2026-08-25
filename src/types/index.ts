@@ -332,6 +332,7 @@ export interface HostIntegration {
   navigate?(routeKey: string): void;
   appRoot?(): Element | Document;
   theme?(): AgentAnnotationsHostTheme;
+  brandColor?(): string | undefined;
   subscribe?(listener: () => void): () => void;
   messages?: AgentAnnotationsLocaleMessages;
   identity?(element: Element): Record<string, string>;

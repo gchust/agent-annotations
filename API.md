@@ -133,7 +133,7 @@ controlled Node integrations.
   redactors per extension are composed deterministically in stable
   `(extensionId, redactorId)` order; duplicate `(extensionId, redactorId)` pairs
   are rejected.
-- `HostIntegration` may expose `pageContext()`, `routeKey()`, `locale()`, `theme()`, `appRoot()`,
+- `HostIntegration` may expose `pageContext()`, `routeKey()`, `locale()`, `theme()`, `brandColor()`, `appRoot()`,
   `navigate(routeKey)`, and a single unified `subscribe(listener)` notification.
   The registry retains the host extension ID, and the runtime guards every host
   callback, message access, and subscription disposer. Faults record one
@@ -149,10 +149,12 @@ controlled Node integrations.
   `pageContext()` is absent.
   `theme()` accepts `"light" | "dark" | "system"`; `system` follows
   `prefers-color-scheme` through a media listener that is bound while the system
-  theme is active and released on switch or unmount. `appRoot()` accepts an
+  theme is active and released on switch or unmount. `brandColor()` accepts an
+  opaque `#RRGGBB` accent or `undefined` to use the default; the runtime derives
+  a readable black or white foreground. `appRoot()` accepts an
   `Element` or `Document` and defaults to `document.body`; observers, frame
   scanning, and capture hits are scoped to it. One `subscribe` notification
-  re-reads route, locale, theme, and app root together; locale changes rebuild
+  re-reads route, locale, theme, brand color, and app root together; locale changes rebuild
   toolbar labels, tooltips, Help, and panel titles without remounting.
   Annotations persist the route key they were created on; markers render only on
   their own route. Without `subscribe`, the runtime observes `popstate`,
