@@ -22,7 +22,7 @@ export type HttpTaskTransportOptions = {
 const TOKEN_HEADER = "x-agent-annotations-token";
 const MIN_POLL_INTERVAL = 100;
 const MAX_POLL_INTERVAL = 10_000;
-const DEFAULT_POLL_INTERVAL = 500;
+const DEFAULT_POLL_INTERVAL = 5_000;
 
 export class HttpTaskTransport implements TaskTransport {
   readonly endpoint: string;

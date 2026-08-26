@@ -116,7 +116,7 @@ it("rejects poll intervals outside the finite integer range 100..10000", () => {
   }
   expect(make(100)().pollInterval).toBe(100);
   expect(make(10_000)().pollInterval).toBe(10_000);
-  expect(new HttpTaskTransport({ endpoint: "/__agent-annotations", token: "test" }).pollInterval).toBe(500);
+  expect(new HttpTaskTransport({ endpoint: "/__agent-annotations", token: "test" }).pollInterval).toBe(5_000);
 });
 
 it("switches to a new task id at revision 0 and ignores older revisions of the same task", async () => {
