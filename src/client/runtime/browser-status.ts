@@ -27,7 +27,7 @@ export type BrowserStatusBindings = {
   annotationHealth(): AnnotationHealth;
   resetResolutionSnapshots(): void;
   scheduleTimer(callback: () => void, delay: number): number;
-  reloadPage(): void;
+  reloadPage(): boolean;
 };
 
 const taskSourceFiles = (task: AgentAnnotationsTask): string[] => [
@@ -119,9 +119,11 @@ export const createBrowserStatusController = (b: BrowserStatusBindings) => {
     b.resetResolutionSnapshots();
     sendHeartbeat();
     if (previous.taskId === next.taskId && previous.status === "active" && next.status === "completed") {
-      b.scheduleTimer(() => {
-        if (b.task().taskId === next.taskId && b.task().status === "completed") b.reloadPage();
-      }, 1_000);
+      const reloadCompletedTask = () => {
+        if (b.task().taskId !== next.taskId || b.task().status !== "completed") return;
+        if (!b.reloadPage()) b.scheduleTimer(reloadCompletedTask, 1_000);
+      };
+      b.scheduleTimer(reloadCompletedTask, 1_000);
     }
   };
 

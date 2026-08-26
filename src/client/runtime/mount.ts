@@ -188,7 +188,11 @@ export async function mountAgentAnnotations(
     annotationHealth: () => annotationHealth(),
     resetResolutionSnapshots: () => resetHeartbeatResolutionSnapshots(),
     scheduleTimer,
-    reloadPage: () => window.location.reload(),
+    reloadPage: () => {
+      if (document.querySelector("vite-error-overlay")) return false;
+      window.location.reload();
+      return true;
+    },
   });
   const {
     runtimeId,

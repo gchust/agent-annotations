@@ -108,7 +108,7 @@ describe("runtime controllers (focused factory contracts)", () => {
       annotationHealth: () => [],
       resetResolutionSnapshots: () => undefined,
       scheduleTimer: () => 0,
-      reloadPage: () => undefined,
+      reloadPage: () => true,
     });
 
     const first = controller();
@@ -147,13 +147,13 @@ describe("runtime controllers (focused factory contracts)", () => {
       annotationHealth: () => [],
       resetResolutionSnapshots: () => undefined,
       scheduleTimer: () => 0,
-      reloadPage: () => undefined,
+      reloadPage: () => true,
     });
     controller.reportBrowserUpdate();
     expect(controller.browserUpdateRevision()).toBe(Number.MAX_SAFE_INTEGER);
   });
 
-  it("reloads once after the current task completes without looping on initial load", () => {
+  it("reloads after the current task completes and waits out build errors", () => {
     const completed = taskFixture({
       status: "completed",
       annotations: [annotationFixture({
@@ -163,7 +163,8 @@ describe("runtime controllers (focused factory contracts)", () => {
     });
     const state = { task: completed };
     const timers: Array<() => void> = [];
-    const reloadPage = vi.fn();
+    let reloadBlocked = true;
+    const reloadPage = vi.fn(() => !reloadBlocked);
     const controller = createBrowserStatusController({
       config: null,
       task: () => state.task,
@@ -187,6 +188,11 @@ describe("runtime controllers (focused factory contracts)", () => {
     controller.setTask({ ...completed, taskRevision: 4 });
     timers[1]!();
     expect(reloadPage).toHaveBeenCalledOnce();
+    expect(timers).toHaveLength(3);
+    reloadBlocked = false;
+    timers[2]!();
+    expect(reloadPage).toHaveBeenCalledTimes(2);
+    expect(timers).toHaveLength(3);
   });
 
   it("serializes heartbeats and replaces pending work with the latest snapshot", async () => {
@@ -225,7 +231,7 @@ describe("runtime controllers (focused factory contracts)", () => {
       annotationHealth: () => [],
       resetResolutionSnapshots: () => undefined,
       scheduleTimer: () => 0,
-      reloadPage: () => undefined,
+      reloadPage: () => true,
     });
 
     controller.reportBrowserUpdate();
@@ -280,7 +286,7 @@ describe("runtime controllers (focused factory contracts)", () => {
       annotationHealth: () => [],
       resetResolutionSnapshots: () => undefined,
       scheduleTimer: () => 0,
-      reloadPage: () => undefined,
+      reloadPage: () => true,
     });
 
     controller.sendHeartbeat();

@@ -4,6 +4,8 @@
 
 - Reduced the default task polling frequency from 500 ms to 5 seconds, matching
   the browser heartbeat interval.
+- Deferred the automatic completed-task reload while Vite is showing a build
+  error, so failed source changes are never reported as browser-applied.
 
 ## 0.1.5 - 2026-08-25
 

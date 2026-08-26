@@ -154,9 +154,8 @@ test("browser status health and HMR-applied source revision ordering", async ({ 
   const baselineGeneration = baselineStatus.browserUpdateRevision;
   const before = readFileSync(card, "utf8");
   try {
-    // A transform error keeps the old module running. Completion may schedule
-    // a reload and advance the browser generation, but it cannot claim the
-    // failed source revision as applied.
+    // A transform error keeps the old module running. Completion defers its
+    // reload until the error clears, so neither applied field can advance.
     writeFileSync(card, `${before}\nexport const broken = ;\n`);
     await page.locator("vite-error-overlay").waitFor();
     const failedBaseline = statusJson();
@@ -170,7 +169,7 @@ test("browser status health and HMR-applied source revision ordering", async ({ 
     cli("complete", task.annotations[0].annotationId, "--verified", "--summary", "Failed HMR remains unapplied");
     await expect.poll(() => statusJson().taskSynchronized, { timeout: 15_000 }).toBe(true);
     const failedUpdate = statusJson();
-    expect(failedUpdate.browserUpdateRevision).toBeGreaterThanOrEqual(failedBaseline.browserUpdateRevision);
+    expect(failedUpdate.browserUpdateRevision).toBe(failedBaseline.browserUpdateRevision);
     expect(failedUpdate.browserReferencedSourceRevision).toBe(failedBaseline.browserReferencedSourceRevision);
 
     // Modify the rendered Card content: the browser must report the new
