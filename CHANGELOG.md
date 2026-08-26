@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.6 - 2026-08-26
+
+- Reduced the default task polling frequency from 500 ms to 5 seconds, matching
+  the browser heartbeat interval.
+
 ## 0.1.5 - 2026-08-25
 
 - Made copied handoffs prioritize the smallest relevant check instead of the

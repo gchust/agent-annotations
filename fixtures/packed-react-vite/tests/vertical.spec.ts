@@ -19,6 +19,7 @@ const shadow = (page: import("@playwright/test").Page, selector: string) =>
   page.locator(`#agent-annotations-root >> ${selector}`);
 
 test("packed browser to file to CLI to browser loop, HMR and session security", async ({ page, context }) => {
+  test.setTimeout(60_000);
   const privacySentinel = "G03_OAUTH_RESET_SIGNED_URL_SENTINEL";
   await page.goto(`/?code=${privacySentinel}&reset=${privacySentinel}&signedUrl=${privacySentinel}#/customers`);
   await expect(page.locator("#agent-annotations-root")).toHaveCount(1);
