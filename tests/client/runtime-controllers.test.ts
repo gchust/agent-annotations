@@ -108,7 +108,6 @@ describe("runtime controllers (focused factory contracts)", () => {
       annotationHealth: () => [],
       resetResolutionSnapshots: () => undefined,
       scheduleTimer: () => 0,
-      reloadPage: () => true,
     });
 
     const first = controller();
@@ -147,52 +146,9 @@ describe("runtime controllers (focused factory contracts)", () => {
       annotationHealth: () => [],
       resetResolutionSnapshots: () => undefined,
       scheduleTimer: () => 0,
-      reloadPage: () => true,
     });
     controller.reportBrowserUpdate();
     expect(controller.browserUpdateRevision()).toBe(Number.MAX_SAFE_INTEGER);
-  });
-
-  it("reloads after the current task completes and waits out build errors", () => {
-    const completed = taskFixture({
-      status: "completed",
-      annotations: [annotationFixture({
-        status: "completed",
-        completedAt: "2026-08-12T12:05:00.000Z",
-      })],
-    });
-    const state = { task: completed };
-    const timers: Array<() => void> = [];
-    let reloadBlocked = true;
-    const reloadPage = vi.fn(() => !reloadBlocked);
-    const controller = createBrowserStatusController({
-      config: null,
-      task: () => state.task,
-      setTaskValue: (task) => { state.task = task; },
-      routeKey: () => "/settings",
-      destroyed: () => false,
-      annotationHealth: () => [],
-      resetResolutionSnapshots: () => undefined,
-      scheduleTimer: (callback) => { timers.push(callback); return timers.length; },
-      reloadPage,
-    });
-
-    expect(timers).toHaveLength(0);
-    controller.setTask(taskFixture({ taskRevision: 1 }));
-    controller.setTask({ ...completed, taskRevision: 2 });
-    expect(timers).toHaveLength(1);
-    controller.setTask(taskFixture({ taskRevision: 3 }));
-    timers[0]!();
-    expect(reloadPage).not.toHaveBeenCalled();
-
-    controller.setTask({ ...completed, taskRevision: 4 });
-    timers[1]!();
-    expect(reloadPage).toHaveBeenCalledOnce();
-    expect(timers).toHaveLength(3);
-    reloadBlocked = false;
-    timers[2]!();
-    expect(reloadPage).toHaveBeenCalledTimes(2);
-    expect(timers).toHaveLength(3);
   });
 
   it("serializes heartbeats and replaces pending work with the latest snapshot", async () => {
@@ -231,7 +187,6 @@ describe("runtime controllers (focused factory contracts)", () => {
       annotationHealth: () => [],
       resetResolutionSnapshots: () => undefined,
       scheduleTimer: () => 0,
-      reloadPage: () => true,
     });
 
     controller.reportBrowserUpdate();
@@ -286,7 +241,6 @@ describe("runtime controllers (focused factory contracts)", () => {
       annotationHealth: () => [],
       resetResolutionSnapshots: () => undefined,
       scheduleTimer: () => 0,
-      reloadPage: () => true,
     });
 
     controller.sendHeartbeat();

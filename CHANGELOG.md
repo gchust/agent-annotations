@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.7 - 2026-08-28
+
+- Replaced task polling with Vite HMR task-update events and removed the
+  completed-task page reload.
+- Kept native history tracking active alongside host subscriptions, so an
+  annotation saves against the current SPA route.
+- Made the collapsed toolbar a draggable annotation icon with an open-count
+  badge and viewport-safe positioning.
+
 ## 0.1.6 - 2026-08-26
 
 - Reduced the default task polling frequency from 500 ms to 5 seconds, matching

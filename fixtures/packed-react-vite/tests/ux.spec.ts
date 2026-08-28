@@ -42,6 +42,12 @@ test("keyboard-only Pick, Multi, Copy, List, and Collapse flows with visual evid
   await page.keyboard.press("Control+Alt+K");
   await expect(shadow(page, ".aa-dock")).toHaveAttribute("data-collapsed", "true");
   await expect(shadow(page, ".aa-collapsed-count")).toBeVisible();
+  await expect(shadow(page, ".aa-dock > button")).toHaveCount(1);
+  const minimizedBox = await shadow(page, ".aa-collapsed-count").boundingBox();
+  const initialViewport = page.viewportSize()!;
+  expect(minimizedBox).toMatchObject({ width: 40, height: 40 });
+  expect(initialViewport.width - minimizedBox!.x - minimizedBox!.width).toBe(20);
+  expect(initialViewport.height - minimizedBox!.y - minimizedBox!.height).toBe(20);
   await page.screenshot({ path: shot("collapsed") });
 
   // A capture hotkey while collapsed auto-expands the dock and starts pick.
@@ -141,7 +147,7 @@ test("keyboard-only Pick, Multi, Copy, List, and Collapse flows with visual evid
   await page.screenshot({ path: shot("list") });
   await page.keyboard.press("Escape");
 
-  // Keyboard-only Collapse: collapsed chrome shows the open count; K restores.
+  // Collapsed chrome is one draggable icon with an open-count badge.
   await page.keyboard.press("Control+Alt+K");
   await expect(shadow(page, ".aa-dock")).toHaveAttribute("data-collapsed", "true");
   await expect(shadow(page, ".aa-collapsed-count")).toHaveText("2");
@@ -150,11 +156,28 @@ test("keyboard-only Pick, Multi, Copy, List, and Collapse flows with visual evid
   // first: the count sits at the same coordinates the cursor already hovers.
   await page.mouse.move(10, 10);
   await shadow(page, ".aa-collapsed-count").hover();
-  await expect(shadow(page, '[role="tooltip"]')).toContainText("2 open annotations");
+  await expect(shadow(page, '[role="tooltip"]')).toContainText("Expand toolbar (2 open annotations)");
   await page.screenshot({ path: shot("collapsed") });
-  await page.keyboard.press("Control+Alt+K");
+  const minimized = shadow(page, ".aa-collapsed-count");
+  const beforeMinimizedDrag = await minimized.boundingBox();
+  await page.mouse.move(beforeMinimizedDrag!.x + 20, beforeMinimizedDrag!.y + 20);
+  await page.mouse.down();
+  await page.mouse.move(beforeMinimizedDrag!.x - 100, beforeMinimizedDrag!.y - 60, { steps: 3 });
+  await page.mouse.up();
+  await expect(shadow(page, ".aa-dock")).toHaveAttribute("data-collapsed", "true");
+  const afterMinimizedDrag = await minimized.boundingBox();
+  expect(afterMinimizedDrag!.x).toBeLessThan(beforeMinimizedDrag!.x - 100);
+  expect(afterMinimizedDrag!.y).toBeLessThan(beforeMinimizedDrag!.y - 40);
+  await minimized.click();
   await expect(shadow(page, ".aa-dock")).toHaveAttribute("data-collapsed", "false");
   await expect(shadow(page, ".aa-collapsed-count")).toHaveCount(0);
+  const expandedAfterMinimizedDrag = await shadow(page, ".aa-dock").boundingBox();
+  expect(expandedAfterMinimizedDrag!.x + expandedAfterMinimizedDrag!.width)
+    .toBeLessThanOrEqual(page.viewportSize()!.width);
+  await page.keyboard.press("Control+Alt+K");
+  const restoredMinimized = await shadow(page, ".aa-collapsed-count").boundingBox();
+  expect(Math.abs(restoredMinimized!.x - afterMinimizedDrag!.x)).toBeLessThan(2);
+  await shadow(page, ".aa-collapsed-count").click();
 
   // Dock position survives a full reload and clamps after a resize.
   const grip = shadow(page, ".aa-grip");

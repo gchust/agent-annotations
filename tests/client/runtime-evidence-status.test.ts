@@ -116,7 +116,7 @@ describe("runtime-evidence-status", () => {
 
 
 
-  it("applies subscribed file revisions and disposes the transport poll", async () => {
+  it("applies subscribed file revisions and disposes the transport subscription", async () => {
     vi.useFakeTimers();
     const task = await new MemoryTaskTransport().read();
     let publish!: (task: AgentAnnotationsTask) => void;
@@ -191,10 +191,10 @@ describe("runtime-evidence-status", () => {
     collapse.click();
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(mounted.api.getSnapshot().collapsed).toBe(true);
-    expect(shadow.querySelectorAll(".aa-action:not([data-toggle=true])")).toHaveLength(8);
+    expect(shadow.querySelectorAll(".aa-action")).toHaveLength(0);
     expect(shadow.querySelector(".aa-dock")?.getAttribute("data-collapsed")).toBe("true");
     shadow
-      .querySelector<HTMLButtonElement>('[aria-label^="Collapse toolbar"]')!
+      .querySelector<HTMLButtonElement>('[aria-label^="Expand toolbar"]')!
       .click();
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(mounted.api.getSnapshot().collapsed).toBe(false);
@@ -1200,7 +1200,7 @@ describe("runtime-evidence-status", () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
       textarea = shadow.querySelector<HTMLTextAreaElement>(".aa-editor textarea")!;
       expect(textarea.value).toBe("Draft for A");
-      shadow.querySelector<HTMLButtonElement>('[aria-label^="Collapse toolbar"]')!.click();
+      shadow.querySelector<HTMLButtonElement>('[aria-label^="Expand toolbar"]')!.click();
       await new Promise((resolve) => setTimeout(resolve, 0));
       // Switching to another annotation must never inherit the previous draft.
       mounted.api.commands.markers.focus("ann-b");

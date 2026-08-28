@@ -188,11 +188,6 @@ export async function mountAgentAnnotations(
     annotationHealth: () => annotationHealth(),
     resetResolutionSnapshots: () => resetHeartbeatResolutionSnapshots(),
     scheduleTimer,
-    reloadPage: () => {
-      if (document.querySelector("vite-error-overlay")) return false;
-      window.location.reload();
-      return true;
-    },
   });
   const {
     runtimeId,
@@ -788,9 +783,8 @@ export async function mountAgentAnnotations(
             commit();
             scheduleFrame(() => {
               if (returnAction) {
-                root
-                  .querySelector<HTMLElement>(`[data-action-id="${returnAction}"]`)
-                  ?.focus();
+                (root.querySelector<HTMLElement>(`[data-action-id="${returnAction}"]`)
+                  ?? root.querySelector<HTMLElement>(".aa-collapsed-count"))?.focus();
               }
             });
           }
@@ -1143,11 +1137,9 @@ export async function mountAgentAnnotations(
     if (!dock || !dockPosition) return;
     const left = Math.max(0, Math.min(innerWidth - dock.offsetWidth, dockPosition.left));
     const top = Math.max(0, Math.min(innerHeight - dock.offsetHeight, dockPosition.top));
-    if (left !== dockPosition.left || top !== dockPosition.top) {
-      dockPosition = { left, top };
-    }
-    dock.style.left = `${dockPosition.left}px`;
-    dock.style.top = `${dockPosition.top}px`;
+    dock.style.left = `${left}px`;
+    dock.style.right = "auto";
+    dock.style.top = `${top}px`;
     dock.style.bottom = "auto";
   };
   const positionPanel = () => {
@@ -1202,10 +1194,10 @@ export async function mountAgentAnnotations(
       top: Math.max(0, Math.min(innerHeight - dock.offsetHeight, drag.top + event.clientY - drag.y)),
     };
     dock.style.left = `${dockPosition.left}px`;
+    dock.style.right = "auto";
     dock.style.top = `${dockPosition.top}px`;
     dock.style.bottom = "auto";
-    const grip = root.querySelector<HTMLElement>(".aa-grip");
-    if (grip) positionTooltip(grip);
+    positionTooltip(event.currentTarget);
     positionPanel();
     positionMultiComplete();
   };
@@ -1230,6 +1222,7 @@ export async function mountAgentAnnotations(
     localized,
     showTooltip,
     hideTooltip,
+    clampDockPosition,
     positionPanel,
     executeContribution,
     setCollapsed,
@@ -1336,33 +1329,30 @@ export async function mountAgentAnnotations(
   // after every setup attempt has settled, so a rolled-back failed host can
   // never leak a subscription or intercept route/history behavior.
   const hostSubscription = host?.subscribeChanges(() => applyHostChange()) ?? null;
-  if (hostSubscription) {
-    cleanups.push(hostSubscription);
-  } else {
-    const onRouteEvent = () => refreshRoute();
-    window.addEventListener("popstate", onRouteEvent);
-    window.addEventListener("hashchange", onRouteEvent);
-    const originalPushState = history.pushState;
-    const originalReplaceState = history.replaceState;
-    const wrap = (
-      original: typeof history.pushState
-    ): typeof history.pushState =>
-      function (this: History, ...args: Parameters<typeof history.pushState>) {
-        const result = original.apply(this, args);
-        refreshRoute();
-        return result;
-      };
-    const pushState = wrap(originalPushState);
-    const replaceState = wrap(originalReplaceState);
-    history.pushState = pushState;
-    history.replaceState = replaceState;
-    cleanups.push(() => {
-      window.removeEventListener("popstate", onRouteEvent);
-      window.removeEventListener("hashchange", onRouteEvent);
-      if (history.pushState === pushState) history.pushState = originalPushState;
-      if (history.replaceState === replaceState) history.replaceState = originalReplaceState;
-    });
-  }
+  if (hostSubscription) cleanups.push(hostSubscription);
+  const onRouteEvent = () => refreshRoute();
+  window.addEventListener("popstate", onRouteEvent);
+  window.addEventListener("hashchange", onRouteEvent);
+  const originalPushState = history.pushState;
+  const originalReplaceState = history.replaceState;
+  const wrap = (
+    original: typeof history.pushState
+  ): typeof history.pushState =>
+    function (this: History, ...args: Parameters<typeof history.pushState>) {
+      const result = original.apply(this, args);
+      refreshRoute();
+      return result;
+    };
+  const pushState = wrap(originalPushState);
+  const replaceState = wrap(originalReplaceState);
+  history.pushState = pushState;
+  history.replaceState = replaceState;
+  cleanups.push(() => {
+    window.removeEventListener("popstate", onRouteEvent);
+    window.removeEventListener("hashchange", onRouteEvent);
+    if (history.pushState === pushState) history.pushState = originalPushState;
+    if (history.replaceState === replaceState) history.replaceState = originalReplaceState;
+  });
   // The browser status loop starts only after every setup step succeeded, so
   // a failed mount can never persist a browserConnected state.
   scheduleBrowserHeartbeat();

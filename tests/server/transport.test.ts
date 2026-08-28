@@ -6,9 +6,16 @@ import { HttpTaskTransport } from "../../src/server/transport.js";
 import { taskFixture } from "../core/test-data.js";
 
 afterEach(() => {
-  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
+
+const taskUpdate = () => window.dispatchEvent(new Event("agent-annotations:task-update"));
+
+const deferred = <T>() => {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => { resolve = done; });
+  return { promise, resolve };
+};
 
 const stubTaskResponse = (task: unknown, status = 200) =>
   new Response(JSON.stringify(status === 200 ? { task } : { error: "revision_conflict", task }), {
@@ -16,8 +23,7 @@ const stubTaskResponse = (task: unknown, status = 200) =>
     headers: { "content-type": "application/json" },
   });
 
-it("does not miss a file revision changed around initial subscription", async () => {
-  vi.useFakeTimers();
+it("requests a task only after a task-update event", async () => {
   let task = taskFixture({ taskRevision: 0 });
   vi.stubGlobal("fetch", vi.fn(async () => stubTaskResponse(task)));
   const transport = new HttpTaskTransport({ endpoint: "/__agent-annotations", token: "test" });
@@ -25,10 +31,12 @@ it("does not miss a file revision changed around initial subscription", async ()
   const listener = vi.fn();
 
   const unsubscribe = transport.subscribe(listener);
+  await Promise.resolve();
+  expect(fetch).toHaveBeenCalledTimes(1);
   task = { ...task, taskRevision: 1 };
-  await vi.runOnlyPendingTimersAsync();
+  taskUpdate();
 
-  expect(listener).toHaveBeenCalledWith(expect.objectContaining({ taskRevision: 1 }));
+  await vi.waitFor(() => expect(listener).toHaveBeenCalledWith(expect.objectContaining({ taskRevision: 1 })));
   expect(fetch).toHaveBeenCalledWith(
     "/__agent-annotations/task",
     expect.objectContaining({
@@ -65,94 +73,88 @@ it("throws a typed RevisionConflictError with the latest task on every 409", asy
   expect((evidenceError as RevisionConflictError).expectedRevision).toBe(2);
 });
 
-it("never delivers a stale revision from a late poll", async () => {
-  vi.useFakeTimers();
+it("never delivers a stale revision from a task-update event", async () => {
   let task = taskFixture({ taskRevision: 1 });
   vi.stubGlobal("fetch", vi.fn(async () => stubTaskResponse(task)));
-  const transport = new HttpTaskTransport({ endpoint: "/__agent-annotations", token: "test", pollInterval: 100 });
+  const transport = new HttpTaskTransport({ endpoint: "/__agent-annotations", token: "test" });
   const listener = vi.fn();
-  transport.subscribe(listener);
-  await vi.runOnlyPendingTimersAsync();
-  expect(listener).toHaveBeenCalledWith(expect.objectContaining({ taskRevision: 1 }));
+  const unsubscribe = transport.subscribe(listener);
+  taskUpdate();
+  await vi.waitFor(() => expect(listener).toHaveBeenCalledWith(expect.objectContaining({ taskRevision: 1 })));
   listener.mockClear();
   task = { ...task, taskRevision: 0 };
-  await vi.runOnlyPendingTimersAsync();
+  taskUpdate();
+  await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
   expect(listener).not.toHaveBeenCalled();
+  unsubscribe();
 });
 
-it("keeps at most one poll in flight and stops all traffic after unsubscribe", async () => {
-  vi.useFakeTimers();
+it("coalesces task-update bursts and stops all traffic after unsubscribe", async () => {
   let inFlight = 0;
   let peak = 0;
-  let release!: () => void;
-  vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
-    if (init?.method === "POST") return new Response("{}", { status: 200 });
+  const requests: Array<ReturnType<typeof deferred<Response>>> = [];
+  vi.stubGlobal("fetch", vi.fn((_url: string) => {
     inFlight += 1;
     peak = Math.max(peak, inFlight);
-    await new Promise<void>((resolve) => { release = resolve; });
-    inFlight -= 1;
-    return stubTaskResponse(taskFixture());
+    const request = deferred<Response>();
+    requests.push(request);
+    return request.promise.finally(() => { inFlight -= 1; });
   }));
-  const transport = new HttpTaskTransport({ endpoint: "/__agent-annotations", token: "test", pollInterval: 100 });
-  const unsubscribe = transport.subscribe(vi.fn());
-  await vi.advanceTimersByTimeAsync(1_000);
+  const transport = new HttpTaskTransport({ endpoint: "/__agent-annotations", token: "test" });
+  const listener = vi.fn();
+  const unsubscribe = transport.subscribe(listener);
+  taskUpdate();
+  taskUpdate();
+  taskUpdate();
+  expect(requests).toHaveLength(1);
   expect(peak).toBe(1);
-  const callsBefore = vi.mocked(fetch).mock.calls.length;
+  requests[0]!.resolve(stubTaskResponse(taskFixture({ taskRevision: 1 })));
+  await vi.waitFor(() => expect(requests).toHaveLength(2));
+  expect(peak).toBe(1);
+  requests[1]!.resolve(stubTaskResponse(taskFixture({ taskRevision: 2 })));
+  await vi.waitFor(() => expect(listener).toHaveBeenCalledTimes(2));
   unsubscribe();
-  release();
-  await vi.advanceTimersByTimeAsync(5_000);
-  expect(vi.mocked(fetch).mock.calls.length).toBe(callsBefore);
-  expect(vi.getTimerCount()).toBe(0);
-});
-
-it("rejects poll intervals outside the finite integer range 100..10000", () => {
-  const make = (pollInterval: unknown) => () => new HttpTaskTransport({
-    endpoint: "/__agent-annotations",
-    token: "test",
-    pollInterval: pollInterval as number,
-  });
-  for (const pollInterval of [0, 50, 99, 10001, -1, 1.5, NaN, Infinity, Number.NEGATIVE_INFINITY, "500"]) {
-    expect(make(pollInterval)).toThrow(TypeError);
-  }
-  expect(make(100)().pollInterval).toBe(100);
-  expect(make(10_000)().pollInterval).toBe(10_000);
-  expect(new HttpTaskTransport({ endpoint: "/__agent-annotations", token: "test" }).pollInterval).toBe(5_000);
+  taskUpdate();
+  await Promise.resolve();
+  expect(requests).toHaveLength(2);
 });
 
 it("switches to a new task id at revision 0 and ignores older revisions of the same task", async () => {
-  vi.useFakeTimers();
   let task = taskFixture({ taskId: "task-a", taskRevision: 12 });
   vi.stubGlobal("fetch", vi.fn(async () => stubTaskResponse(task)));
-  const transport = new HttpTaskTransport({ endpoint: "/__agent-annotations", token: "test", pollInterval: 100 });
+  const transport = new HttpTaskTransport({ endpoint: "/__agent-annotations", token: "test" });
   const listener = vi.fn();
   const unsubscribe = transport.subscribe(listener);
-  await vi.runOnlyPendingTimersAsync();
+  taskUpdate();
+  await vi.waitFor(() => expect(listener).toHaveBeenCalledTimes(1));
   expect(listener).toHaveBeenLastCalledWith(expect.objectContaining({ taskId: "task-a", taskRevision: 12 }));
   listener.mockClear();
   // The same task id with an older revision is ignored.
   task = { ...task, taskId: "task-a", taskRevision: 10 };
-  await vi.runOnlyPendingTimersAsync();
+  taskUpdate();
+  await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
   expect(listener).not.toHaveBeenCalled();
   // A replacement task id arrives with revision 0 and must replace task-a@12.
   task = { ...task, taskId: "task-b", taskRevision: 0 };
-  await vi.runOnlyPendingTimersAsync();
-  expect(listener).toHaveBeenCalledWith(expect.objectContaining({ taskId: "task-b", taskRevision: 0 }));
+  taskUpdate();
+  await vi.waitFor(() => expect(listener).toHaveBeenCalledWith(expect.objectContaining({ taskId: "task-b", taskRevision: 0 })));
   listener.mockClear();
   // The same replacement at an equal revision is ignored.
   task = { ...task, taskId: "task-b", taskRevision: 0 };
-  await vi.runOnlyPendingTimersAsync();
+  taskUpdate();
+  await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(4));
   expect(listener).not.toHaveBeenCalled();
   unsubscribe();
 });
 
 it("does not re-deliver the revision returned by a successful mutation", async () => {
-  vi.useFakeTimers();
   let task = taskFixture({ taskRevision: 0 });
   vi.stubGlobal("fetch", vi.fn(async () => stubTaskResponse(task)));
-  const transport = new HttpTaskTransport({ endpoint: "/__agent-annotations", token: "test", pollInterval: 100 });
+  const transport = new HttpTaskTransport({ endpoint: "/__agent-annotations", token: "test" });
   const listener = vi.fn();
   const unsubscribe = transport.subscribe(listener);
-  await vi.runOnlyPendingTimersAsync();
+  taskUpdate();
+  await vi.waitFor(() => expect(listener).toHaveBeenCalledTimes(1));
   expect(listener).toHaveBeenCalledTimes(1);
   listener.mockClear();
   task = { ...task, taskRevision: 1 };
@@ -161,19 +163,20 @@ it("does not re-deliver the revision returned by a successful mutation", async (
     expectedRevision: 0,
     operations: [{ op: "removeCompleted" }],
   });
-  await vi.runOnlyPendingTimersAsync();
+  taskUpdate();
+  await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(3));
   expect(listener).not.toHaveBeenCalled();
   unsubscribe();
 });
 
-it("records the evidence result as last-seen so the next poll is not re-delivered", async () => {
-  vi.useFakeTimers();
+it("records the evidence result as last-seen so the next event is not re-delivered", async () => {
   let task = taskFixture({ taskRevision: 0 });
   vi.stubGlobal("fetch", vi.fn(async () => stubTaskResponse(task)));
-  const transport = new HttpTaskTransport({ endpoint: "/__agent-annotations", token: "test", pollInterval: 100 });
+  const transport = new HttpTaskTransport({ endpoint: "/__agent-annotations", token: "test" });
   const listener = vi.fn();
   const unsubscribe = transport.subscribe(listener);
-  await vi.runOnlyPendingTimersAsync();
+  taskUpdate();
+  await vi.waitFor(() => expect(listener).toHaveBeenCalledTimes(1));
   expect(listener).toHaveBeenCalledTimes(1);
   listener.mockClear();
   task = { ...task, taskRevision: 2 };
@@ -185,13 +188,13 @@ it("records the evidence result as last-seen so the next poll is not re-delivere
     width: 10,
     height: 10,
   });
-  await vi.runOnlyPendingTimersAsync();
+  taskUpdate();
+  await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(3));
   expect(listener).not.toHaveBeenCalled();
   unsubscribe();
 });
 
-it("only polls tasks and aborts the in-flight poll on unsubscribe", async () => {
-  vi.useFakeTimers();
+it("only refreshes tasks and aborts the in-flight request on unsubscribe", async () => {
   const signals: AbortSignal[] = [];
   const urls: string[] = [];
   let release!: () => void;
@@ -201,30 +204,30 @@ it("only polls tasks and aborts the in-flight poll on unsubscribe", async () => 
     await new Promise<void>((resolve) => { release = resolve; });
     return stubTaskResponse(taskFixture());
   }));
-  const transport = new HttpTaskTransport({ endpoint: "/__agent-annotations", token: "test", pollInterval: 100 });
+  const transport = new HttpTaskTransport({ endpoint: "/__agent-annotations", token: "test" });
   const unsubscribe = transport.subscribe(vi.fn());
-  await vi.advanceTimersByTimeAsync(100);
-  expect(signals.length).toBeGreaterThan(0);
+  taskUpdate();
+  expect(signals).toHaveLength(1);
   expect(urls.every((url) => url.endsWith("/task"))).toBe(true);
   unsubscribe();
   expect(signals.every((signal) => signal.aborted)).toBe(true);
   release();
-  await vi.advanceTimersByTimeAsync(5_000);
-  expect(vi.getTimerCount()).toBe(0);
+  await Promise.resolve();
+  taskUpdate();
+  await Promise.resolve();
   expect(vi.mocked(fetch).mock.calls.length).toBe(signals.length);
 });
 
-it("never delivers an invalid task from a poll", async () => {
-  vi.useFakeTimers();
-  let task: unknown = { invalid: true };
+it("never delivers an invalid task from a task-update event", async () => {
+  const task: unknown = { invalid: true };
   vi.stubGlobal("fetch", vi.fn(async () => stubTaskResponse(task)));
-  const transport = new HttpTaskTransport({ endpoint: "/__agent-annotations", token: "test", pollInterval: 100 });
+  const transport = new HttpTaskTransport({ endpoint: "/__agent-annotations", token: "test" });
   const listener = vi.fn();
   const unsubscribe = transport.subscribe(listener);
-  await vi.advanceTimersByTimeAsync(500);
+  taskUpdate();
+  await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
   expect(listener).not.toHaveBeenCalled();
   unsubscribe();
-  expect(vi.getTimerCount()).toBe(0);
 });
 
 it("reports a locatable validation error when a 409 carries an invalid task", async () => {

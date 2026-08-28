@@ -41,9 +41,11 @@ The package root exports the host-neutral `agent-annotations.task.v1` core and
 from `@gchust/agent-annotations/types`; `MemoryTaskTransport` is available only
 from `@gchust/agent-annotations/testing` for tests and playgrounds.
 
-The toolbar starts expanded by default. When it is collapsed, a capture
-shortcut (Pick/Multi/Area) expands the dock and starts the capture instead of
-failing silently. Saving an annotation exits capture mode. The
+The toolbar starts expanded by default. When collapsed, it becomes one 40 px
+annotation icon at the bottom right with an open-count badge; the icon can be
+dragged and remembers its task-specific position, while a click expands it.
+A capture shortcut (Pick/Multi/Area) also expands the dock and starts the
+capture instead of failing silently. Saving an annotation exits capture mode. The
 initial UI and the built-in actions are configurable on the Vite plugin and on
 `mountAgentAnnotations()`:
 

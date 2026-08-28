@@ -154,18 +154,14 @@ test("browser status health and HMR-applied source revision ordering", async ({ 
   const baselineGeneration = baselineStatus.browserUpdateRevision;
   const before = readFileSync(card, "utf8");
   try {
-    // A transform error keeps the old module running. Completion defers its
-    // reload until the error clears, so neither applied field can advance.
+    // A transform error keeps the old module running. Task completion updates
+    // through the HMR channel without advancing either applied-source field.
     writeFileSync(card, `${before}\nexport const broken = ;\n`);
     await page.locator("vite-error-overlay").waitFor();
     const failedBaseline = statusJson();
     expect(failedBaseline.browserUpdateRevision).toBe(baselineGeneration);
     expect(failedBaseline.browserReferencedSourceRevision).toBe(baseline);
     const task = JSON.parse(readFileSync(path.join(runtimeRoot, "tasks/active-task.json"), "utf8"));
-    const completionReload = page.waitForEvent("framenavigated", {
-      predicate: (frame) => frame === page.mainFrame(),
-      timeout: 15_000,
-    });
     cli("complete", task.annotations[0].annotationId, "--verified", "--summary", "Failed HMR remains unapplied");
     await expect.poll(() => statusJson().taskSynchronized, { timeout: 15_000 }).toBe(true);
     const failedUpdate = statusJson();
@@ -187,11 +183,10 @@ test("browser status health and HMR-applied source revision ordering", async ({ 
     // happened after the HMR update actually applied.
     const text = await page.locator("#duplicate-a").evaluate((element) => element.textContent);
     expect(text).toBe("Duplicate A APPLIED");
-    await completionReload;
     await expect(shadow(page, ".aa-dock")).toBeVisible();
     await expect.poll(() => statusJson().referencedSourceSynchronized, { timeout: 15_000 }).toBe(true);
-    // The repaired HMR and completion reload may coalesce, but the applied
-    // browser revision must advance and match the current source revision.
+    // The repaired HMR must advance the applied browser revision and match the
+    // current source revision.
     const applied = JSON.parse(cli("status", "--check", "--json"));
     expect(applied.referencedSourceSynchronized).toBe(true);
     expect(applied.browserUpdateRevision).toBeGreaterThan(failedBaseline.browserUpdateRevision);

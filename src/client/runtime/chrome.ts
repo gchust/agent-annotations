@@ -77,6 +77,7 @@ export type ChromeBindings = {
   ): string;
   showTooltip(trigger: HTMLElement): void;
   hideTooltip(): void;
+  clampDockPosition(): void;
   positionPanel(): void;
   executeContribution(contribution: RegisteredToolbarContribution): void;
   setCollapsed(next: boolean): void;
@@ -177,9 +178,10 @@ export const ToolbarButton = (props: {
 export const CollapsedCount = (props: {
     b: ChromeBindings;
     openCount: number;
-    current: StudioPublicSnapshot;
   }): import("react").ReactNode => {
     const ref = useRef<HTMLButtonElement | null>(null);
+    const dragStart = useRef<{ x: number; y: number } | null>(null);
+    const dragged = useRef(false);
     useLayoutEffect(() => {
       const node = ref.current!;
       const enter = () => b.showTooltip(node);
@@ -195,46 +197,57 @@ export const CollapsedCount = (props: {
         node.removeEventListener("blur", leave);
       };
     }, []);
-    const { b, openCount, current } = props;
-    const listOpen = current.openPanel === "agent-annotations.builtin:list";
-    const listPanel = b.registry.getPanels().find((panel) => panel.id === "agent-annotations.builtin:list");
-    const listContribution = b.getToolbar().find((entry) => entry.id === "agent-annotations.builtin:list");
-    const collapseContributionId = b.getToolbar().find((entry) => entry.id === "agent-annotations.builtin:toggle")?.id;
-    const listShortcut = b.getShortcuts().find((entry) => entry.id === "agent-annotations.builtin:list");
-    const listLabel = listPanel ? b.localized(listPanel.title) : b.localized("Annotation list");
-    const zeroLabel = listShortcut ? `${listLabel} (${listShortcut.formatted})` : listLabel;
-    const hasList = listContribution !== undefined;
-    const countLabel = openCount === 0
-      ? zeroLabel
-      : b.localized("openAnnotations", { count: openCount });
+    const { b, openCount } = props;
+    const collapseContributionId = b.getCollapseAction();
     const expandLabel = b.localized("Expand toolbar");
+    const countLabel = openCount > 0
+      ? b.localized("openAnnotations", { count: openCount })
+      : "";
     return createElement("button", {
       ref,
       type: "button",
       className: "aa-collapsed-count",
-      "aria-label": hasList
-        ? countLabel
-        : `${expandLabel}${openCount > 0 ? ` (${openCount} open annotations)` : ""}`,
-      "aria-expanded": String(hasList ? listOpen : false),
-      // The expand id is a runtime chrome id, never a disabled builtin's id:
-      // when both the list and the collapse builtins are absent, this control
-      // still expands the dock with an accurate action identity.
-      "data-action-id": listContribution?.id ?? collapseContributionId ?? "agent-annotations.builtin:expand",
-      onClick: () => {
-        if (listContribution) {
-          // Route through the registered contribution so closing the panel
-          // returns focus to this visible control (same data-action-id as
-          // the toolbar list).
-          b.executeContribution(listContribution);
-        } else {
-          // No list panel registered (list disabled or builtins:false): the
-          // visible collapsed control expands the toolbar instead.
-          b.setCollapsed(false);
-        }
+      "aria-label": `${expandLabel}${countLabel ? ` (${countLabel})` : ""}`,
+      "aria-expanded": "false",
+      "data-action-id": collapseContributionId ?? "agent-annotations.builtin:expand",
+      onPointerDown: (event: import("react").PointerEvent<HTMLButtonElement>) => {
+        if (event.button !== 0) return;
+        dragStart.current = { x: event.clientX, y: event.clientY };
+        dragged.current = false;
+        b.onGripPointerDown(event, event.currentTarget.parentElement as HTMLDivElement);
       },
-    }, openCount === 0
-      ? createElement(AnnotationsIcon, { className: "aa-icon" })
-      : createElement("span", { className: "aa-count-badge" }, openCount > 99 ? "99+" : String(openCount)));
+      onPointerMove: (event: import("react").PointerEvent<HTMLButtonElement>) => {
+        const start = dragStart.current;
+        if (!start) return;
+        if (!dragged.current && Math.hypot(event.clientX - start.x, event.clientY - start.y) < 5) return;
+        dragged.current = true;
+        b.onGripPointerMove(event, event.currentTarget.parentElement as HTMLDivElement);
+      },
+      onPointerUp: () => {
+        if (!dragStart.current) return;
+        dragStart.current = null;
+        b.onGripPointerUp();
+      },
+      onPointerCancel: () => {
+        dragStart.current = null;
+        dragged.current = false;
+        b.onGripPointerUp();
+      },
+      onClick: (event: import("react").MouseEvent<HTMLButtonElement>) => {
+        if (dragged.current) {
+          dragged.current = false;
+          return;
+        }
+        const dock = event.currentTarget.parentElement;
+        b.setCollapsed(false);
+        dock?.querySelector<HTMLElement>(".aa-grip")?.focus();
+      },
+    },
+    createElement(AnnotationsIcon, { className: "aa-icon" }),
+    openCount > 0
+      ? createElement("span", { className: "aa-count-badge", "aria-hidden": "true" },
+          openCount > 99 ? "99+" : String(openCount))
+      : null);
   };
 
 export const StudioChrome = (props: {
@@ -267,7 +280,8 @@ export const StudioChrome = (props: {
       : [];
 
     useLayoutEffect(() => {
-      const grip = gripRef.current!;
+      const grip = gripRef.current;
+      if (!grip) return;
       const enter = () => b.showTooltip(grip);
       const leave = () => b.hideTooltip();
       grip.addEventListener("mouseenter", enter);
@@ -280,9 +294,10 @@ export const StudioChrome = (props: {
         grip.removeEventListener("focus", enter);
         grip.removeEventListener("blur", leave);
       };
-    }, []);
+    }, [current.collapsed]);
 
     useLayoutEffect(() => {
+      b.clampDockPosition();
       b.positionPanel();
       if (b.takeFocusPanel() && panelRef.current) {
         b.focusPanelControl(panelRef.current);
@@ -295,44 +310,46 @@ export const StudioChrome = (props: {
         className: "aa-dock",
         "data-collapsed": String(current.collapsed),
         style: b.getDockPosition()
-          ? { left: `${b.getDockPosition()!.left}px`, top: `${b.getDockPosition()!.top}px`, bottom: "auto" }
+          ? { left: `${b.getDockPosition()!.left}px`, right: "auto", top: `${b.getDockPosition()!.top}px`, bottom: "auto" }
           : undefined,
       },
-        createElement("button", {
-          ref: gripRef,
-          type: "button",
-          className: "aa-grip",
-          "aria-label": b.localized("Drag toolbar"),
-          onPointerDown: (event: import("react").PointerEvent<HTMLButtonElement>) => {
-            b.onGripPointerDown(event, dockRef.current!);
-          },
-          onPointerMove: (event: import("react").PointerEvent<HTMLButtonElement>) => {
-            b.onGripPointerMove(event, dockRef.current);
-          },
-          onPointerUp: () => b.onGripPointerUp(),
-        }, createElement(GripIcon, { className: "aa-icon" })),
         ...(current.collapsed
-          ? [createElement(CollapsedCount, { key: "collapsed-count", b, openCount, current })]
-          : []),
-        ...b.getToolbar().flatMap((contribution) => {
-          if (contribution.id === b.getCollapseAction()) return [];
-          const label = b.localized(contribution.label);
-          const shortcut = b.getShortcuts().find(({ id }) => id === contribution.id);
-          if (b.guardedPredicate(contribution.extensionId, contribution.id, "visible", true, () =>
-            contribution.isVisible?.(current) === false
-          )) {
-            return [];
-          }
-          return [createElement(ToolbarButton, {
-            key: contribution.id,
-            b,
-            contribution,
-            label,
-            shortcut,
-            current,
-          })];
-        }),
-        ...collapseChrome
+          ? [createElement(CollapsedCount, { key: "collapsed-count", b, openCount })]
+          : [
+              createElement("button", {
+                key: "grip",
+                ref: gripRef,
+                type: "button",
+                className: "aa-grip",
+                "aria-label": b.localized("Drag toolbar"),
+                onPointerDown: (event: import("react").PointerEvent<HTMLButtonElement>) => {
+                  b.onGripPointerDown(event, dockRef.current!);
+                },
+                onPointerMove: (event: import("react").PointerEvent<HTMLButtonElement>) => {
+                  b.onGripPointerMove(event, dockRef.current);
+                },
+                onPointerUp: () => b.onGripPointerUp(),
+              }, createElement(GripIcon, { className: "aa-icon" })),
+              ...b.getToolbar().flatMap((contribution) => {
+                if (contribution.id === b.getCollapseAction()) return [];
+                const label = b.localized(contribution.label);
+                const shortcut = b.getShortcuts().find(({ id }) => id === contribution.id);
+                if (b.guardedPredicate(contribution.extensionId, contribution.id, "visible", true, () =>
+                  contribution.isVisible?.(current) === false
+                )) {
+                  return [];
+                }
+                return [createElement(ToolbarButton, {
+                  key: contribution.id,
+                  b,
+                  contribution,
+                  label,
+                  shortcut,
+                  current,
+                })];
+              }),
+              ...collapseChrome,
+            ])
       ),
       panelContribution
         ? createElement("section", {

@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, realpathSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync, statSync, watch, type FSWatcher } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -32,6 +32,7 @@ import { PACKAGE_NAME } from "../metadata.js";
 const VIRTUAL_ID = "virtual:agent-annotations/client";
 const RESOLVED_VIRTUAL_ID = `\0${VIRTUAL_ID}`;
 const TOKEN_HEADER = "x-agent-annotations-token";
+const TASK_UPDATE_EVENT = "agent-annotations:task-update";
 const MAX_BODY_BYTES = 256 * 1024;
 const MAX_EVIDENCE_BODY_BYTES = 3 * 1024 * 1024;
 const MAX_DIAGNOSTICS_BODY_BYTES = 16 * 1024;
@@ -155,6 +156,7 @@ export default function agentAnnotations(
   let sourcePaths = createSourcePathService(root);
   let store = new FileTaskStore(runtimeRoot);
   let closeInstalled = false;
+  let taskWatcher: FSWatcher | undefined;
   let viteBase = "/";
   let resolvedEndpoint = endpoint;
   const browserRuntimeIds = new Set<string>();
@@ -209,9 +211,14 @@ export default function agentAnnotations(
         `const config = ${JSON.stringify({ endpoint: resolvedEndpoint, token, screenshotEvidence, handoff, builtins, initialState, diagnostics })};`,
         `const extensions = [${values}];`,
         "const key = Symbol.for('agent-annotations.mount');",
+        "let mounted;",
+        "let taskUpdatePending = false;",
+        `const onTaskUpdate = () => { if (mounted) window.dispatchEvent(new Event(${JSON.stringify(TASK_UPDATE_EVENT)})); else taskUpdatePending = true; };`,
+        `if (import.meta.hot) import.meta.hot.on(${JSON.stringify(TASK_UPDATE_EVENT)}, onTaskUpdate);`,
         "window[key]?.(true);",
         "const transport = new HttpTaskTransport(config);",
-        `const mounted = await mountAgentAnnotations({ transport, extensions, screenshotEvidence: config.screenshotEvidence, browserStatus: { endpoint: config.endpoint, token: config.token }, handoff: config.handoff, builtins: config.builtins, initialState: config.initialState, diagnostics: config.diagnostics });`,
+        `mounted = await mountAgentAnnotations({ transport, extensions, screenshotEvidence: config.screenshotEvidence, browserStatus: { endpoint: config.endpoint, token: config.token }, handoff: config.handoff, builtins: config.builtins, initialState: config.initialState, diagnostics: config.diagnostics });`,
+        `if (taskUpdatePending) window.dispatchEvent(new Event(${JSON.stringify(TASK_UPDATE_EVENT)}));`,
         "const onPageHide = () => window[key]?.(true);",
         "window.addEventListener('pagehide', onPageHide, { once: true });",
         "window[key] = (preserveBrowserState = false) => { window.removeEventListener('pagehide', onPageHide); mounted.unmount(preserveBrowserState); delete window[key]; };",
@@ -228,7 +235,7 @@ export default function agentAnnotations(
         "    } catch {}",
         "  };",
         "  import.meta.hot.accept();",
-        "  import.meta.hot.dispose(() => window[key]?.(true));",
+        `  import.meta.hot.dispose(() => { import.meta.hot.off(${JSON.stringify(TASK_UPDATE_EVENT)}, onTaskUpdate); window[key]?.(true); });`,
         "  import.meta.hot.on('vite:afterUpdate', (event) => { void reportAfterUpdate(event); });",
         "}",
       ].filter(Boolean).join("\n");
@@ -300,6 +307,12 @@ export default function agentAnnotations(
     },
     configureServer(server) {
       const httpServer = server.httpServer;
+      mkdirSync(path.dirname(store.taskPath), { recursive: true, mode: 0o700 });
+      taskWatcher?.close();
+      taskWatcher = watch(path.dirname(store.taskPath), (_event, filename) => {
+        if (filename?.toString() !== path.basename(store.taskPath)) return;
+        server.ws.send({ type: "custom", event: TASK_UPDATE_EVENT });
+      });
       const listening = () => persistSession(httpServer?.address() ?? null);
       if (httpServer?.listening) listening();
       else httpServer?.once("listening", listening);
@@ -324,6 +337,8 @@ export default function agentAnnotations(
         process.once("exit", onExit);
         for (const signal of signals) process.once(signal, onSignal);
         httpServer.once("close", () => {
+          taskWatcher?.close();
+          taskWatcher = undefined;
           process.off("exit", onExit);
           for (const signal of signals) process.off(signal, onSignal);
           cleanupBrowserState();

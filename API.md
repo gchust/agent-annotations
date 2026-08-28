@@ -204,13 +204,13 @@ Exports `HttpTaskTransport`, the browser transport used by the Vite virtual
 client. Applications normally receive it through automatic development-server
 injection rather than importing it directly.
 
-`HttpTaskTransport` accepts `pollInterval` only as a finite integer between
-100 and 10,000 ms (default 500) and throws a `TypeError` otherwise. Its `read`,
+`HttpTaskTransport` fetches once at mount and then refreshes only when the Vite
+plugin reports a task-file change over its existing HMR connection. Its `read`,
 `mutate`, and `writeEvidence` results, every 409 conflict payload, and every
-subscription push are schema-parsed; synchronization follows the
+subscription update are schema-parsed; synchronization follows the
 `(taskId, taskRevision)` identity rule (a different task id replaces the
 current task even at revision 0; the same task id only advances on a strictly
-larger revision), and unsubscribing aborts in-flight polls.
+larger revision), and unsubscribing aborts an in-flight refresh.
 `mountAgentAnnotations()` applies the same validation and identity rules
 unconditionally around any custom `TaskTransport`.
 

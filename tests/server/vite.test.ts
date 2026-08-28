@@ -8,6 +8,7 @@ import react from "@vitejs/plugin-react";
 import { createServer } from "vite";
 
 import pkg from "../../package.json" with { type: "json" };
+import { atomicWriteJson } from "../../src/server/store.js";
 import agentAnnotations, { createSourcePathService, isAgentAnnotationsRequestAllowed } from "../../src/vite/index.js";
 
 const roots: string[] = [];
@@ -47,8 +48,10 @@ describe("serve-only Vite plugin", () => {
     expect(String(loaded)).toContain("mounted.reportBrowserUpdate()");
     expect(String(loaded)).toContain("vite:afterUpdate");
     expect(String(loaded)).toContain("responses.every((response) => response.ok)");
+    expect(String(loaded)).toContain("agent-annotations:task-update");
+    expect(String(loaded)).toContain("window.dispatchEvent");
+    expect(String(loaded)).toContain("import.meta.hot.off");
     expect(String(loaded)).toContain("window[key]?.(true)");
-    expect(String(loaded)).toContain("import.meta.hot.dispose(() => window[key]?.(true))");
     expect(String(loaded)).toContain("import.meta.hot.accept()");
     expect(String(loaded)).toContain("import.meta.hot.dispose");
     expect(String(loaded)).not.toContain("extension.setup");
@@ -67,6 +70,27 @@ describe("serve-only Vite plugin", () => {
     expect(source.canonicalize("../outside.ts")).toBeNull();
     expect(() => agentAnnotations({ root: "/tmp/demo", dir: "../outside" })).toThrow("inside root");
     expect(() => agentAnnotations({ endpoint: "https://evil.test" })).toThrow("root-relative");
+  });
+
+  it("sends a task-update event when the active task file changes", async () => {
+    const { root } = fixture();
+    const server = await createServer({
+      root,
+      logLevel: "silent",
+      server: { host: "127.0.0.1", port: 0 },
+      plugins: [agentAnnotations({ root })],
+    });
+    await server.listen();
+    try {
+      const send = vi.spyOn(server.ws, "send");
+      atomicWriteJson(path.join(root, ".agent-annotations/tasks/active-task.json"), { revision: 1 });
+      await vi.waitFor(() => expect(send).toHaveBeenCalledWith({
+        type: "custom",
+        event: "agent-annotations:task-update",
+      }));
+    } finally {
+      await server.close();
+    }
   });
 
   it("returns a canonical identity { code, map } for modules under root", () => {

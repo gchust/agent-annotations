@@ -16,31 +16,19 @@ import type {
 export type HttpTaskTransportOptions = {
   endpoint: string;
   token: string;
-  pollInterval?: number;
 };
 
 const TOKEN_HEADER = "x-agent-annotations-token";
-const MIN_POLL_INTERVAL = 100;
-const MAX_POLL_INTERVAL = 10_000;
-const DEFAULT_POLL_INTERVAL = 5_000;
+const TASK_UPDATE_EVENT = "agent-annotations:task-update";
 
 export class HttpTaskTransport implements TaskTransport {
   readonly endpoint: string;
   readonly token: string;
-  readonly pollInterval: number;
   #lastSeen: TaskIdentity | null = null;
 
   constructor(options: HttpTaskTransportOptions) {
     this.endpoint = options.endpoint;
     this.token = options.token;
-    const pollInterval = options.pollInterval ?? DEFAULT_POLL_INTERVAL;
-    if (!Number.isInteger(pollInterval) || pollInterval < MIN_POLL_INTERVAL || pollInterval > MAX_POLL_INTERVAL) {
-      throw new TypeError(
-        `pollInterval must be a finite integer between ${MIN_POLL_INTERVAL} and ${MAX_POLL_INTERVAL} ` +
-          `(received ${options.pollInterval})`
-      );
-    }
-    this.pollInterval = pollInterval;
   }
 
   async #request(init?: RequestInit, expectedRevision?: number): Promise<unknown> {
@@ -148,12 +136,16 @@ export class HttpTaskTransport implements TaskTransport {
   subscribe(listener: (task: AgentAnnotationsTask) => void): () => void {
     const controller = new AbortController();
     let stopped = false;
-    let pollInFlight = false;
-    let pollTimer: number | undefined;
+    let requestActive = false;
+    let updatePending = false;
 
-    const poll = async () => {
-      if (stopped || pollInFlight) return;
-      pollInFlight = true;
+    const refresh = async () => {
+      if (stopped) return;
+      if (requestActive) {
+        updatePending = true;
+        return;
+      }
+      requestActive = true;
       try {
         const task = parseValidatedTask(
           await this.#request({ signal: controller.signal }),
@@ -161,26 +153,29 @@ export class HttpTaskTransport implements TaskTransport {
         );
         if (stopped) return;
         // The shared last-seen identity also covers successful reads,
-        // mutations, and evidence writes, so a poll never re-delivers the
-        // version the runtime already saw, and a late stale poll can never
-        // overwrite a newer task or revision.
+        // mutations, and evidence writes, so an event never re-delivers the
+        // version the runtime already saw or overwrites a newer revision.
         if (isTaskIdentityNewer(taskIdentity(task), this.#lastSeen)) {
           listener(task);
           this.#lastSeen = taskIdentity(task);
         }
       } catch {
-        // The dev server may be restarting (or the subscription was aborted);
-        // the next poll reconnects.
+        // The dev server may be restarting, or the subscription was aborted.
       } finally {
-        pollInFlight = false;
-        if (!stopped) pollTimer = window.setTimeout(() => void poll(), this.pollInterval);
+        requestActive = false;
+        if (updatePending && !stopped) {
+          updatePending = false;
+          void refresh();
+        }
       }
     };
-    void poll();
+    const onTaskUpdate = () => void refresh();
+    window.addEventListener(TASK_UPDATE_EVENT, onTaskUpdate);
     return () => {
       stopped = true;
+      updatePending = false;
+      window.removeEventListener(TASK_UPDATE_EVENT, onTaskUpdate);
       controller.abort();
-      if (pollTimer !== undefined) window.clearTimeout(pollTimer);
     };
   }
 }

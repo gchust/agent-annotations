@@ -33,7 +33,9 @@ describe("toolbar accessibility", () => {
     const collapse = [...shadow.querySelectorAll<HTMLButtonElement>("button")].find((node) => node.getAttribute("aria-label")?.startsWith("Collapse toolbar"))!;
     collapse.click();
     expect(shadow.querySelector(".aa-dock")?.getAttribute("data-collapsed")).toBe("true");
-    expect([...shadow.querySelectorAll<HTMLButtonElement>("button")].find((node) => node.getAttribute("aria-label")?.startsWith("Collapse toolbar"))?.getAttribute("aria-pressed")).toBe("true");
+    const expand = shadow.querySelector<HTMLButtonElement>('[aria-label^="Expand toolbar"]')!;
+    expect(shadow.querySelectorAll(".aa-dock > button")).toHaveLength(1);
+    expect(expand.getAttribute("aria-expanded")).toBe("false");
 
     mounted.unmount();
     vi.useRealTimers();

@@ -527,7 +527,8 @@ describe("runtime-markers-capture", () => {
       await vi.advanceTimersByTimeAsync(20);
       expect(shadow.querySelector(".aa-editor")).toBeNull();
       expect(shadow.querySelector(".aa-marker-highlight")).toBeNull();
-      expect(shadow.activeElement?.getAttribute("aria-label")).toBe("1 open annotations");
+      expect(shadow.activeElement?.getAttribute("aria-label"))
+        .toBe("Expand toolbar (1 open annotations)");
       // Expanded dock: Escape returns focus to the list action instead.
       mounted.api.commands.toolbar.toggleCollapsed();
       mounted.api.commands.markers.focus("ann-1");
@@ -569,7 +570,8 @@ describe("runtime-markers-capture", () => {
       // The dock is still collapsed; focus returns to the visible collapsed
       // count control instead of the CSS-hidden list action.
       expect(shadow.querySelector(".aa-dock")?.getAttribute("data-collapsed")).toBe("true");
-      expect(shadow.activeElement?.getAttribute("aria-label")).toBe("1 open annotations");
+      expect(shadow.activeElement?.getAttribute("aria-label"))
+        .toBe("Expand toolbar (1 open annotations)");
     } finally {
       mounted.unmount();
     }
@@ -1083,6 +1085,40 @@ describe("runtime-markers-capture", () => {
       mounted.unmount();
     }
     expect(unsubscribe).toHaveBeenCalledOnce();
+  });
+
+
+
+  it("saves on the current history route when the host only subscribes to changes", async () => {
+    history.pushState({}, "", "/route-a");
+    const target = document.createElement("button");
+    document.body.append(target);
+    const transport = new MemoryTaskTransport();
+    const mounted = await mountAgentAnnotations({
+      transport,
+      extensions: [defineClientExtension({
+        id: "subscribed-host",
+        apiVersion: 1,
+        host: { subscribe: () => () => undefined },
+      })],
+    });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      history.pushState({}, "", "/route-b");
+      mounted.api.commands.capture.startPick();
+      target.click();
+      const composer = shadow.querySelector<HTMLFormElement>(".aa-composer")!;
+      composer.querySelector<HTMLTextAreaElement>("textarea")!.value = "Current route";
+      composer.requestSubmit();
+
+      await vi.waitFor(() => expect(shadow.querySelector(".aa-composer")).toBeNull());
+      const annotation = (await transport.read()).annotations[0]!;
+      expect(annotation.pageContext.routeKey).toBe("/route-b");
+      expect(shadow.querySelector(".aa-marker")?.textContent).toContain("1");
+    } finally {
+      mounted.unmount();
+      target.remove();
+    }
   });
 
 

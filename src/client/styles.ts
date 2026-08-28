@@ -4,10 +4,10 @@ export const AGENT_ANNOTATIONS_STYLES = `
 *,*::before,*::after { box-sizing:border-box; }
 button,textarea { font:inherit; }
 .aa-dock { position:fixed; left:calc(50vw - 210px); bottom:20px; z-index:2147483000; display:flex; align-items:center; gap:4px; padding:6px; color:var(--aa-text); background:var(--aa-bg); border:1px solid var(--aa-border); border-radius:14px; box-shadow:0 10px 35px #18181b26; pointer-events:auto; }
-.aa-dock[data-collapsed=true] .aa-action:not([data-toggle=true]) { display:none; }
+.aa-dock[data-collapsed=true] { left:auto; right:20px; gap:0; padding:0; border:0; border-radius:12px; }
 .aa-divider { width:1px; height:22px; margin:0 2px; background:var(--aa-border); pointer-events:none; }
-.aa-collapsed-count { display:inline-grid; place-items:center; min-width:34px; min-height:34px; padding:0 8px; border:1px solid var(--aa-border); border-radius:8px; color:var(--aa-text); background:var(--aa-bg); font-weight:700; cursor:pointer; }
-.aa-collapsed-count .aa-count-badge { line-height:1; }
+.aa-collapsed-count { position:relative; display:inline-grid; place-items:center; width:40px; height:40px; padding:0; border:1px solid var(--aa-border); border-radius:12px; color:var(--aa-text); background:var(--aa-bg); cursor:grab; touch-action:none; }
+.aa-collapsed-count .aa-count-badge { position:absolute; top:1px; right:1px; display:inline-grid; place-items:center; min-width:18px; height:18px; padding:0 4px; border:2px solid var(--aa-bg); border-radius:999px; color:var(--aa-accent-text); background:var(--aa-accent); font-size:10px; font-weight:700; line-height:1; pointer-events:none; }
 .aa-multi-complete { position:fixed; z-index:2147483008; min-height:34px; padding:6px 10px; border:1px solid var(--aa-accent); border-radius:999px; color:var(--aa-accent-text); background:var(--aa-accent); font-weight:700; cursor:pointer; pointer-events:auto; }
 .aa-grip,.aa-action,.aa-marker,.aa-button { display:inline-grid; place-items:center; border:1px solid transparent; border-radius:8px; color:inherit; background:transparent; min-width:34px; min-height:34px; cursor:pointer; }
 .aa-grip { cursor:grab; color:var(--aa-muted); }

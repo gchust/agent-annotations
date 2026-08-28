@@ -31,7 +31,7 @@ if (/\bmcp\b/i.test(readme)) {
 if (manifest.publishConfig?.access !== "public") {
   throw new Error("package publishConfig.access must be public");
 }
-if (!changelog.includes(`## ${manifest.version} - 2026-08-26`) || changelog.includes("## Unreleased")) {
+if (changelog.match(/^## (\S+) - \d{4}-\d{2}-\d{2}$/m)?.[1] !== manifest.version || changelog.includes("## Unreleased")) {
   throw new Error("package version and consolidated changelog release must agree");
 }
 if (existsSync(new URL("../MIGRATION-BASELINE.md", import.meta.url))) {

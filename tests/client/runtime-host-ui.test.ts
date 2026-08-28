@@ -1607,7 +1607,7 @@ describe("runtime-host-ui", () => {
 
 
 
-  it("shows the open count when collapsed", async () => {
+  it("shows an annotation icon with an open-count badge when collapsed", async () => {
     vi.useFakeTimers();
     // The strict schema boundary caps tasks at 50 annotations, so the count
     // chrome is exercised at the schema maximum.
@@ -1623,17 +1623,18 @@ describe("runtime-host-ui", () => {
     try {
       const count = shadow.querySelector<HTMLElement>(".aa-collapsed-count")!;
       expect(count.textContent).toBe("50");
-      expect(count.getAttribute("aria-label")).toBe("50 open annotations");
+      expect(count.querySelector("svg")).not.toBeNull();
+      expect(count.getAttribute("aria-label")).toBe("Expand toolbar (50 open annotations)");
       expect(count.getAttribute("aria-expanded")).toBe("false");
-      // The count chrome shows a tooltip on hover and focus like other controls.
+      // The minimized control shows the same action and count on hover and focus.
       count.dispatchEvent(new MouseEvent("mouseenter"));
       vi.advanceTimersByTime(300);
-      expect(shadow.querySelector('[role="tooltip"]')?.textContent).toBe("50 open annotations");
-      // Clicking the count opens the annotation list and reflects aria-expanded.
+      expect(shadow.querySelector('[role="tooltip"]')?.textContent)
+        .toBe("Expand toolbar (50 open annotations)");
       count.click();
-      expect(shadow.querySelector('[aria-label^="Annotations"]')).not.toBeNull();
-      expect(shadow.querySelector<HTMLElement>(".aa-collapsed-count")!.getAttribute("aria-expanded"))
-        .toBe("true");
+      expect(mounted.api.getSnapshot().collapsed).toBe(false);
+      expect(shadow.querySelector(".aa-collapsed-count")).toBeNull();
+      expect(shadow.activeElement).toBe(shadow.querySelector(".aa-grip"));
     } finally {
       mounted.unmount();
     }
@@ -1651,7 +1652,7 @@ describe("runtime-host-ui", () => {
       const count = shadow.querySelector<HTMLElement>(".aa-collapsed-count")!;
       expect(count.querySelector("svg")).not.toBeNull();
       expect(count.textContent?.trim()).toBe("");
-      expect(count.getAttribute("aria-label")).toBe("Annotation list (Ctrl+Alt+L)");
+      expect(count.getAttribute("aria-label")).toBe("Expand toolbar");
       expect(shadow.querySelectorAll(".aa-collapsed-count .aa-count-badge")).toHaveLength(0);
     } finally {
       mounted.unmount();
@@ -1800,7 +1801,7 @@ describe("runtime-host-ui", () => {
 
 
 
-  it("returns focus to the collapsed count after the list panel closes", async () => {
+  it("returns focus to the minimized icon after the list panel closes", async () => {
     vi.useFakeTimers();
     const mounted = await mountAgentAnnotations({
       transport: new MemoryTaskTransport(taskFixture()),
@@ -1808,21 +1809,74 @@ describe("runtime-host-ui", () => {
     });
     const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
     try {
-      const count = shadow.querySelector<HTMLElement>(".aa-collapsed-count")!;
-      expect(count.getAttribute("data-action-id")).toBe("agent-annotations.builtin:list");
-      count.click();
-      expect(shadow.querySelector('[aria-label^="Annotations"]')).not.toBeNull();
+      const minimized = shadow.querySelector<HTMLElement>(".aa-collapsed-count")!;
+      document.dispatchEvent(new KeyboardEvent("keydown", {
+        key: "l", code: "KeyL", ctrlKey: true, altKey: true, bubbles: true,
+      }));
+      expect(shadow.querySelector('[aria-label="Annotation list"]')).not.toBeNull();
       await vi.runAllTimersAsync();
-      // The panel has focus inside the shadow; Escape from there closes it and
-      // returns focus to the visible count trigger.
-      const shadowRoot = document.getElementById("agent-annotations-root")!.shadowRoot!;
-      const panelFocus = shadowRoot.activeElement as HTMLElement;
-      panelFocus.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, composed: true }));
+      const panelFocus = shadow.activeElement as HTMLElement;
+      panelFocus.dispatchEvent(new KeyboardEvent("keydown", {
+        key: "Escape", bubbles: true, composed: true,
+      }));
       await vi.runAllTimersAsync();
       expect(shadow.querySelector('[aria-label="Annotation list"]')).toBeNull();
-      expect(shadowRoot.activeElement).toBe(count);
+      expect(shadow.activeElement).toBe(minimized);
     } finally {
       mounted.unmount();
+    }
+  });
+
+
+
+  it("drags the minimized icon without expanding, then expands it on click", async () => {
+    vi.spyOn(window, "innerWidth", "get").mockReturnValue(1000);
+    vi.spyOn(window, "innerHeight", "get").mockReturnValue(800);
+    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains("aa-dock")
+        ? (this.dataset.collapsed === "true" ? 40 : 420)
+        : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains("aa-dock") ? 40 : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this.classList.contains("aa-dock")) {
+        return new DOMRect(Number.parseFloat(this.style.left) || 940, Number.parseFloat(this.style.top) || 740, 40, 40);
+      }
+      return new DOMRect();
+    });
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(taskFixture()),
+      initialState: { collapsed: true },
+    });
+    const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
+    try {
+      const count = shadow.querySelector<HTMLElement>(".aa-collapsed-count")!;
+      count.setPointerCapture = vi.fn();
+      count.dispatchEvent(new MouseEvent("pointerdown", {
+        bubbles: true, button: 0, clientX: 960, clientY: 760,
+      }));
+      count.dispatchEvent(new MouseEvent("pointermove", {
+        bubbles: true, buttons: 1, clientX: 800, clientY: 600,
+      }));
+      count.dispatchEvent(new MouseEvent("pointerup", { bubbles: true, button: 0 }));
+      count.click();
+      expect(mounted.api.getSnapshot().collapsed).toBe(true);
+      const dock = shadow.querySelector<HTMLElement>(".aa-dock")!;
+      expect({ left: dock.style.left, right: dock.style.right, top: dock.style.top })
+        .toEqual({ left: "780px", right: "auto", top: "580px" });
+      expect(localStorage.getItem("agent-annotations:dock-position:task-1"))
+        .toContain('"left":780');
+      count.click();
+      expect(mounted.api.getSnapshot().collapsed).toBe(false);
+      expect(shadow.activeElement).toBe(shadow.querySelector(".aa-grip"));
+      expect(dock.style.left).toBe("580px");
+      mounted.api.commands.toolbar.toggleCollapsed();
+      expect(dock.style.left).toBe("780px");
+    } finally {
+      mounted.unmount();
+      localStorage.removeItem("agent-annotations:dock-position:task-1");
     }
   });
 

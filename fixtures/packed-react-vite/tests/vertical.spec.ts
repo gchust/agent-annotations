@@ -196,13 +196,8 @@ test("packed browser to file to CLI to browser loop, HMR and session security", 
   await expect(completedMarker.locator(".aa-marker-complete")).toBeVisible();
   expect(JSON.parse(cli("validate-task", "--json"))).toMatchObject({ ok: true, taskRevision: beforeComplete + 1 });
   const remainingId = completedTask.annotations.find((entry: { status: string }) => entry.status === "open").annotationId;
-  const autoReload = page.waitForEvent("framenavigated", {
-    predicate: (frame) => frame === page.mainFrame(),
-    timeout: 15_000,
-  });
   expect(cli("complete", remainingId, "--verified", "--summary", "Verified remaining annotation"))
     .toContain(`taskRevision ${beforeComplete + 2}`);
-  await autoReload;
   await expect(page.locator("#agent-annotations-root")).toHaveCount(1);
   await expect.poll(() => page.evaluate(() =>
     window.__demoExtension?.studio?.getSnapshot().task.status
