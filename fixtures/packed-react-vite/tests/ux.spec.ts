@@ -211,6 +211,14 @@ test("keyboard-only Pick, Multi, Copy, List, and Collapse flows with visual evid
     })
     .toBe(1);
   await page.setViewportSize({ width: 1280, height: 720 });
+  await expect
+    .poll(async () => {
+      const box = await shadow(page, ".aa-dock").boundingBox();
+      return box
+        ? Math.max(Math.abs(box.x - restored!.x), Math.abs(box.y - restored!.y))
+        : Number.POSITIVE_INFINITY;
+    })
+    .toBeLessThan(2);
 
   // Tooltip flips below a dock pinned to the top edge and stays fully onscreen.
   const topBox = await grip.boundingBox();
