@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.8 - 2026-09-03
+
+- Removed obsolete heartbeat, browser status, and automatic verification
+  surfaces; task completion remains an explicit CLI operation.
+- Kept reopened annotations visible at their captured bounds after a target's
+  accessible name changes, while reporting the target as unresolved.
+
 ## 0.1.7 - 2026-08-28
 
 - Replaced task polling with Vite HMR task-update events and removed the
