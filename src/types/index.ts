@@ -252,12 +252,6 @@ export type AgentAnnotationsPlatform = "mac" | "other";
 
 export type AgentAnnotationsScreenshotEvidenceMode = "auto" | "manual" | "off";
 
-export type AgentAnnotationsBrowserStatusConfig = {
-  endpoint: string;
-  token: string;
-  runtimeId?: string;
-};
-
 export type AgentAnnotationsHandoffConfig = {
   command?: string;
   verificationCommands?: readonly string[];
@@ -518,7 +512,6 @@ export type MountAgentAnnotationsOptions = {
   transport: TaskTransport;
   extensions?: readonly AgentAnnotationsClientExtension[];
   screenshotEvidence?: AgentAnnotationsScreenshotEvidenceMode;
-  browserStatus?: AgentAnnotationsBrowserStatusConfig;
   handoff?: AgentAnnotationsHandoffConfig;
   builtins?: false | AgentAnnotationsBuiltinsConfig;
   initialState?: AgentAnnotationsInitialState;
@@ -541,8 +534,4 @@ export interface AgentAnnotationsClientExtension {
 export type MountedAgentAnnotations = {
   api: StudioPublicApi;
   unmount(): void;
-  // Trusted mount-level hook (the generated Vite client, not extensions):
-  // reports a confirmed browser update and then snapshots the referenced
-  // source revision. Extensions only receive StudioPublicApi and cannot call it.
-  reportBrowserUpdate(): void;
 };

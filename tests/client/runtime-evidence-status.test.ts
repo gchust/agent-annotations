@@ -48,12 +48,10 @@ vi.mock("../../src/client/screenshot.js", () => ({
 }));
 
 import {
-  agentAnnotationsVersion,
   mountAgentAnnotations,
   RevisionConflictError,
 } from "../../src/client/index.js";
 import { createSafePageContext } from "../../src/client/runtime/annotated.js";
-import { browserSessionStorageKey } from "../../src/client/runtime/browser-session.js";
 import { defineClientExtension } from "../../src/extension/index.js";
 import { FileTaskStore } from "../../src/server/store.js";
 import { MemoryTaskTransport } from "../../src/testing/index.js";
@@ -640,7 +638,6 @@ describe("runtime-evidence-status", () => {
       };
       const mounted = await mountAgentAnnotations({
         transport,
-        browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
       });
       const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
       mounted.api.commands.capture.startPick();
@@ -654,9 +651,7 @@ describe("runtime-evidence-status", () => {
       expect(attempts).toBe(2);
       expect(mounted.api.getSnapshot().task.taskRevision).toBe(3);
       expect(diagnostics[0]).toContain("screenshot evidence failed");
-      // Task mutation and both conflict adoptions cannot report a browser update.
-      const revisionFetches = fetchMock.mock.calls.filter((call) => String(call[0]).endsWith("/revision"));
-      expect(revisionFetches).toHaveLength(0);
+      expect(fetchMock).not.toHaveBeenCalled();
       mounted.unmount();
     } finally {
       vi.unstubAllGlobals();
@@ -815,187 +810,6 @@ describe("runtime-evidence-status", () => {
     expect(shadow.querySelector('[role="status"]')?.textContent ?? "").not.toContain("Screenshot");
     mounted.unmount();
   });
-
-
-
-  it("does not report a browser update when an accepted task changes the referenced sources", async () => {
-    vi.useFakeTimers();
-    const fetchMock = vi.fn<typeof fetch>(async (input: RequestInfo | URL) => {
-      if (String(input).endsWith("/revision")) {
-        return new Response(JSON.stringify({
-          taskId: "task-1",
-          taskRevision: 0,
-          referencedSourceRevision: null,
-          referencedSourceFiles: [],
-        }), { status: 200 });
-      }
-      return new Response("{}", { status: 200 });
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    try {
-      const initial = await new MemoryTaskTransport().read();
-      let publish!: (task: AgentAnnotationsTask) => void;
-      const transport: TaskTransport = {
-        read: async () => initial,
-        mutate: async () => initial,
-        subscribe(listener) {
-          publish = listener;
-          return () => undefined;
-        },
-      };
-      const mounted = await mountAgentAnnotations({
-        transport,
-        browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
-      });
-      await vi.advanceTimersByTimeAsync(0);
-      // An accepted task revision introduces a referenced source file. It may
-      // invalidate the source snapshot, but it cannot report a browser update.
-      publish({ ...taskFixture(), taskId: initial.taskId, taskRevision: 1 });
-      await vi.advanceTimersByTimeAsync(0);
-      const revisionFetches = fetchMock.mock.calls.filter((call) => String(call[0]).endsWith("/revision"));
-      expect(revisionFetches).toHaveLength(0);
-      const heartbeats = fetchMock.mock.calls.filter((call) => String(call[0]).endsWith("/heartbeat"));
-      const latest = JSON.parse(heartbeats.at(-1)![1]!.body as string);
-      expect(latest.referencedSourceRevision).toBeNull();
-      expect(latest.taskRevision).toBe(1);
-      mounted.unmount();
-    } finally {
-      vi.unstubAllGlobals();
-    }
-  });
-
-
-
-  it("reports browser status heartbeats and applies source revisions through the mount hook", async () => {
-    vi.useFakeTimers();
-    history.pushState({}, "", "/#/settings?secret=supersecret");
-    const transport = new MemoryTaskTransport();
-    const initial = await transport.read();
-    const fetchMock = vi.fn<typeof fetch>(async (input: RequestInfo | URL) => {
-      if (String(input).endsWith("/revision")) {
-        return new Response(JSON.stringify({
-          taskId: initial.taskId,
-          taskRevision: initial.taskRevision,
-          referencedSourceRevision: "ab".repeat(32),
-          referencedSourceFiles: ["src/App.tsx"],
-        }), { status: 200 });
-      }
-      return new Response("{}", { status: 200 });
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    let mounted: Awaited<ReturnType<typeof mountAgentAnnotations>> | null = null;
-    try {
-      mounted = await mountAgentAnnotations({
-        transport,
-        browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
-      });
-      await vi.advanceTimersByTimeAsync(0);
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/__agent-annotations/heartbeat",
-        expect.objectContaining({
-          method: "POST",
-          headers: expect.objectContaining({ "x-agent-annotations-token": "status-token" }),
-        })
-      );
-      const body = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string);
-      expect(body).toMatchObject({
-        schema: "agent-annotations.browser-state.v2",
-        clientVersion: agentAnnotationsVersion,
-        taskId: expect.any(String),
-        taskRevision: 0,
-        browserUpdateRevision: 0,
-        referencedSourceRevision: null,
-        referencedSourceFiles: [],
-        annotationHealth: [],
-      });
-      // The hash route is preserved; the secret query is stripped.
-      expect(body.routeKey).toBe("/#/settings");
-      expect(JSON.stringify(body)).not.toContain("supersecret");
-      expect(JSON.stringify(body)).not.toContain("status-token");
-      expect(sessionStorage.getItem(browserSessionStorageKey("/__agent-annotations"))).not.toBeNull();
-      // The applied revision is reported only through the trusted mount hook.
-      mounted.reportBrowserUpdate();
-      await vi.advanceTimersByTimeAsync(0);
-      const heartbeats = fetchMock.mock.calls.filter((call) => String(call[0]).endsWith("/heartbeat"));
-      expect(JSON.parse(heartbeats.at(-1)![1]!.body as string).referencedSourceRevision)
-        .toBe("ab".repeat(32));
-      // Unmount stops the heartbeats.
-      mounted.unmount();
-      expect(sessionStorage.getItem(browserSessionStorageKey("/__agent-annotations"))).toBeNull();
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/__agent-annotations/heartbeat",
-        expect.objectContaining({ method: "DELETE" })
-      );
-      const calls = fetchMock.mock.calls.length;
-      await vi.advanceTimersByTimeAsync(20_000);
-      expect(fetchMock.mock.calls.length).toBe(calls);
-    } finally {
-      vi.unstubAllGlobals();
-    }
-  });
-
-
-
-  it("drops a queued heartbeat when the runtime unmounts", async () => {
-    vi.useFakeTimers();
-    let resolveHeartbeat!: (response: Response) => void;
-    const heartbeat = new Promise<Response>((resolve) => { resolveHeartbeat = resolve; });
-    const fetchMock = vi.fn<typeof fetch>((input, init) => {
-      if (String(input).endsWith("/heartbeat") && init?.method === "POST") return heartbeat;
-      return Promise.resolve(new Response("{}", { status: 500 }));
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    try {
-      const mounted = await mountAgentAnnotations({
-        transport: new MemoryTaskTransport(),
-        browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
-      });
-      const posts = () => fetchMock.mock.calls.filter(([input, init]) =>
-        String(input).endsWith("/heartbeat") && init?.method === "POST");
-      expect(posts()).toHaveLength(1);
-      mounted.reportBrowserUpdate();
-      mounted.unmount();
-      resolveHeartbeat(new Response("{}", { status: 200 }));
-      await vi.advanceTimersByTimeAsync(0);
-      expect(posts()).toHaveLength(1);
-    } finally {
-      vi.unstubAllGlobals();
-    }
-  });
-
-
-
-  it("isolates a failing third-party setup and still starts the browser status heartbeat", async () => {
-    vi.useFakeTimers();
-    const fetchMock = vi.fn<typeof fetch>(async () => new Response("{}", { status: 200 }));
-    vi.stubGlobal("fetch", fetchMock);
-    try {
-      const mounted = await mountAgentAnnotations({
-        transport: new MemoryTaskTransport(),
-        browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
-        extensions: [defineClientExtension({
-          id: "failing-setup",
-          apiVersion: 1,
-          setup: () => {
-            throw new Error("setup exploded");
-          },
-        })],
-      });
-      // The failing extension was isolated; the runtime stays mounted and
-      // reports its browser status.
-      expect(mounted.api.getSnapshot().collapsed).toBe(false);
-      await vi.advanceTimersByTimeAsync(0);
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/__agent-annotations/heartbeat",
-        expect.objectContaining({ method: "POST" })
-      );
-      mounted.unmount();
-    } finally {
-      vi.unstubAllGlobals();
-    }
-  });
-
-
 
   it("runs setup and dispose exactly once per mount and unmount", async () => {
     const setup = vi.fn();
@@ -1239,7 +1053,6 @@ describe("runtime-evidence-status", () => {
     });
     const mounted = await mountAgentAnnotations({
       transport: new MemoryTaskTransport(task),
-      browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
     });
     const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
     try {
@@ -1290,112 +1103,6 @@ describe("runtime-evidence-status", () => {
       mounted.unmount();
     }
   });
-
-
-
-  it("preserves applied browser state across task-only updates and clears it for a failed report", async () => {
-    vi.useFakeTimers();
-    let revisionResponse: Promise<Response> | null = null;
-    const fetchMock = vi.fn<typeof fetch>((input: RequestInfo | URL) => {
-      if (String(input).endsWith("/revision")) {
-        return revisionResponse ?? Promise.resolve(new Response("{}", { status: 500 }));
-      }
-      return Promise.resolve(new Response("{}", { status: 200 }));
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    try {
-      const initial = taskFixture();
-      let publish!: (task: AgentAnnotationsTask) => void;
-      const transport: TaskTransport = {
-        read: async () => initial,
-        mutate: async () => initial,
-        subscribe(listener) {
-          publish = listener;
-          return () => undefined;
-        },
-      };
-      const mounted = await mountAgentAnnotations({
-        transport,
-        browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
-      });
-      await vi.advanceTimersByTimeAsync(0);
-      const heartbeats = () => fetchMock.mock.calls.filter((call) => String(call[0]).endsWith("/heartbeat"));
-      const heartbeat = () => JSON.parse(heartbeats().at(-1)![1]!.body as string);
-      const revisionFetches = () => fetchMock.mock.calls.filter((call) => String(call[0]).endsWith("/revision"));
-      // A baseline is reported through the trusted hook.
-      revisionResponse = Promise.resolve(
-        new Response(JSON.stringify({
-          taskId: initial.taskId,
-          taskRevision: initial.taskRevision,
-          referencedSourceRevision: "ab".repeat(32),
-          referencedSourceFiles: ["src/pages/settings.tsx"],
-        }), { status: 200 })
-      );
-      mounted.reportBrowserUpdate();
-      await vi.advanceTimersByTimeAsync(0);
-      expect(heartbeat()).toMatchObject({
-        browserUpdateRevision: 1,
-        referencedSourceRevision: "ab".repeat(32),
-      });
-      const generation = heartbeat().browserUpdateRevision;
-      expect(revisionFetches()).toHaveLength(1);
-      // A same-source task update cannot advance the browser generation or
-      // replace the trusted source snapshot.
-      publish({ ...initial, taskRevision: 1 });
-      await vi.advanceTimersByTimeAsync(0);
-      expect(heartbeat()).toMatchObject({
-        browserUpdateRevision: generation,
-        referencedSourceRevision: "ab".repeat(32),
-      });
-      expect(revisionFetches()).toHaveLength(1);
-      // A trusted browser update advances the generation, but a response for
-      // another task revision cannot install its source snapshot.
-      revisionResponse = Promise.resolve(new Response(
-        JSON.stringify({
-          taskId: initial.taskId,
-          taskRevision: 99,
-          referencedSourceRevision: null,
-          referencedSourceFiles: [],
-        }),
-        { status: 200 }
-      ));
-      mounted.reportBrowserUpdate();
-      await vi.advanceTimersByTimeAsync(0);
-      expect(heartbeat()).toMatchObject({ browserUpdateRevision: 2, referencedSourceRevision: null });
-      // A task update racing an in-flight trusted report invalidates the
-      // response, so the newer task cannot inherit a disk hash it never ran.
-      let resolveStale!: (value: Response) => void;
-      revisionResponse = new Promise((resolve) => { resolveStale = resolve; });
-      mounted.reportBrowserUpdate();
-      publish({ ...initial, taskRevision: 2 });
-      resolveStale(new Response(JSON.stringify({
-        referencedSourceRevision: null,
-        referencedSourceFiles: [],
-      }), { status: 200 }));
-      await vi.advanceTimersByTimeAsync(0);
-      expect(heartbeat().referencedSourceRevision).toBeNull();
-      // A later successful refresh restores the new baseline.
-      revisionResponse = Promise.resolve(
-        new Response(JSON.stringify({
-          taskId: initial.taskId,
-          taskRevision: 2,
-          referencedSourceRevision: "cd".repeat(32),
-          referencedSourceFiles: ["src/pages/settings.tsx"],
-        }), { status: 200 })
-      );
-      mounted.reportBrowserUpdate();
-      await vi.advanceTimersByTimeAsync(0);
-      expect(heartbeat()).toMatchObject({
-        browserUpdateRevision: 4,
-        referencedSourceRevision: "cd".repeat(32),
-      });
-      mounted.unmount();
-    } finally {
-      vi.unstubAllGlobals();
-    }
-  });
-
-
 
   it("keeps completion commands bounded and redacts handoff instructions", async () => {
     const task = taskFixture({

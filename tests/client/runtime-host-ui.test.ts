@@ -89,7 +89,6 @@ describe("runtime-host-ui", () => {
     const originalFetch = window.fetch;
     const first = await mountAgentAnnotations({
       transport: new MemoryTaskTransport(),
-      browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
     });
     const patched = window.fetch;
     expect(patched).not.toBe(originalFetch);
@@ -98,7 +97,6 @@ describe("runtime-host-ui", () => {
     // A second mount patches again without stacking.
     const second = await mountAgentAnnotations({
       transport: new MemoryTaskTransport(),
-      browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
     });
     expect(window.fetch).not.toBe(originalFetch);
     second.unmount();
@@ -106,7 +104,6 @@ describe("runtime-host-ui", () => {
     // diagnostics.network=false leaves fetch untouched; console=false gates console capture.
     const gated = await mountAgentAnnotations({
       transport: new MemoryTaskTransport(),
-      browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
       diagnostics: { network: false, console: false },
     });
     expect(window.fetch).toBe(originalFetch);

@@ -25,12 +25,7 @@ const annotated = () => taskFixture({
 
 describe("agent handoff formatter", () => {
   it("emits the streamlined workflow with exact completion commands", () => {
-    const output = formatAgentAnnotationsHandoff(annotated(), {
-      browserUpdateRevision: 7,
-      referencedSourceRevision: "ab".repeat(32),
-      runtimeId: "runtime-customers",
-      routeKey: "/settings",
-    });
+    const output = formatAgentAnnotationsHandoff(annotated());
     expect(output).toContain(`# Agent Annotations Handoff ${annotated().taskId}`);
     expect(output).toContain(`- task revision: 4`);
     const instructions = output.split("## Instructions\n\n")[1]!.split("\n\n## Annotations")[0]!;

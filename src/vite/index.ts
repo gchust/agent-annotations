@@ -13,12 +13,6 @@ import type {
 } from "../types/index.js";
 
 import { FileTaskStore } from "../server/store.js";
-import {
-  parseAgentAnnotationsBrowserState,
-  parseAgentAnnotationsRuntimeId,
-  removeAgentAnnotationsBrowserState,
-  writeAgentAnnotationsBrowserState,
-} from "../server/browser-state.js";
 import { appendDiagnostics } from "../server/diagnostics.js";
 import { createSourcePathService } from "../server/source-path.js";
 import { validateAgentAnnotationsHandoffConfig } from "../core/handoff.js";
@@ -159,7 +153,6 @@ export default function agentAnnotations(
   let taskWatcher: FSWatcher | undefined;
   let viteBase = "/";
   let resolvedEndpoint = endpoint;
-  const browserRuntimeIds = new Set<string>();
 
   if (allowRemote) {
     console.warn(
@@ -215,28 +208,16 @@ export default function agentAnnotations(
         "let taskUpdatePending = false;",
         `const onTaskUpdate = () => { if (mounted) window.dispatchEvent(new Event(${JSON.stringify(TASK_UPDATE_EVENT)})); else taskUpdatePending = true; };`,
         `if (import.meta.hot) import.meta.hot.on(${JSON.stringify(TASK_UPDATE_EVENT)}, onTaskUpdate);`,
-        "window[key]?.(true);",
+        "window[key]?.();",
         "const transport = new HttpTaskTransport(config);",
-        `mounted = await mountAgentAnnotations({ transport, extensions, screenshotEvidence: config.screenshotEvidence, browserStatus: { endpoint: config.endpoint, token: config.token }, handoff: config.handoff, builtins: config.builtins, initialState: config.initialState, diagnostics: config.diagnostics });`,
+        `mounted = await mountAgentAnnotations({ transport, extensions, screenshotEvidence: config.screenshotEvidence, handoff: config.handoff, builtins: config.builtins, initialState: config.initialState, diagnostics: config.diagnostics });`,
         `if (taskUpdatePending) window.dispatchEvent(new Event(${JSON.stringify(TASK_UPDATE_EVENT)}));`,
-        "const onPageHide = () => window[key]?.(true);",
+        "const onPageHide = () => window[key]?.();",
         "window.addEventListener('pagehide', onPageHide, { once: true });",
-        "window[key] = (preserveBrowserState = false) => { window.removeEventListener('pagehide', onPageHide); mounted.unmount(preserveBrowserState); delete window[key]; };",
-        "mounted.reportBrowserUpdate();",
+        "window[key] = () => { window.removeEventListener('pagehide', onPageHide); mounted.unmount(); delete window[key]; };",
         "if (import.meta.hot) {",
-        "  const reportAfterUpdate = async (event) => {",
-        "    try {",
-        "      const responses = await Promise.all(event.updates.map((update) => {",
-        "        const url = new URL(update.acceptedPath, window.location.href);",
-        "        url.searchParams.set('t', String(update.timestamp));",
-        "        return fetch(url);",
-        "      }));",
-        "      if (responses.every((response) => response.ok)) mounted.reportBrowserUpdate();",
-        "    } catch {}",
-        "  };",
         "  import.meta.hot.accept();",
-        `  import.meta.hot.dispose(() => { import.meta.hot.off(${JSON.stringify(TASK_UPDATE_EVENT)}, onTaskUpdate); window[key]?.(true); });`,
-        "  import.meta.hot.on('vite:afterUpdate', (event) => { void reportAfterUpdate(event); });",
+        `  import.meta.hot.dispose(() => { import.meta.hot.off(${JSON.stringify(TASK_UPDATE_EVENT)}, onTaskUpdate); window[key]?.(); });`,
         "}",
       ].filter(Boolean).join("\n");
     },
@@ -320,19 +301,11 @@ export default function agentAnnotations(
         closeInstalled = true;
         const signals = ["SIGINT", "SIGTERM"] as const;
         const onExit = () => {
-          cleanupBrowserState();
           store.closeSync(token);
         };
         const onSignal = (signal: NodeJS.Signals) => {
-          cleanupBrowserState();
           store.closeSync(token);
           process.kill(process.pid, signal);
-        };
-        const cleanupBrowserState = (): void => {
-          for (const runtimeId of browserRuntimeIds) {
-            removeAgentAnnotationsBrowserState(runtimeRoot, runtimeId);
-          }
-          browserRuntimeIds.clear();
         };
         process.once("exit", onExit);
         for (const signal of signals) process.once(signal, onSignal);
@@ -341,7 +314,6 @@ export default function agentAnnotations(
           taskWatcher = undefined;
           process.off("exit", onExit);
           for (const signal of signals) process.off(signal, onSignal);
-          cleanupBrowserState();
           void store.close(token);
         });
       }
@@ -367,39 +339,9 @@ export default function agentAnnotations(
               ),
             });
           }
-          if (url.pathname === `${resolvedEndpoint}/revision` && request.method === "GET") {
-            const task = store.read();
-            return json(response, 200, {
-              taskId: task?.taskId ?? null,
-              taskRevision: task?.taskRevision ?? null,
-              referencedSourceRevision: task ? sourcePaths.revision(task) : null,
-              referencedSourceFiles: task ? sourcePaths.files(task) : [],
-            });
-          }
           if (url.pathname === `${resolvedEndpoint}/diagnostics` && request.method === "POST") {
             const input = await body(request, MAX_DIAGNOSTICS_BODY_BYTES) as { entries?: unknown };
             return json(response, 200, { entries: await appendDiagnostics(runtimeRoot, input.entries) });
-          }
-          if (url.pathname === `${resolvedEndpoint}/heartbeat` && request.method === "POST") {
-            const state = parseAgentAnnotationsBrowserState(await body(request, 16 * 1024));
-            writeAgentAnnotationsBrowserState(runtimeRoot, {
-              ...state,
-              lastHeartbeatAt: new Date().toISOString(),
-            });
-            browserRuntimeIds.add(state.runtimeId);
-            return json(response, 200, { ok: true, receivedAt: new Date().toISOString() });
-          }
-          if (url.pathname === `${resolvedEndpoint}/heartbeat` && request.method === "DELETE") {
-            const input = await body(request, 1_024) as Record<string, unknown>;
-            if (!input || typeof input !== "object" || Array.isArray(input) ||
-              Object.keys(input).length !== 1 || !("runtimeId" in input)) {
-              return json(response, 400, { error: "invalid_browser_runtime" });
-            }
-            const runtimeId = parseAgentAnnotationsRuntimeId(input.runtimeId);
-            if (browserRuntimeIds.delete(runtimeId)) {
-              removeAgentAnnotationsBrowserState(runtimeRoot, runtimeId);
-            }
-            return json(response, 200, { ok: true });
           }
           if (url.pathname === `${resolvedEndpoint}/evidence` && request.method === "POST") {
             const input = await body(request, MAX_EVIDENCE_BODY_BYTES) as {
@@ -423,7 +365,7 @@ export default function agentAnnotations(
           const code = (error as Error & { code?: string }).code ?? (error as Error).message;
           const task = (error as Error & { task?: unknown; latestTask?: unknown }).task
             ?? (error as Error & { latestTask?: unknown }).latestTask;
-          return json(response, code === "revision_conflict" || code === "stale_browser_state" ? 409 : 400, {
+          return json(response, code === "revision_conflict" ? 409 : 400, {
             error: code,
             ...(task ? { task } : {}),
           });

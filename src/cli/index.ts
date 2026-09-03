@@ -7,13 +7,6 @@ import {
   parseAgentAnnotationsTask,
   redactAgentAnnotationsText,
 } from "../core/index.js";
-import {
-  parseAgentAnnotationsRouteKey,
-  parseAgentAnnotationsRuntimeId,
-  readAgentAnnotationsBrowserStates,
-  selectAgentAnnotationsBrowserState,
-  type AgentAnnotationsBrowserStateSelector,
-} from "../server/browser-state.js";
 import { clearDiagnostics, readDiagnostics } from "../server/diagnostics.js";
 import { listEvidence, pruneOrphanEvidence } from "../server/evidence.js";
 import { createSourcePathService } from "../server/source-path.js";
@@ -37,9 +30,7 @@ Commands:
   reopen <annotation-id>
   print [--json|--markdown]
   validate-task [--json]
-  status [--json] [--check] [--runtime <runtime-id>|--route <route-key>] [--annotation <id>] [--fail-on-diagnostics --diagnostics-since <ISO>]
   revision [--json]
-  wait --browser-update-revision <integer> [--runtime <runtime-id>|--route <route-key>] [--timeout-ms <n>] [--json]
   wait --referenced-source-revision <sha256> [--timeout-ms <n>] [--json]
   diagnostics [--json|--clear]
   evidence [--json|--prune [--json]]
@@ -51,7 +42,6 @@ const KNOWN_COMMANDS = new Set([
   "reopen",
   "print",
   "validate-task",
-  "status",
   "revision",
   "wait",
   "diagnostics",
@@ -71,37 +61,6 @@ const task = (runtimeRoot: string): AgentAnnotationsTask => {
   const found = new FileTaskStore(runtimeRoot).read();
   if (!found) return fail(`no task found at ${taskPath(runtimeRoot)}`);
   return found;
-};
-
-const parseBrowserSelector = (args: string[]): {
-  selector: AgentAnnotationsBrowserStateSelector;
-  rest: string[];
-} => {
-  let runtimeId: string | undefined;
-  let routeKey: string | undefined;
-  const rest: string[] = [];
-  for (let index = 0; index < args.length; index += 1) {
-    const option = args[index]!;
-    if (option !== "--runtime" && option !== "--route") {
-      rest.push(option);
-      continue;
-    }
-    const value = args[++index];
-    if (value === undefined) fail(`${option} requires a value`, 2);
-    if (option === "--runtime") {
-      if (runtimeId !== undefined) fail("duplicate --runtime", 2);
-      try { runtimeId = parseAgentAnnotationsRuntimeId(value); }
-      catch { fail("--runtime must be a valid runtime id", 2); }
-    } else {
-      if (routeKey !== undefined) fail("duplicate --route", 2);
-      try { routeKey = parseAgentAnnotationsRouteKey(value); }
-      catch { fail("--route must be a safe query-free route key", 2); }
-    }
-  }
-  if (runtimeId !== undefined && routeKey !== undefined) {
-    fail("--runtime and --route are mutually exclusive", 2);
-  }
-  return { selector: { runtimeId, routeKey }, rest };
 };
 
 const parseMutationArgs = (command: "complete" | "reopen", args: string[]): {
@@ -199,7 +158,7 @@ const main = async (): Promise<void> => {
   }
   const resolution = resolveCliPaths({ cwd: process.cwd(), root, dir, env: process.env });
   if (!resolution.ok) return fail(resolution.message, resolution.code);
-  const { workspaceRoot, runtimeRoot, session } = resolution;
+  const { workspaceRoot, runtimeRoot } = resolution;
 
   if (command === "list") {
     const unknown = args.filter((arg) => arg !== "--json");
@@ -255,135 +214,6 @@ const main = async (): Promise<void> => {
     );
     return;
   }
-  if (command === "status") {
-    const { selector, rest } = parseBrowserSelector(args);
-    let json = false;
-    let check = false;
-    let failOnDiagnostics = false;
-    let annotationId: string | null = null;
-    let diagnosticsSince: string | null = null;
-    for (let index = 0; index < rest.length; index += 1) {
-      const option = rest[index]!;
-      if (option === "--json") json = true;
-      else if (option === "--check") check = true;
-      else if (option === "--fail-on-diagnostics") failOnDiagnostics = true;
-      else if (option === "--annotation" || option === "--diagnostics-since") {
-        const value = rest[++index];
-        if (value === undefined) fail(`${option} requires a value`, 2);
-        if (option === "--annotation") {
-          if (annotationId !== null) fail("duplicate --annotation", 2);
-          if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(value)) fail("--annotation must be a valid annotation id", 2);
-          annotationId = value;
-        } else {
-          if (diagnosticsSince !== null) fail("duplicate --diagnostics-since", 2);
-          if (Number.isNaN(Date.parse(value)) || new Date(value).toISOString() !== value) {
-            fail("--diagnostics-since must be an ISO-8601 timestamp", 2);
-          }
-          diagnosticsSince = value;
-        }
-      } else fail(`unknown option: ${option}`, 2);
-    }
-    if (failOnDiagnostics && diagnosticsSince === null) {
-      fail("--fail-on-diagnostics requires --diagnostics-since", 2);
-    }
-    const store = new FileTaskStore(runtimeRoot);
-    let current: AgentAnnotationsTask | null = null;
-    try {
-      current = store.read();
-    } catch {
-      current = null;
-    }
-    const taskValid = current !== null;
-    const browserStates = readAgentAnnotationsBrowserStates(runtimeRoot);
-    const selection = selectAgentAnnotationsBrowserState(browserStates, selector);
-    const browser = selection.selected;
-    const browserConnected = browser !== null;
-    const sourcePaths = createSourcePathService(workspaceRoot);
-    const referencedSourceRevision = current ? sourcePaths.revision(current) : null;
-    const referencedSourceFiles = current ? sourcePaths.files(current) : [];
-    const taskSynchronized =
-      taskValid &&
-      browserConnected &&
-      browser.taskId === current!.taskId &&
-      browser.taskRevision === current!.taskRevision;
-    const referencedSourceSynchronized = referencedSourceRevision === null
-      ? null
-      : browserConnected && browser.referencedSourceRevision === referencedSourceRevision;
-    const annotation = current?.annotations.find((entry) => entry.annotationId === annotationId) ?? null;
-    const annotationRouteMatches = annotationId === null
-      ? null
-      : browserConnected && annotation !== null && annotation.pageContext.routeKey === browser.routeKey;
-    const selectedAnnotationHealth = annotationId === null || !browser
-      ? null
-      : browser.annotationHealth.find((entry) => entry.annotationId === annotationId) ?? null;
-    const annotationResolved = annotationId === null
-      ? null
-      : annotationRouteMatches === true && selectedAnnotationHealth !== null &&
-        selectedAnnotationHealth.resolved === selectedAnnotationHealth.total;
-    const diagnostics = await readDiagnostics(runtimeRoot);
-    const diagnosticsAfterBaseline = diagnosticsSince === null
-      ? []
-      : diagnostics.filter((entry) => entry.timestamp > diagnosticsSince);
-    const report = {
-      taskValid,
-      // The resolved, shape-validated session (canonical roots, token, pid).
-      sessionPresent: session !== null,
-      runtimeSelectionError: selection.error,
-      selectedRuntimeId: browser?.runtimeId ?? null,
-      runtimes: browserStates.map((state) => ({
-        runtimeId: state.runtimeId,
-        routeKey: state.routeKey,
-        connected: selectAgentAnnotationsBrowserState([state]).selected !== null,
-        taskId: state.taskId,
-        taskRevision: state.taskRevision,
-        browserUpdateRevision: state.browserUpdateRevision,
-        lastHeartbeatAt: state.lastHeartbeatAt,
-      })),
-      browserConnected,
-      taskSynchronized,
-      referencedSourceSynchronized,
-      taskId: current?.taskId ?? null,
-      taskRevision: current?.taskRevision ?? null,
-      browserTaskId: browser?.taskId ?? null,
-      browserTaskRevision: browser?.taskRevision ?? null,
-      browserUpdateRevision: browser?.browserUpdateRevision ?? null,
-      referencedSourceRevision,
-      referencedSourceFiles,
-      browserReferencedSourceRevision: browser?.referencedSourceRevision ?? null,
-      browserReferencedSourceFiles: browser?.referencedSourceFiles ?? [],
-      routeKey: browser?.routeKey ?? null,
-      lastHeartbeatAt: browser?.lastHeartbeatAt ?? null,
-      selectedAnnotationId: annotationId,
-      annotationFound: annotationId === null ? null : annotation !== null,
-      annotationRouteKey: annotation?.pageContext.routeKey ?? null,
-      annotationRouteMatches,
-      annotationHealth: selectedAnnotationHealth,
-      annotationResolved,
-      diagnosticsSince,
-      failOnDiagnostics,
-      diagnosticCount: diagnostics.length,
-      diagnosticsAfterBaseline: diagnosticsAfterBaseline.length,
-    };
-    if (json) {
-      process.stdout.write(`${JSON.stringify(report)}\n`);
-    } else {
-      for (const [key, value] of Object.entries(report)) {
-        process.stdout.write(`${key}: ${String(value)}\n`);
-      }
-    }
-    if (check && !(
-      report.taskValid &&
-      report.runtimeSelectionError === null &&
-      report.browserConnected &&
-      report.taskSynchronized &&
-      report.referencedSourceSynchronized !== false &&
-      report.annotationResolved !== false &&
-      (!report.failOnDiagnostics || report.diagnosticsAfterBaseline === 0)
-    )) {
-      return fail("status check failed", 1);
-    }
-    return;
-  }
   if (command === "revision") {
     const unknown = args.filter((arg) => arg !== "--json");
     if (unknown.length) return fail(`unknown option: ${unknown[0]}`, 2);
@@ -406,24 +236,14 @@ const main = async (): Promise<void> => {
     return;
   }
   if (command === "wait") {
-    let browserUpdateTarget: string | null = null;
     let referencedSourceTarget: string | null = null;
     let timeoutMs = 30_000;
-    const selected = parseBrowserSelector(args);
-    const selector = selected.selector;
-    const json = selected.rest.includes("--json");
-    const rest = selected.rest.filter((arg) => arg !== "--json");
+    const json = args.includes("--json");
+    const rest = args.filter((arg) => arg !== "--json");
     while (rest.length) {
       const option = rest.shift();
-      if (option === "--browser-update-revision") {
-        if (browserUpdateTarget !== null || referencedSourceTarget !== null) {
-          return fail("wait accepts exactly one revision option", 2);
-        }
-        browserUpdateTarget = rest.shift() ?? "";
-      } else if (option === "--referenced-source-revision") {
-        if (browserUpdateTarget !== null || referencedSourceTarget !== null) {
-          return fail("wait accepts exactly one revision option", 2);
-        }
+      if (option === "--referenced-source-revision") {
+        if (referencedSourceTarget !== null) return fail("duplicate --referenced-source-revision", 2);
         referencedSourceTarget = rest.shift() ?? "";
       } else if (option === "--timeout-ms") {
         const value = rest.shift() ?? "";
@@ -439,61 +259,26 @@ const main = async (): Promise<void> => {
         return fail(`unknown option: ${option}`, 2);
       }
     }
-    if (browserUpdateTarget === null && referencedSourceTarget === null) {
-      return fail("wait requires --browser-update-revision <integer> or --referenced-source-revision <sha256>", 2);
+    if (referencedSourceTarget === null) {
+      return fail("wait requires --referenced-source-revision <sha256>", 2);
     }
-    let browserUpdateBaseline: number | null = null;
-    let referencedSourceBaseline: string | null = null;
-    if (browserUpdateTarget !== null) {
-      if (!/^\d+$/.test(browserUpdateTarget)) {
-        return fail("--browser-update-revision must be a non-negative safe integer", 2);
-      }
-      browserUpdateBaseline = Number(browserUpdateTarget);
-      if (!Number.isSafeInteger(browserUpdateBaseline)) {
-        return fail("--browser-update-revision must be a non-negative safe integer", 2);
-      }
-    } else {
-      referencedSourceBaseline = referencedSourceTarget!.toLowerCase();
-      if (!/^[0-9a-f]{64}$/i.test(referencedSourceBaseline)) {
-        return fail("--referenced-source-revision must be a 64-character hex sha256", 2);
-      }
+    const referencedSourceBaseline = referencedSourceTarget.toLowerCase();
+    if (!/^[0-9a-f]{64}$/i.test(referencedSourceBaseline)) {
+      return fail("--referenced-source-revision must be a 64-character hex sha256", 2);
     }
     const store = new FileTaskStore(runtimeRoot);
     const sourcePaths = createSourcePathService(workspaceRoot);
     const deadline = Date.now() + timeoutMs;
     while (true) {
-      if (browserUpdateBaseline !== null) {
-        const selection = selectAgentAnnotationsBrowserState(
-          readAgentAnnotationsBrowserStates(runtimeRoot),
-          selector
-        );
-        if (selection.error !== null && !(
-          selection.error === "browser_runtime_not_found" && selector.runtimeId !== undefined
-        )) return fail(selection.error, 1);
-        const observed = selection.selected?.browserUpdateRevision ?? null;
-        const changed = observed !== null && observed > browserUpdateBaseline;
-        if (changed || Date.now() >= deadline) {
-          const result = {
-            changed,
-            browserConnected: selection.selected !== null,
-            browserUpdateRevision: observed,
-          };
-          process.stdout.write(json
-            ? `${JSON.stringify(result)}\n`
-            : `changed: ${changed}, browserConnected: ${result.browserConnected}, browserUpdateRevision: ${observed}\n`);
-          return;
-        }
-      } else {
-        const current = store.read();
-        const observed = current ? sourcePaths.revision(current) : null;
-        const changed = observed !== null && observed !== referencedSourceBaseline;
-        if (changed || observed === null || Date.now() >= deadline) {
-          const result = { changed, referencedSourceRevision: observed };
-          process.stdout.write(json
-            ? `${JSON.stringify(result)}\n`
-            : `changed: ${changed}, referencedSourceRevision: ${observed ?? "unavailable"}\n`);
-          return;
-        }
+      const current = store.read();
+      const observed = current ? sourcePaths.revision(current) : null;
+      const changed = observed !== null && observed !== referencedSourceBaseline;
+      if (changed || observed === null || Date.now() >= deadline) {
+        const result = { changed, referencedSourceRevision: observed };
+        process.stdout.write(json
+          ? `${JSON.stringify(result)}\n`
+          : `changed: ${changed}, referencedSourceRevision: ${observed ?? "unavailable"}\n`);
+        return;
       }
       await new Promise((resolve) => setTimeout(resolve, 250));
     }

@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
@@ -8,10 +8,6 @@ const runtimeRoot = path.resolve(".agent-annotations");
 const evidenceRoot = process.env.AGENT_ANNOTATIONS_EVIDENCE;
 const extensionSource = path.resolve("src/demo-extension.ts");
 const cli = (...args: string[]) => execFileSync("pnpm", ["exec", "agent-annotations", ...args], {
-  encoding: "utf8",
-  env: { ...process.env, AGENT_ANNOTATIONS_DIR: runtimeRoot },
-});
-const cliFailure = (...args: string[]) => spawnSync("pnpm", ["exec", "agent-annotations", ...args], {
   encoding: "utf8",
   env: { ...process.env, AGENT_ANNOTATIONS_DIR: runtimeRoot },
 });
@@ -70,10 +66,6 @@ test("packed browser to file to CLI to browser loop, HMR and session security", 
   }, privacySentinel);
   await expect.poll(() => cli("diagnostics", "--json")).toContain("privacy-probe");
   expect(cli("diagnostics", "--json")).not.toContain(privacySentinel);
-  let selectedRuntimeId = JSON.parse(cli("status", "--json")).selectedRuntimeId;
-  const browserState = readFileSync(path.join(runtimeRoot, "browser-states", `${selectedRuntimeId}.json`), "utf8");
-  expect(JSON.parse(browserState).routeKey).toBe("/#/customers");
-  expect(browserState).not.toContain(privacySentinel);
   cli("diagnostics", "--clear");
   expect(JSON.parse(cli("diagnostics", "--json"))).toEqual([]);
   // A host identity adapter can fail for one NocoBase-style record without
@@ -92,17 +84,9 @@ test("packed browser to file to CLI to browser loop, HMR and session security", 
   await page.keyboard.press("Control+Alt+C");
   expect(await page.evaluate(() => navigator.clipboard.readText())).toContain("Identity fallback remains usable");
   await page.evaluate(() => { window.__AGENT_ANNOTATIONS_IDENTITY_FAULT = false; });
-  // The first referenced source was introduced by task-only capture. Reloading
-  // establishes the browser-applied source baseline before exact status checks.
+  // Reloading keeps the dock and task available.
   await page.reload();
   await expect(shadow(page, ".aa-dock")).toBeVisible();
-  await expect.poll(() => {
-    const status = JSON.parse(cli("status", "--json"));
-    return status.browserConnected && status.taskSynchronized && status.referencedSourceSynchronized
-      ? status.selectedRuntimeId
-      : null;
-  }, { timeout: 15_000 }).not.toBeNull();
-  selectedRuntimeId = JSON.parse(cli("status", "--json")).selectedRuntimeId;
   // Revision and wait commands report and poll exact referenced sources.
   const revision = JSON.parse(cli("revision", "--json"));
   expect(revision).toMatchObject({ taskRevision: expect.any(Number), referencedSourceFiles: ["src/main.tsx"] });
@@ -124,44 +108,6 @@ test("packed browser to file to CLI to browser loop, HMR and session security", 
   expect(handoff).not.toContain("agent-annotations status ");
   expect(handoff).not.toContain("--summary 'Make target purple'");
   expect(handoff).not.toContain(privacySentinel);
-
-  // The current-route heartbeat follows Goal 06's shared resolution snapshot:
-  // even with markers hidden, exact target loss blocks status and restoring
-  // the same identity recovers on the bounded periodic heartbeat.
-  await page.evaluate(() => window.__demoExtension?.studio?.commands.markers.hide());
-  await page.locator("#target").evaluate((element) => {
-    const state = window as typeof window & { __GOAL07_TARGET?: Element; __GOAL07_NEXT?: ChildNode | null };
-    state.__GOAL07_TARGET = element;
-    state.__GOAL07_NEXT = element.nextSibling;
-    element.remove();
-  });
-  await expect.poll(() => {
-    const result = cliFailure("status", "--runtime", selectedRuntimeId, "--annotation", id, "--check", "--json");
-    return result.status === 1 ? JSON.parse(result.stdout).annotationResolved : true;
-  }, { timeout: 10_000 }).toBe(false);
-  await page.evaluate(() => {
-    const state = window as typeof window & { __GOAL07_TARGET?: Element; __GOAL07_NEXT?: ChildNode | null };
-    document.querySelector("main")!.insertBefore(state.__GOAL07_TARGET!, state.__GOAL07_NEXT ?? null);
-    delete state.__GOAL07_TARGET;
-    delete state.__GOAL07_NEXT;
-  });
-  await expect.poll(() => {
-    const result = cliFailure("status", "--runtime", selectedRuntimeId, "--annotation", id, "--check", "--json");
-    return result.status === 0 && JSON.parse(result.stdout).annotationResolved;
-  }, { timeout: 15_000 }).toBe(true);
-  await page.evaluate(() => window.__demoExtension?.studio?.commands.markers.show());
-
-  // Diagnostics before an explicit CLI baseline are informational. A new 500
-  // after that baseline blocks only when status opts in.
-  const statusArgs = [
-    "status", "--runtime", selectedRuntimeId, "--annotation", id,
-    "--fail-on-diagnostics", "--diagnostics-since", new Date().toISOString(), "--check", "--json",
-  ];
-  expect(JSON.parse(cli(...statusArgs))).toMatchObject({ diagnosticsAfterBaseline: 0, annotationResolved: true });
-  await page.route("**/goal-07-500", (route) => route.fulfill({ status: 500, body: "failed" }));
-  await page.evaluate(() => fetch("/goal-07-500"));
-  await expect.poll(() => cliFailure(...statusArgs).status).toBe(1);
-  expect(JSON.parse(cliFailure(...statusArgs).stdout).diagnosticsAfterBaseline).toBeGreaterThan(0);
 
   // Complete from the handoff's summary-file placeholder after task validation.
   await page.keyboard.press("Control+Alt+C");

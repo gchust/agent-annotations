@@ -7,7 +7,7 @@ browser runs reset runtime output in the existing consumer without reinstalling.
 Agent Annotations is a browser annotation runtime for code review workflows: a
 React/Vite-powered studio captures element, multi, and region annotations with
 full observed context, persists them to a task file, and hands the task off to
-a code agent that fixes the issue and completes it from the browser.
+a code agent that fixes the issue and completes it through the CLI.
 
 ## Dependency and data flow
 
@@ -20,10 +20,10 @@ flowchart TD
     C --> F[Validated / Redacted Transport]
     F --> G[Vite API / Custom Transport]
     G --> H[FileTaskStore]
-    H --> I[Task / Evidence files]
-    C --> J[Browser State / Diagnostics]
-    J --> K[CLI Status / Handoff]
-    K --> H
+    H --> I[Task / Diagnostics / Evidence files]
+    C --> J[Diagnostics]
+    J --> I
+    K[CLI / Handoff] --> H
 ```
 
 - `react-grab/primitives` is imported by exactly one module
@@ -33,9 +33,9 @@ flowchart TD
   targets (identity-validated, no fuzzy matching), samples regions, and
   exposes capture freezing.
 - `Runtime Controllers` (`src/client/runtime/`) own disjoint concerns —
-  task/conflict synchronization, browser-status heartbeat state, host
-  route/locale/theme, capture modes and document binding, markers and
-  observers, evidence, diagnostics, and the chrome/overlays. A shared UI
+  task/conflict synchronization, host route/locale/theme, capture modes and
+  document binding, markers and observers, evidence, diagnostics, and the
+  chrome/overlays. A shared UI
   commit coordinator builds one deeply frozen public snapshot and refreshes
   Chrome once per logical state update; pointer movement only refreshes
   interactive overlays. The dependency graph is a DAG: helpers/controllers →
@@ -52,13 +52,10 @@ flowchart TD
   `MemoryTaskTransport` and custom transports are supported.
 - `FileTaskStore` persists the task, session, and evidence with atomic writes
   under a shared cross-process file lock with stale-lock recovery.
-- Per-runtime `Browser State` files and shared deterministic selection feed the
-  CLI `status`/browser-update wait checks; diagnostics feed the
-  `diagnostics` boundary, and handoff output; the CLI is the Code agent's
-  read/write authority (`validate-task`, `wait --browser-update-revision`,
-  `complete`, `reopen`, `evidence`, `revision`).
-- The Vite API accepts only complete Browser State v2 payloads at
-  `/heartbeat`. Source paths are canonicalized at the task mutation boundary;
+- Diagnostics feed the `diagnostics` boundary and handoff output; the CLI is
+  the Code agent's read/write authority (`validate-task`,
+  `wait --referenced-source-revision`, `complete`, `reopen`, `evidence`,
+  `revision`). Source paths are canonicalized at the task mutation boundary;
   there is no separate source-normalization endpoint.
 
 ## Runtime module graph
@@ -71,7 +68,6 @@ flowchart TB
     end
     subgraph Controllers
         diagnostics
-        browser-status
         markers
         task
         evidence
@@ -102,9 +98,8 @@ narrow per-module bindings (lazy getters, no module-level mutable globals);
   session token.
 - Diagnostics are bounded, redacted, and privacy-safe; network capture keeps
   only origin+path, never bodies/headers/auth.
-- Annotation and browser-state page identity comes from one safe page-context
-  resolver: defaults omit queries, host overrides are bounded and validated,
-  and task/browser parsers reject persisted query-bearing values.
+- Annotation page identity comes from a safe page-context resolver: defaults
+  omit queries, and host overrides are bounded and validated.
 - Evidence files are confined to `<runtimeRoot>/evidence`; refs and pruning
   never follow symlinks or traverse outside.
 - Task mutation payloads are redacted at the boundary before any transport.

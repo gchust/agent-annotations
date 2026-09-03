@@ -85,11 +85,9 @@ the task file.
 3. **Run the dev server** — the studio dock appears on the page.
 4. **Capture**: pick an element with `Ctrl+Alt+P`, type a comment, save. The
    task lands in `.agent-annotations/tasks/active-task.json`.
-5. **Hand off**: the browser runtime stays in sync; a code agent edits the
-   source, then runs `agent-annotations wait --browser-update-revision <generation>` —
-   the browser waits for the applied update, then
-   verifies the exact annotation health and new diagnostics, then completes
-   with `agent-annotations complete <id> --verified --summary-file <path>`.
+5. **Hand off**: a code agent edits the source, runs the relevant project
+   check, then completes with
+   `agent-annotations complete <id> --verified --summary-file <path>`.
 
 ## Manual runtime and custom transports
 
@@ -207,9 +205,7 @@ agent-annotations complete <annotation-id> --verified --summary-file <path>
 agent-annotations reopen <annotation-id>
 agent-annotations print [--json|--markdown]
 agent-annotations validate-task [--json]
-agent-annotations status [--json] [--check] [--runtime <runtime-id>|--route <route-key>] [--annotation <id>] [--fail-on-diagnostics --diagnostics-since <ISO>]
 agent-annotations revision [--json]
-agent-annotations wait --browser-update-revision <integer> [--runtime <runtime-id>|--route <route-key>] [--timeout-ms <n>] [--json]
 agent-annotations wait --referenced-source-revision <sha256> [--timeout-ms <n>] [--json]
 agent-annotations diagnostics [--json|--clear]
 agent-annotations evidence [--json|--prune [--json]]
@@ -223,29 +219,8 @@ human-readable text; errors go to stderr with stable exit codes. Completing an
 annotation that is no longer present is an idempotent success reported as
 `skipped`; `reopen` remains strict.
 
-`status [--json] [--check]` reports task validity, session presence, all fresh
-browser runtimes, the selected runtime, browser
-connection, task synchronization, browser update generation, disk-computed
-referenced-source revision, browser-reported referenced-source revision, and
-whether referenced-source synchronization is available. When no source files
-are known, the revision and synchronization fields are `null`; this does not
-make `status --check` fail. With multiple fresh runtimes, pass the exact
-`--runtime <runtime-id>` or safe `--route <route-key>`; otherwise status and
-browser-update waits fail with `ambiguous_browser_runtime` rather than choosing
-a last writer. `wait --browser-update-revision <integer>` waits for the selected
-fresh browser generation above the baseline; a pinned `--runtime` tolerates a
-temporary reload disconnect and reports `browserConnected: false` if it times
-out before reconnection. The generated Vite client keeps that runtime ID and
-generation in endpoint-scoped tab session storage across HMR and full reloads.
-Explicit library `unmount()` clears the session. `wait
---referenced-source-revision <sha256>` watches known referenced files and
+`wait --referenced-source-revision <sha256>` watches known referenced files and
 returns an explicit unavailable result when none are known.
-
-`--annotation <id>` additionally checks that the task annotation belongs to
-the selected browser route and that every persisted target resolves in the
-current-route heartbeat. Diagnostics stay informational unless
-`--fail-on-diagnostics` is paired with an exact `--diagnostics-since <ISO>`
-baseline; then `--check` also fails for newer entries.
 
 The default `Copy` action emits a Code-Agent handoff instead of a data dump:
 annotation context plus source-edit, immediate-completion, project-check, and
@@ -287,8 +262,8 @@ origin+path URL — never queries, bodies, headers, or auth); `evidence`
 lists task-referenced screenshot files with their annotation ids and never
 touches files outside the runtime evidence directory. `revision` reports the
 task revision, `referencedSourceRevision` (or `null`), and canonical referenced
-files. The two wait modes return their named observed field and use the same
-bounded (30 second) timeout.
+files. The wait command returns the observed source revision and uses a bounded
+30 second timeout.
 
 ## Localization
 
