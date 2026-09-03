@@ -57,7 +57,6 @@ import { createEvidenceController } from "./evidence.js";
 import { createCaptureController } from "./capture.js";
 import { createGuardedHostIntegration, createHostController, type GuardedHostIntegration } from "./host.js";
 import { createOverlayController } from "./overlays.js";
-import { createBrowserStatusController } from "./browser-status.js";
 import { createUiCommitCoordinator } from "./ui-state.js";
 
 export async function mountAgentAnnotations(
@@ -92,6 +91,9 @@ export async function mountAgentAnnotations(
 
   // Unconditional transport boundary: every task entering the runtime is
   // schema-parsed, including third-party custom TaskTransport implementations.
+  const ownEndpoint = typeof (options.transport as { endpoint?: unknown }).endpoint === "string"
+    ? (options.transport as unknown as { endpoint: string }).endpoint
+    : null;
   const transport = createValidatedTaskTransport(options.transport);
 
   const screenshotMode: AgentAnnotationsScreenshotEvidenceMode =
@@ -171,33 +173,6 @@ export async function mountAgentAnnotations(
     timers.delete(timer);
   };
 
-  const browserStatus = options.browserStatus ?? null;
-  let annotationHealth = (): Array<{
-    annotationId: string;
-    resolved: number;
-    total: number;
-    reason: "unresolved" | "identity mismatch" | "identity unverifiable" | "iframe unsupported" | null;
-  }> => [];
-  let resetHeartbeatResolutionSnapshots = (): void => undefined;
-  const browserStatusController = createBrowserStatusController({
-    config: browserStatus,
-    task: () => task,
-    setTaskValue: (next) => { task = next; },
-    routeKey: () => routeKey,
-    destroyed: () => destroyed,
-    annotationHealth: () => annotationHealth(),
-    resetResolutionSnapshots: () => resetHeartbeatResolutionSnapshots(),
-    scheduleTimer,
-  });
-  const {
-    runtimeId,
-    setTask,
-    sendHeartbeat: sendBrowserHeartbeat,
-    stopHeartbeats: stopBrowserHeartbeats,
-    scheduleHeartbeat: scheduleBrowserHeartbeat,
-    reportBrowserUpdate,
-    removeBrowserState,
-  } = browserStatusController;
   const scheduleFrame = (callback: () => void): number => {
     const frame = window.requestAnimationFrame(() => {
       frames.delete(frame);
@@ -217,7 +192,7 @@ export async function mountAgentAnnotations(
       // Identity rule: a different task id replaces the current task even at
       // revision 0; the same task id only advances on a larger revision.
       if (destroyed || !isTaskIdentityNewer(taskIdentity(next), taskIdentity(task))) return;
-      setTask(next);
+      task = next;
       scheduleFrame(() => commit());
     }));
   }
@@ -251,8 +226,6 @@ export async function mountAgentAnnotations(
     routeKey: () => routeKey,
     setRouteKey: (value) => {
       routeKey = value;
-      resetHeartbeatResolutionSnapshots();
-      sendBrowserHeartbeat();
     },
     pageContext: () => safePageContext(),
     shortcuts: () => shortcuts,
@@ -383,7 +356,7 @@ export async function mountAgentAnnotations(
     scheduleFrame: (cb) => scheduleFrame(cb),
     emit: () => emit(),
     refreshChrome: () => refreshChrome(),
-    browserStatus: () => browserStatus,
+    ownEndpoint: () => ownEndpoint,
     destroyed: () => destroyed,
   });
   const {
@@ -432,7 +405,7 @@ export async function mountAgentAnnotations(
 
   const taskController = createTaskController({
     task: () => task,
-    setTask,
+    setTask: (next) => { task = next; },
     transport: () => transport,
     guardedRedactors,
     commit: () => commit(),
@@ -595,10 +568,7 @@ export async function mountAgentAnnotations(
     positionComposer: () => positionComposer(),
     positionEditor: () => positionEditor(),
     localized: (value, params) => localized(value, params),
-    resolutionChanged: () => {
-      refreshChrome();
-      sendBrowserHeartbeat();
-    },
+    resolutionChanged: () => refreshChrome(),
   });
   const {
     resolutionSnapshot,
@@ -610,11 +580,6 @@ export async function mountAgentAnnotations(
     scheduleMarkerRefresh,
     syncMarkerTracking,
   } = markers;
-  resetHeartbeatResolutionSnapshots = resetResolutionSnapshots;
-  annotationHealth = () => task.annotations
-    .filter((annotation) => annotation.status === "open" && annotation.pageContext.routeKey === routeKey)
-    .map((annotation) => ({ annotationId: annotation.annotationId, ...resolutionSnapshot(annotation).summary }));
-
   const overlays = createOverlayController({
     localized: (value, params) => localized(value, params),
     scheduleTimer,
@@ -1307,10 +1272,8 @@ export async function mountAgentAnnotations(
     hostElement.remove();
     throw error;
   }
-  const unmount = (preserveBrowserState = false) => {
+  const unmount = () => {
     if (destroyed) return;
-    stopBrowserHeartbeats();
-    if (!preserveBrowserState) removeBrowserState();
     destroyed = true;
     setMarkerHighlight(null);
     editorAnchorRect = null;
@@ -1353,8 +1316,5 @@ export async function mountAgentAnnotations(
     if (history.pushState === pushState) history.pushState = originalPushState;
     if (history.replaceState === replaceState) history.replaceState = originalReplaceState;
   });
-  // The browser status loop starts only after every setup step succeeded, so
-  // a failed mount can never persist a browserConnected state.
-  scheduleBrowserHeartbeat();
-  return { api, unmount, reportBrowserUpdate };
+  return { api, unmount };
 }

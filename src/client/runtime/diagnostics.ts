@@ -22,7 +22,7 @@ export type DiagnosticsBindings = {
   scheduleFrame(callback: () => void): number;
   emit(): void;
   refreshChrome(): void;
-  browserStatus(): { endpoint: string; token: string } | null;
+  ownEndpoint(): string | null;
   destroyed(): boolean;
 };
 
@@ -194,10 +194,10 @@ export const createDiagnosticsController = (b: DiagnosticsBindings): Diagnostics
     }
   };
   const isOwnEndpoint = (raw: string): boolean => {
-    const status = b.browserStatus();
-    if (!status) return false;
+    const ownEndpoint = b.ownEndpoint();
+    if (!ownEndpoint) return false;
     try {
-      const endpoint = new URL(status.endpoint, window.location.href);
+      const endpoint = new URL(ownEndpoint, window.location.href);
       const target = new URL(raw, window.location.href);
       return target.origin === endpoint.origin
         && (target.pathname === endpoint.pathname || target.pathname.startsWith(`${endpoint.pathname}/`));

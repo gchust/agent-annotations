@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
@@ -29,12 +30,11 @@ const rows = (task: any) => task.annotations.map((annotation: any) => {
   };
 });
 
-const revision = async (page: Page, token: string) => page.evaluate(async (value) => {
-  const session = await (await fetch("/__agent-annotations/revision", {
-    headers: { "x-agent-annotations-token": value },
-  })).json();
-  return session;
-}, token);
+const revision = () => JSON.parse(execFileSync(
+  "pnpm",
+  ["exec", "agent-annotations", "revision", "--json"],
+  { encoding: "utf8", env: { ...process.env, AGENT_ANNOTATIONS_DIR: runtimeRoot } }
+));
 
 const capture = async (page: Page, selector: string) => {
   const comment = `source ${selector}`;
@@ -104,18 +104,17 @@ test("source-benchmark duplicate-basename exact path, line, column, and revision
   }, null, 2)}\n`);
   const correct = path.resolve("src/duplicate-a/Card.tsx");
   const wrong = path.resolve("src/duplicate-b/Card.tsx");
-  const token = JSON.parse(readFileSync(path.join(runtimeRoot, "session.json"), "utf8")).token;
-  const baseline = await revision(page, token);
+  const baseline = revision();
   expect(baseline.referencedSourceFiles).toContain("src/duplicate-a/Card.tsx");
   expect(baseline.referencedSourceFiles).not.toContain("src/duplicate-b/Card.tsx");
   const wrongBefore = readFileSync(wrong, "utf8");
   const correctBefore = readFileSync(correct, "utf8");
   try {
     writeFileSync(wrong, `${wrongBefore}\n`);
-    const afterWrong = await revision(page, token);
+    const afterWrong = revision();
     expect(afterWrong).toEqual(baseline);
     writeFileSync(correct, `${correctBefore}\n`);
-    const afterCorrect = await revision(page, token);
+    const afterCorrect = revision();
     expect(afterCorrect).toMatchObject({
       taskRevision: baseline.taskRevision,
       referencedSourceFiles: baseline.referencedSourceFiles,

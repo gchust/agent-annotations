@@ -1638,32 +1638,42 @@ describe("runtime-markers-capture", () => {
 
 
 
-  it("hides the marker when the unique selector points at a different element identity", async () => {
-    vi.useFakeTimers();
+  it("keeps a reopened marker at its saved bounds after remount when the target changed", async () => {
     history.pushState({}, "", "/settings");
-    document.body.innerHTML = '<main><button id="actual">Wrong</button></main>';
-    const task = taskFixture({
+    document.body.innerHTML = '<main><button aria-label="Wrong">Wrong</button></main>';
+    const transport = new MemoryTaskTransport(taskFixture({
+      status: "completed",
       annotations: [annotationFixture({
+        status: "completed",
+        completedAt: "2026-08-24T00:00:00.000Z",
         targets: [targetFixture({
+          bounds: { x: 420, y: 260, width: 120, height: 32 },
           selector: "main > button",
           inspection: {
             ...targetFixture().inspection,
-            attributes: { id: "expected", role: "button", "aria-label": "Save" },
+            attributes: { role: "button", "aria-label": "Save" },
           },
         })],
       })],
-    });
-    const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport(task) });
+    }));
+    const mounted = await mountAgentAnnotations({ transport });
+    await mounted.api.commands.annotations.reopen("ann-1");
+    expect(mounted.api.getSnapshot().task.annotations[0]?.status).toBe("open");
+    mounted.unmount();
+
+    const remounted = await mountAgentAnnotations({ transport });
     const shadow = document.getElementById("agent-annotations-root")!.shadowRoot!;
     try {
       const marker = shadow.querySelector<HTMLElement>(".aa-marker")!;
-      expect(marker.hidden).toBe(true);
-      expect(marker.style.left).toBe("");
-      window.dispatchEvent(new Event("resize"));
-      await vi.runAllTimersAsync();
-      expect(marker.hidden).toBe(true);
+      expect(marker.hidden).toBe(false);
+      expect(marker.dataset.status).toBe("open");
+      expect(marker.dataset.resolved).toBe("0");
+      expect({ left: marker.style.left, top: marker.style.top }).toEqual({
+        left: "412px",
+        top: "252px",
+      });
     } finally {
-      mounted.unmount();
+      remounted.unmount();
     }
   });
 

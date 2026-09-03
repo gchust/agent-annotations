@@ -78,12 +78,14 @@ export const createMarkerController = (b: MarkerBindings): MarkerController => {
       resolution.status !== "resolved" || !b.isInAppRoot(resolution.element)
     );
     const anchor = resolvedTargets[0] ?? null;
-    // Completed annotations remain useful after a page change. When their
-    // target no longer resolves, retain the capture-time viewport position
-    // converted back through the capture scroll offset.
+    // Open annotations remain reachable when an implementation changes only
+    // their accessible name, without treating the changed element as resolved.
+    const useCapturedBounds = annotation.status === "completed" ||
+      (resolutions[0]?.status === "identity_mismatch" &&
+        resolutions[0].reason === "accessible name changed");
     const anchorBounds = anchor
       ? targetBounds(anchor)
-      : annotation.status === "completed" && annotation.targets?.[0]
+      : useCapturedBounds && annotation.targets?.[0]
         ? {
             x: annotation.targets[0].bounds.x + annotation.pageContext.scroll.x - scrollX,
             y: annotation.targets[0].bounds.y + annotation.pageContext.scroll.y - scrollY,

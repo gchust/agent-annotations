@@ -10,13 +10,7 @@ import type {
   AgentAnnotationsTask,
 } from "../types/index.js";
 
-export type AgentAnnotationsHandoffOptions = AgentAnnotationsHandoffConfig & {
-  browserUpdateRevision?: number | null;
-  referencedSourceRevision?: string | null;
-  runtimeId?: string | null;
-  routeKey?: string | null;
-  generatedAt?: string | null;
-};
+export type AgentAnnotationsHandoffOptions = AgentAnnotationsHandoffConfig;
 
 export type NormalizedAgentAnnotationsHandoffConfig = {
   command: string;

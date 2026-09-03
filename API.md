@@ -6,25 +6,14 @@ package, Node consumer, and browser consumer checks do not repack it.
 ## `@gchust/agent-annotations`
 
 - `mountAgentAnnotations(options)` mounts the React runtime and returns
-  `{ api, unmount, reportBrowserUpdate }`. `options.transport`
+  `{ api, unmount }`. `options.transport`
   implements `TaskTransport`; optional `options.extensions` uses public client
   extensions. `options.screenshotEvidence`
   accepts `"auto" | "manual" | "off"` (default `"auto"`): `auto` captures
   best-effort screenshot evidence in the background after every save (the save
   never waits for it), `manual` exposes `studio.commands.annotations.captureEvidence(id)`
   and the editor's `Capture screenshot` action, and `off` disables capture
-  entirely. Invalid values throw a `TypeError`. `options.browserStatus`
-  (`{ endpoint, token }`) enables the authenticated browser runtime status
-  heartbeat (`.agent-annotations/browser-states/<runtimeId>.json`). The
-  endpoint-scoped tab session keeps its runtime ID and browser update revision
-  across Vite remounts and full reloads. Explicit `unmount()` clears that local
-  session and requests removal of its server state; generated HMR and pagehide
-  teardown preserve both for the replacement mount.
-  `reportBrowserUpdate()` is a trusted mount-level hook (used by the
-  generated Vite client after mount and after `vite:afterUpdate`): it re-fetches
-  the current source revision through the runtime-owned, generation-guarded
-  refresh path and reports it as applied. It is not part of `StudioPublicApi`,
-  so extensions cannot spoof the applied revision.
+  entirely. Invalid values throw a `TypeError`.
 - `StudioPublicApi.commands.annotations.targetSummary(annotationId)` returns the
   annotation's resolution summary `{ resolved, total, reason }` where `reason`
   is one of `"unresolved"`, `"identity mismatch"`, `"identity unverifiable"`,
@@ -221,7 +210,7 @@ that directory and never follow traversal or symlink paths.
 ## CLI
 
 The `agent-annotations` bin exposes `list`, `complete`, `reopen`, `print`,
-`validate-task`, `status`, `revision`, `wait`, `diagnostics`, and
+`validate-task`, `revision`, `wait`, `diagnostics`, and
 `evidence [--json|--prune [--json]]`. `evidence --prune` performs a safe
 orphan sweep of `<runtimeRoot>/evidence` (only unreferenced regular files,
 never symlinks, with a grace window for newly written evidence) and reports
@@ -237,27 +226,9 @@ value to stdout, the default writes stable human-readable text, and errors go
 to stderr with exit code 1 (runtime) or 2 (usage). The removed `verify` command
 has no alias.
 
-`status [--json] [--check] [--runtime <runtime-id>|--route <route-key>]
-[--annotation <id>] [--fail-on-diagnostics --diagnostics-since <ISO>]` reads
-the per-runtime browser states persisted by the authenticated dev client
-(`.agent-annotations/browser-states/<runtimeId>.json`, strict v2 schema, mode
-0600, no token or sensitive text) and reports task validity,
-session presence, browser connection (fresh heartbeat within 15 seconds), task
-and source synchronization, deterministic runtime summaries/selection,
-ids/revisions, route, bounded current-route annotation health, last heartbeat,
-and diagnostic counts. With multiple fresh
-runtimes, callers must select an exact runtime or route; otherwise the result is
-`ambiguous_browser_runtime`. `--check` exits 1 unless `taskValid`, `browserConnected`,
-`taskSynchronized`, available referenced-source synchronization, requested
-annotation route/target health, and opted-in post-baseline diagnostics are
-healthy. Diagnostics are informational unless `--fail-on-diagnostics` is
-paired with `--diagnostics-since`; without `--check`
-the command is informational and exits 0. `wait --browser-update-revision
-<integer>` accepts the same runtime selectors and waits for that fresh browser
-generation above the baseline. A pinned `--runtime` remains pending while that
-runtime is temporarily disconnected and reports `browserConnected: false` on
-timeout; ambiguous selection still fails immediately. `wait
---referenced-source-revision <sha256>` watches known referenced files and
+`revision [--json]` reports the task revision, canonical referenced files, and
+their source revision. `wait --referenced-source-revision <sha256>` watches
+known referenced files and
 returns an explicit unavailable result when no files are known.
 
 Path resolution is shared by every command and distinguishes the workspace

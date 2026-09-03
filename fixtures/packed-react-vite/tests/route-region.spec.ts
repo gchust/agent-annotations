@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
@@ -12,12 +13,11 @@ test.beforeAll(() => {
   rmSync(taskPath, { force: true });
 });
 
-const revision = async (page: Page, token: string) => page.evaluate(async (value) => {
-  const session = await (await fetch("/__agent-annotations/revision", {
-    headers: { "x-agent-annotations-token": value },
-  })).json();
-  return session;
-}, token);
+const revision = () => JSON.parse(execFileSync(
+  "pnpm",
+  ["exec", "agent-annotations", "revision", "--json"],
+  { encoding: "utf8", env: { ...process.env, AGENT_ANNOTATIONS_DIR: runtimeRoot } }
+));
 
 test("route-aware markers, region targets, history navigation, and cross-route focus", async ({ page }) => {
   await page.goto("/route-a");
@@ -60,13 +60,12 @@ test("route-aware markers, region targets, history navigation, and cross-route f
 
   // 3. Source revision changes for a file referenced only by a Region target.
   const regionOnly = path.resolve("src/route-a/RegionOnly.tsx");
-  const token = JSON.parse(readFileSync(path.join(runtimeRoot, "session.json"), "utf8")).token;
-  const baseline = await revision(page, token);
+  const baseline = revision();
   expect(baseline.referencedSourceFiles).toContain("src/route-a/RegionOnly.tsx");
   const before = readFileSync(regionOnly, "utf8");
   try {
     writeFileSync(regionOnly, `${before}\n`);
-    const after = await revision(page, token);
+    const after = revision();
     expect(after.referencedSourceRevision).not.toBe(baseline.referencedSourceRevision);
   } finally {
     writeFileSync(regionOnly, before);

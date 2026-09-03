@@ -15,10 +15,8 @@ for (const text of [
   `${bin} reopen <annotation-id>`,
   `${bin} print [--json|--markdown]`,
   `${bin} validate-task [--json]`,
-  `${bin} status [--json] [--check] [--runtime <runtime-id>|--route <route-key>]`,
   `${bin} --root <path> --dir <path> <command> [options]`,
   `${bin} revision [--json]`,
-  `${bin} wait --browser-update-revision <integer> [--runtime <runtime-id>|--route <route-key>] [--timeout-ms <n>] [--json]`,
   `${bin} wait --referenced-source-revision <sha256> [--timeout-ms <n>] [--json]`,
   `${bin} diagnostics [--json|--clear]`,
   `${bin} evidence [--json|--prune [--json]]`,
@@ -69,6 +67,9 @@ const apiText = readFileSync(new URL("../API.md", import.meta.url), "utf8");
 for (const [file, content] of [["README.md", readme], ["API.md", apiText], ["docs/architecture.md", arch]]) {
   if (/\bmcp\b|nocobase/i.test(content)) {
     throw new Error(`${file} must not document MCP/NocoBase coupling`);
+  }
+  if (/\/(?:heartbeats?|revision)\b|\bstatus \[--json\]|--browser-update-revision\b/i.test(content)) {
+    throw new Error(`${file} must not document removed browser-state interfaces`);
   }
 }
 for (const file of [

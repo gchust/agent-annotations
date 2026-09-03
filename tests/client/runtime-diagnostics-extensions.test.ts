@@ -213,9 +213,6 @@ describe("runtime-diagnostics-extensions", () => {
     vi.useFakeTimers();
     const fetchMock = vi.fn<typeof fetch>(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.includes("/heartbeat") || url.includes("/revision")) {
-        return new Response("{}", { status: 200 });
-      }
       if (url.includes("fail-500")) return new Response("{}", { status: 500 });
       if (url.includes("fail-404")) return new Response("{}", { status: 404 });
       throw new TypeError("network down");
@@ -223,10 +220,7 @@ describe("runtime-diagnostics-extensions", () => {
     vi.stubGlobal("fetch", fetchMock);
     let mounted: Awaited<ReturnType<typeof mountAgentAnnotations>> | null = null;
     try {
-      mounted = await mountAgentAnnotations({
-        transport: new MemoryTaskTransport(),
-        browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
-      });
+      mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport() });
       await vi.advanceTimersByTimeAsync(0);
       const network = (): AgentAnnotationsDiagnosticsEntry[] =>
         mounted!.api.getSnapshot().diagnostics.filter((entry) => entry.source === "network");
@@ -270,7 +264,6 @@ describe("runtime-diagnostics-extensions", () => {
     } as typeof XMLHttpRequest.prototype.send;
     const mounted = await mountAgentAnnotations({
       transport: new MemoryTaskTransport(),
-      browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
     });
     const dispatch = (xhr: XMLHttpRequest, type: string) => {
       (xhr as XMLHttpRequest & { dispatchEvent(e: Event): boolean }).dispatchEvent(new Event(type));
@@ -339,7 +332,6 @@ describe("runtime-diagnostics-extensions", () => {
     } as typeof XMLHttpRequest.prototype.send;
     const mounted = await mountAgentAnnotations({
       transport: new MemoryTaskTransport(),
-      browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
     });
     const dispatch = (xhr: XMLHttpRequest, type: string) => {
       (xhr as XMLHttpRequest & { dispatchEvent(e: Event): boolean }).dispatchEvent(new Event(type));
@@ -389,7 +381,6 @@ describe("runtime-diagnostics-extensions", () => {
     } as typeof XMLHttpRequest.prototype.send;
     const mounted = await mountAgentAnnotations({
       transport: new MemoryTaskTransport(),
-      browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
     });
     const dispatch = (xhr: XMLHttpRequest, type: string) => {
       (xhr as XMLHttpRequest & { dispatchEvent(e: Event): boolean }).dispatchEvent(new Event(type));
@@ -441,7 +432,6 @@ describe("runtime-diagnostics-extensions", () => {
     } as typeof XMLHttpRequest.prototype.send;
     const mounted = await mountAgentAnnotations({
       transport: new MemoryTaskTransport(),
-      browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
     });
     try {
       const toStringSpy = vi.fn(() => "https://app.test/private");
@@ -478,7 +468,6 @@ describe("runtime-diagnostics-extensions", () => {
     } as typeof XMLHttpRequest.prototype.send;
     const mounted = await mountAgentAnnotations({
       transport: new MemoryTaskTransport(),
-      browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
     });
     const xhr = new XMLHttpRequest();
     try {
@@ -511,10 +500,7 @@ describe("runtime-diagnostics-extensions", () => {
     vi.stubGlobal("fetch", fetchMock);
     let mounted: Awaited<ReturnType<typeof mountAgentAnnotations>> | null = null;
     try {
-      mounted = await mountAgentAnnotations({
-        transport: new MemoryTaskTransport(),
-        browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
-      });
+      mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport() });
       // Overlong origin+path (> 2000) never enters the snapshot.
       await fetch(`https://app.test/${"x".repeat(2000)}`);
       // Overlong and non-A-Z methods never enter the snapshot.
@@ -538,10 +524,7 @@ describe("runtime-diagnostics-extensions", () => {
     vi.stubGlobal("fetch", fetchMock);
     let mounted: Awaited<ReturnType<typeof mountAgentAnnotations>> | null = null;
     try {
-      mounted = await mountAgentAnnotations({
-        transport: new MemoryTaskTransport(),
-        browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
-      });
+      mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport() });
       const unknown = { toString: toStringSpy } as unknown as RequestInfo;
       await fetch(unknown);
       await vi.advanceTimersByTimeAsync(0);
@@ -579,18 +562,16 @@ describe("runtime-diagnostics-extensions", () => {
     vi.stubGlobal("fetch", fetchMock);
     let mounted: Awaited<ReturnType<typeof mountAgentAnnotations>> | null = null;
     try {
-      mounted = await mountAgentAnnotations({
-        transport: new MemoryTaskTransport(),
-        browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
+      const transport = Object.assign(new MemoryTaskTransport(), {
+        endpoint: "/__agent-annotations",
       });
+      mounted = await mountAgentAnnotations({ transport });
       await vi.advanceTimersByTimeAsync(0);
       // Failing own-endpoint requests (relative and absolute) are suppressed
       // and must not produce a single network diagnostic or recurse.
       await expect(fetch("/__agent-annotations/diagnostics")).rejects.toThrow("diagnostics endpoint down");
       const absoluteOwn = `${window.location.origin}/__agent-annotations/diagnostics`;
       await expect(fetch(absoluteOwn)).rejects.toThrow("diagnostics endpoint down");
-      // Own-endpoint successes are also never recorded.
-      expect((await fetch("/__agent-annotations/heartbeat")).ok).toBe(true);
       await vi.advanceTimersByTimeAsync(0);
       const entries = mounted.api.getSnapshot().diagnostics.filter((entry) => entry.source === "network");
       expect(entries).toEqual([]);
@@ -625,7 +606,6 @@ describe("runtime-diagnostics-extensions", () => {
     try {
       mounted = await mountAgentAnnotations({
         transport: new MemoryTaskTransport(),
-        browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
       });
       const ours = window.fetch;
       expect(ours).not.toBe(originalFetch);
@@ -648,7 +628,6 @@ describe("runtime-diagnostics-extensions", () => {
       // reinstalled exactly once.
       mounted = await mountAgentAnnotations({
         transport: new MemoryTaskTransport(),
-        browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
       });
       expect(window.fetch).toBe(foreign);
       expect(XMLHttpRequest.prototype.open).not.toBe(originalOpen);
@@ -695,12 +674,10 @@ describe("runtime-diagnostics-extensions", () => {
     try {
       const first = await mountAgentAnnotations({
         transport: new MemoryTaskTransport(),
-        browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
       });
       const patchedOnce = window.fetch;
       await expect(mountAgentAnnotations({
         transport: new MemoryTaskTransport(),
-        browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
       })).rejects.toThrow("already mounted");
       expect(window.fetch).toBe(patchedOnce);
       first.unmount();
@@ -736,7 +713,6 @@ describe("runtime-diagnostics-extensions", () => {
     try {
       const mounted = await mountAgentAnnotations({
         transport: new MemoryTaskTransport(),
-        browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
       });
       // Method derived from Request.method when init.method is absent.
       await fetch(new Request("https://app.test/request-500?token=SECRET", { method: "DELETE" }));
@@ -1226,64 +1202,6 @@ describe("runtime-diagnostics-extensions", () => {
     expect(mounted.api.getSnapshot().diagnostics.some((entry) => entry.phase === "setup")).toBe(true);
     mounted.unmount();
   });
-
-
-
-  it("supersedes stale source revision responses so they cannot regress the applied revision", async () => {
-    vi.useFakeTimers();
-    const transport = new MemoryTaskTransport();
-    const initial = await transport.read();
-    let first = true;
-    let resolveFirst!: (value: Response) => void;
-    const fetchMock = vi.fn<typeof fetch>((input: RequestInfo | URL) => {
-      if (String(input).endsWith("/revision")) {
-        if (first) {
-          first = false;
-          return new Promise((resolve) => { resolveFirst = resolve; });
-        }
-        return Promise.resolve(
-          new Response(JSON.stringify({
-            taskId: initial.taskId,
-            taskRevision: initial.taskRevision,
-            referencedSourceRevision: "cd".repeat(32),
-            referencedSourceFiles: ["src/pages/settings.tsx"],
-          }), { status: 200 })
-        );
-      }
-      return Promise.resolve(new Response("{}", { status: 200 }));
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    let mounted: Awaited<ReturnType<typeof mountAgentAnnotations>> | null = null;
-    try {
-      mounted = await mountAgentAnnotations({
-        transport,
-        browserStatus: { endpoint: "/__agent-annotations", token: "status-token" },
-      });
-      await vi.advanceTimersByTimeAsync(0);
-      // The first refresh is pending; the second supersedes it.
-      mounted.reportBrowserUpdate();
-      mounted.reportBrowserUpdate();
-      await vi.advanceTimersByTimeAsync(0);
-      const heartbeats = () => fetchMock.mock.calls.filter((call) => String(call[0]).endsWith("/heartbeat"));
-      expect(JSON.parse(heartbeats().at(-1)![1]!.body as string).referencedSourceRevision)
-        .toBe("cd".repeat(32));
-      // The superseded response arrives late: it must never overwrite.
-      resolveFirst(new Response(JSON.stringify({
-        taskId: initial.taskId,
-        taskRevision: initial.taskRevision,
-        referencedSourceRevision: "ab".repeat(32),
-        referencedSourceFiles: ["src/pages/settings.tsx"],
-      }), { status: 200 }));
-      await vi.advanceTimersByTimeAsync(0);
-      expect(JSON.parse(heartbeats().at(-1)![1]!.body as string).referencedSourceRevision)
-        .toBe("cd".repeat(32));
-      mounted.unmount();
-    } finally {
-      vi.unstubAllGlobals();
-    }
-  });
-
-
 
   it("defers the background capture through the tracked timer so unmount cancels it", async () => {
     vi.useFakeTimers();
