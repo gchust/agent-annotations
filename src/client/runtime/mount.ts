@@ -117,7 +117,17 @@ export async function mountAgentAnnotations(
     throw error;
   }
   let captureMode: AgentAnnotationsCaptureMode = "idle";
-  let collapsed = initialState.collapsed ?? false;
+  const collapsedStateKey = (): string => `agent-annotations:collapsed:${task.taskId}`;
+  const readCollapsedState = (): boolean => {
+    try {
+      const saved = window.localStorage.getItem(collapsedStateKey());
+      if (saved === "true" || saved === "false") return saved === "true";
+    } catch {
+      // Storage can be unavailable; the configured initial state still works.
+    }
+    return initialState.collapsed ?? false;
+  };
+  let collapsed = readCollapsedState();
   let markersVisible = initialState.markersVisible ?? true;
   let openPanel: StudioPublicSnapshot["openPanel"] = null;
   let selected: Element[] = [];
@@ -635,7 +645,14 @@ export async function mountAgentAnnotations(
     markersVisible: () => markersVisible,
     setMarkersVisibleValue: (value) => { markersVisible = value; },
     collapsed: () => collapsed,
-    setCollapsedValue: (value) => { collapsed = value; },
+    setCollapsedValue: (value) => {
+      collapsed = value;
+      try {
+        window.localStorage.setItem(collapsedStateKey(), String(value));
+      } catch {
+        // Persistence must not prevent toolbar interactions.
+      }
+    },
     captureMode: () => captureMode,
     setCaptureModeValue: (value) => { captureMode = value; },
     selected: () => selected,

@@ -151,8 +151,7 @@ controlled Node integrations.
   listeners and restores the patched methods on unmount.
 - `mountAgentAnnotations` accepts `builtins?: false | AgentAnnotationsBuiltinsConfig`
   (per-action booleans plus `shortcuts` overrides, all JSON-safe validated) and
-  `initialState?: { collapsed?, markersVisible? }` (default expanded, markers
-  visible). With `builtins: false` only third-party extensions mount; disabled
+  `initialState?: { collapsed?, markersVisible? }` (default expanded, markers visible). The collapsed state is persisted per origin and task and restored before the first render; a saved boolean takes precedence over `initialState.collapsed`, which is the fallback when storage is missing, invalid, or unavailable. With `builtins: false` only third-party extensions mount; disabled
   builtins contribute no toolbar entry, panel, or shortcut, and shortcut
   overrides still pass the registry's conflict validation.
 - Saving a Pick, Multi, or Area annotation exits capture mode. Destructive

@@ -62,6 +62,7 @@ import type {
 import { annotationFixture, targetFixture, taskFixture } from "../core/test-data.js";
 
 afterEach(() => {
+  window.localStorage.clear();
   document.getElementById("agent-annotations-root")?.remove();
   primitives.getElementAtPoint.mockReset();
   primitives.getElementAtPoint.mockReturnValue(null);

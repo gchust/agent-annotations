@@ -62,6 +62,7 @@ import type {
 import { annotationFixture, targetFixture, taskFixture } from "../core/test-data.js";
 
 afterEach(() => {
+  window.localStorage.clear();
   document.getElementById("agent-annotations-root")?.remove();
   primitives.getElementAtPoint.mockReset();
   primitives.getElementAtPoint.mockReturnValue(null);
@@ -1657,6 +1658,65 @@ describe("runtime-host-ui", () => {
   });
 
 
+
+  it("restores collapsed and expanded state on remount without leaking between tasks", async () => {
+    const transport = new MemoryTaskTransport(taskFixture());
+    let mounted = await mountAgentAnnotations({ transport });
+    try {
+      mounted.api.commands.toolbar.toggleCollapsed();
+      expect(mounted.api.getSnapshot().collapsed).toBe(true);
+    } finally {
+      mounted.unmount();
+    }
+    mounted = await mountAgentAnnotations({ transport, initialState: { collapsed: false } });
+    try {
+      expect(mounted.api.getSnapshot().collapsed).toBe(true);
+      expect(document.getElementById("agent-annotations-root")!.shadowRoot!.querySelector(".aa-collapsed-count")).not.toBeNull();
+      mounted.api.commands.toolbar.toggleCollapsed();
+      expect(mounted.api.getSnapshot().collapsed).toBe(false);
+    } finally {
+      mounted.unmount();
+    }
+    mounted = await mountAgentAnnotations({ transport, initialState: { collapsed: true } });
+    try {
+      expect(mounted.api.getSnapshot().collapsed).toBe(false);
+      mounted.api.commands.toolbar.toggleCollapsed();
+    } finally {
+      mounted.unmount();
+    }
+    mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport(taskFixture({ taskId: "another-task" })) });
+    try {
+      expect(mounted.api.getSnapshot().collapsed).toBe(false);
+    } finally {
+      mounted.unmount();
+    }
+  });
+
+  it.each([undefined, "invalid", "null", "{}", "1"])("uses initialState when stored collapse state is %s", async (saved) => {
+    if (saved !== undefined) localStorage.setItem("agent-annotations:collapsed:task-1", saved);
+    const mounted = await mountAgentAnnotations({
+      transport: new MemoryTaskTransport(taskFixture()),
+      initialState: { collapsed: true },
+    });
+    try {
+      expect(mounted.api.getSnapshot().collapsed).toBe(true);
+    } finally {
+      mounted.unmount();
+    }
+  });
+
+  it("keeps collapse usable when browser storage is unavailable", async () => {
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new Error("Storage blocked"); });
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("Storage blocked"); });
+    const mounted = await mountAgentAnnotations({ transport: new MemoryTaskTransport(taskFixture()), initialState: { collapsed: true } });
+    try {
+      expect(mounted.api.getSnapshot().collapsed).toBe(true);
+      mounted.api.commands.toolbar.toggleCollapsed();
+      expect(mounted.api.getSnapshot().collapsed).toBe(false);
+    } finally {
+      mounted.unmount();
+    }
+  });
 
   it("persists the dock position per origin and project task and clamps it after reload and resize", async () => {
     vi.useFakeTimers();

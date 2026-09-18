@@ -168,6 +168,12 @@ test("keyboard-only Pick, Multi, Copy, List, and Collapse flows with visual evid
   const afterMinimizedDrag = await minimized.boundingBox();
   expect(afterMinimizedDrag!.x).toBeLessThan(beforeMinimizedDrag!.x - 100);
   expect(afterMinimizedDrag!.y).toBeLessThan(beforeMinimizedDrag!.y - 40);
+  // Reload after dragging must preserve both the collapsed state and position.
+  await page.reload();
+  await expect(shadow(page, ".aa-dock")).toHaveAttribute("data-collapsed", "true");
+  const reloadedMinimized = await minimized.boundingBox();
+  expect(reloadedMinimized!.x).toBeCloseTo(afterMinimizedDrag!.x, 0);
+  expect(reloadedMinimized!.y).toBeCloseTo(afterMinimizedDrag!.y, 0);
   await minimized.click();
   await expect(shadow(page, ".aa-dock")).toHaveAttribute("data-collapsed", "false");
   await expect(shadow(page, ".aa-collapsed-count")).toHaveCount(0);
@@ -192,7 +198,7 @@ test("keyboard-only Pick, Multi, Copy, List, and Collapse flows with visual evid
   const draggedLeft = dockBox!.x;
   await page.reload();
   await expect(shadow(page, ".aa-dock")).toBeVisible();
-  // A reload resets to the default expanded initial state.
+  // A reload also preserves the explicitly expanded state.
   await expect(shadow(page, ".aa-dock")).toHaveAttribute("data-collapsed", "false");
   const restored = await shadow(page, ".aa-dock").boundingBox();
   expect(restored!.x).toBeCloseTo(draggedLeft, 0);

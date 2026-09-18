@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.9 - 2026-09-18
+
+- Remember the toolbar collapsed or expanded state per origin and task across page reloads, falling back to `initialState.collapsed` when no valid stored preference is available.
+
 ## 0.1.8 - 2026-09-03
 
 - Removed obsolete heartbeat, browser status, and automatic verification
