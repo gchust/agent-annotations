@@ -12,7 +12,7 @@ export const REDACTED_VALUE = "[REDACTED]";
 export const DEFAULT_REDACTION_STRING_LIMIT = 2_000;
 
 const SECRET_KEY_PATTERN =
-  /(?:^|[-_.])(?:authorization|cookie|token|secret|password|api[-_.]?key|input[-_.]?value|value)(?:$|[-_.])/i;
+  /(?:^|[-_.])(?:authorization|cookie|(?:access[-_.]?|refresh[-_.]?)?token|(?:client[-_.]?)?secret|password|api[-_.]?key|input[-_.]?value|value)(?:$|[-_.])/i;
 const AUTHORIZATION_PATTERN =
   /\bAuthorization\s*:\s*[^\r\n]+/gi;
 const BEARER_PATTERN = /\bBearer\s+[A-Za-z0-9._~+/=-]+/gi;
@@ -20,7 +20,7 @@ const JWT_PATTERN =
   /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g;
 const COOKIE_PATTERN = /\b(?:Set-)?Cookie\s*:\s*[^\r\n]+/gi;
 const ASSIGNMENT_PATTERN =
-  /(^|[?&\s;,<{])(["']?)((?:access_?|refresh_?)?token|(?:client[_-]?)?secret|password|api[_-]?key|input[_-]?value|value)\2(\s*[:=]\s*)(?:(["])([^"]*)"|(['])([^']*)'|([^\s&;,"'>}]+))/gi;
+  /(^|[?&\s;,<{])(["']?)((?:access[-_.]?|refresh[-_.]?)?token|(?:client[-_.]?)?secret|password|api[-_.]?key|input[-_.]?value|value)\2(\s*[:=]\s*)(?:(["])([^"]*)"|(['])([^']*)'|([^\s&;,"'>}]+))/gi;
 
 type RedactionRecorder = {
   droppedKeys: Set<string>;

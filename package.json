@@ -86,7 +86,6 @@
     "check:tarball": "node scripts/tarball-audit.mjs"
   },
   "dependencies": {
-    "magic-string": "0.30.21",
     "react-grab": "0.1.50"
   },
   "peerDependencies": {

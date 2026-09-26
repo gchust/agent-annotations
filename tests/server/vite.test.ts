@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -10,6 +10,7 @@ import { createServer } from "vite";
 import pkg from "../../package.json" with { type: "json" };
 import { atomicWriteJson } from "../../src/server/store.js";
 import agentAnnotations, { createSourcePathService, isAgentAnnotationsRequestAllowed } from "../../src/vite/index.js";
+import { taskFixture } from "../core/test-data.js";
 
 const roots: string[] = [];
 const fixture = () => {
@@ -30,6 +31,60 @@ const fixture = () => {
 afterEach(() => roots.splice(0).forEach((root) => rmSync(root, { recursive: true, force: true })));
 
 describe("serve-only Vite plugin", () => {
+  it.each([
+    { dir: ".agent-annotations", base: "/", strict: true },
+    { dir: "public/private annotations", base: "/app/", strict: false },
+  ])("never serves runtime files ($dir, base $base, strict $strict)", async ({ dir, base, strict }) => {
+    const { root } = fixture();
+    const runtime = path.join(root, dir);
+    const files = ["tasks/active-task.json", "diagnostics.json", "evidence/test.png", "summary.txt", "..private.txt"];
+    for (const file of files) {
+      mkdirSync(path.dirname(path.join(runtime, file)), { recursive: true });
+      writeFileSync(path.join(runtime, file), "PRIVATE_SENTINEL");
+    }
+    atomicWriteJson(path.join(runtime, files[0]!), taskFixture());
+    symlinkSync(runtime, path.join(root, "runtime-link"), "junction");
+    writeFileSync(path.join(root, "public.txt"), "public content");
+    const server = await createServer({
+      root, base, configFile: false, logLevel: "silent",
+      resolve: { alias: { "/runtime-alias": runtime } },
+      server: { host: "127.0.0.1", port: 0, fs: { strict } },
+      plugins: [agentAnnotations({ root, dir })],
+    });
+    try {
+      await server.listen();
+      const address = server.httpServer!.address();
+      if (!address || typeof address === "string") throw new Error("no address");
+      const origin = `http://127.0.0.1:${address.port}`;
+      const session = JSON.parse(readFileSync(path.join(runtime, "session.json"), "utf8"));
+      for (const file of ["session.json", ...files]) {
+        for (const prefix of [dir, `@fs/${runtime.replace(/\\/g, "/")}`, "runtime-link", "runtime-alias",
+          ...(dir.startsWith("public/") ? [dir.slice(7)] : [])]) {
+          for (const query of ["", "?raw", "?url", "?import"]) {
+            const response = await fetch(`${origin}${base}${encodeURI(`${prefix}/${file}`)}${query}`);
+            expect(response.status).toBe(404);
+            const text = await response.text();
+            expect(text).not.toContain(session.token);
+            expect(text).not.toContain("PRIVATE_SENTINEL");
+          }
+        }
+        const encoded = await fetch(`${origin}${base}${encodeURIComponent(dir).replace(/\./g, "%2e")}/${file}`);
+        expect(encoded.status).toBe(404);
+      }
+      await expect(server.transformRequest(`/@fs/${runtime.replace(/\\/g, "/")}/tasks/active-task.json?raw`))
+        .rejects.toThrow("runtime files are private");
+      expect((await fetch(`${origin}${base}public.txt`)).status).toBe(200);
+      expect((await fetch(`${origin}${base}__agent-annotations/task`)).status).toBe(404);
+      const allowed = await fetch(`${origin}${base}__agent-annotations/task`, {
+        headers: { "x-agent-annotations-token": session.token },
+      });
+      expect(allowed.status).toBe(200);
+      expect((await allowed.json()).task.taskId).toBe("task-1");
+    } finally {
+      await server.close();
+    }
+  });
+
   it("is serve-only, injects through the namespaced virtual module, and canonicalizes under root", () => {
     const plugin = agentAnnotations({ root: "/tmp/demo", clientExtensions: ["/tmp/demo/extension.ts"] });
     const resolveId = plugin.resolveId as Function;

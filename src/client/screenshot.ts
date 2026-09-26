@@ -1,6 +1,8 @@
 export const MAX_SCREENSHOT_WIDTH = 1600;
 export const MAX_SCREENSHOT_HEIGHT = 1200;
 export const MAX_SCREENSHOT_SNAPSHOT_BYTES = 2 * 1024 * 1024;
+export const MAX_SCREENSHOT_NODES = 5_000;
+export const MAX_SCREENSHOT_PREPARATION_MS = 100;
 
 const STYLE_PROPERTIES = [
   "display", "position", "visibility", "opacity", "box-sizing", "width", "height",
@@ -105,7 +107,30 @@ const sanitize = (source: Element, clone: Element): void => {
 };
 
 /** Clone and style in source/clone lockstep before media is changed. */
-export function cloneScreenshotRoot(root: Element): Element {
+export function cloneScreenshotRoot(
+  root: Element,
+  deadline = performance.now() + MAX_SCREENSHOT_PREPARATION_MS
+): Element {
+  // Reject oversized pages before cloning or reading computed styles. The
+  // ponytail: cooperative fixed budget; one native DOM operation cannot be
+  // preempted. Use incremental capture if larger pages must retain evidence.
+  const checkTime = () => {
+    if (performance.now() > deadline) throw new Error("screenshot preparation budget exceeded");
+  };
+  const preflight = root.ownerDocument.createTreeWalker(root, NodeFilter.SHOW_ALL);
+  let nodes = 0;
+  let characters = 0;
+  do {
+    checkTime();
+    const node = preflight.currentNode;
+    characters += node.nodeValue?.length ?? 0;
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      for (const attribute of (node as Element).attributes) characters += attribute.value.length;
+    }
+    if (++nodes > MAX_SCREENSHOT_NODES || characters > MAX_SCREENSHOT_SNAPSHOT_BYTES) {
+      throw new Error("screenshot snapshot too large");
+    }
+  } while (preflight.nextNode());
   const clone = root.cloneNode(true) as Element;
   const sources: Element[] = [root];
   const clones: Element[] = [clone];
@@ -115,7 +140,11 @@ export function cloneScreenshotRoot(root: Element): Element {
     sources.push(sourceWalker.currentNode as Element);
     clones.push(cloneWalker.currentNode as Element);
   }
-  for (let index = 0; index < sources.length; index += 1) sanitize(sources[index]!, clones[index]!);
+  for (let index = 0; index < sources.length; index += 1) {
+    checkTime();
+    sanitize(sources[index]!, clones[index]!);
+  }
+  checkTime();
   clone.querySelector("#agent-annotations-root")?.remove();
   for (const noscript of clone.querySelectorAll("noscript")) noscript.remove();
   clone.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
@@ -164,7 +193,7 @@ export function prepareViewportSnapshot(
     const scale = computeScreenshotScale(viewportWidth, viewportHeight);
     const width = Math.round(viewportWidth * scale);
     const height = Math.round(viewportHeight * scale);
-    const clone = cloneScreenshotRoot(document.documentElement);
+    const clone = cloneScreenshotRoot(document.documentElement, started + MAX_SCREENSHOT_PREPARATION_MS);
     const svg = buildScreenshotSvg(
       new XMLSerializer().serializeToString(clone),
       viewportWidth,
@@ -174,7 +203,8 @@ export function prepareViewportSnapshot(
       scrollX,
       scrollY
     );
-    if (new TextEncoder().encode(svg).byteLength > MAX_SCREENSHOT_SNAPSHOT_BYTES) return null;
+    if (performance.now() - started > MAX_SCREENSHOT_PREPARATION_MS ||
+      new TextEncoder().encode(svg).byteLength > MAX_SCREENSHOT_SNAPSHOT_BYTES) return null;
     return Object.freeze({
       svg,
       width,

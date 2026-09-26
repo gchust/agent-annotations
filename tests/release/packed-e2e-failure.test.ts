@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
+import type { JSONReport } from "@playwright/test/reporter";
 
 const root = fileURLToPath(new URL("../..", import.meta.url));
 const generated = ["node_modules", ".git", "dist", "test-results", "playwright-report"];
@@ -47,21 +48,22 @@ describe("packed E2E failure propagation", () => {
     };
     writeFileSync(manifestPath, `${JSON.stringify({
       ...manifest,
-      scripts: { ...manifest.scripts, "test:e2e": "playwright test tests/failing.spec.ts" },
+      scripts: { ...manifest.scripts, "test:e2e": "playwright test tests/failing.spec.ts --reporter=json" },
     }, null, 2)}\n`);
     mkdirSync(path.join(fixture, "tests"), { recursive: true });
     writeFileSync(path.join(fixture, "tests", "failing.spec.ts"), `
 import { expect, test } from "@playwright/test";
 
 test("single packed E2E failure", () => {
-  expect(1).toBe(2);
+  expect(1, "PACKED_E2E_EXPECTED_ASSERTION").toBe(2);
 });
 `);
 
     const script = path.join(checkout, "scripts/packed-e2e.mjs");
+    const reportPath = path.join(fixture, "failure-report.json");
     const result = spawnSync(process.execPath, [script], {
       cwd: checkout,
-      env: { ...process.env, AGENT_ANNOTATIONS_PACKED_FIXTURE: fixture },
+      env: { ...process.env, AGENT_ANNOTATIONS_PACKED_FIXTURE: fixture, PLAYWRIGHT_JSON_OUTPUT_FILE: reportPath },
       encoding: "utf8",
       timeout: 300_000,
     });
@@ -70,5 +72,16 @@ test("single packed E2E failure", () => {
     // retried or swallowed into a green exit.
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("preserved failed packed E2E consumer");
+    // Build/install/server failures are not proof that a failed spec propagates.
+    const report = JSON.parse(readFileSync(reportPath, "utf8")) as JSONReport;
+    expect(report.errors).toEqual([]);
+    expect(report.stats).toMatchObject({ expected: 0, unexpected: 1, skipped: 0, flaky: 0 });
+    const specs = report.suites.flatMap((suite) => suite.specs);
+    expect(specs).toHaveLength(1);
+    expect(specs[0].title).toBe("single packed E2E failure");
+    const results = specs[0].tests.flatMap((test) => test.results);
+    expect(results).toHaveLength(1);
+    expect(results[0].status).toBe("failed");
+    expect(results[0].error?.message).toContain("PACKED_E2E_EXPECTED_ASSERTION");
   });
 });

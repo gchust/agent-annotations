@@ -33,7 +33,7 @@ jobs:
       - run: pnpm check:docs
       - name: Full test suite (Linux)
         if: runner.os == 'Linux'
-        run: pnpm test
+        run: pnpm exec vitest run
       - name: Windows filesystem, Vite, and CLI path gates
         if: runner.os == 'Windows'
         run: pnpm exec vitest run tests/server/store.test.ts tests/server/diagnostics.test.ts tests/server/evidence.test.ts tests/server/source-path.test.ts tests/server/vite.test.ts tests/cli/arguments.test.ts tests/cli/cli.test.ts

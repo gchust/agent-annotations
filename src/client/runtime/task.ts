@@ -31,7 +31,9 @@ export type TaskController = {
 export const createTaskController = (b: TaskBindings): TaskController => {
   const mutate = async (operations: AgentAnnotationsMutationOperation[]): Promise<AgentAnnotationsTask | undefined> => {
     if (b.destroyed()) return undefined;
+    const taskId = b.task().taskId;
     const attempt = async (expectedRevision: number): Promise<AgentAnnotationsTask | undefined> => {
+      if (b.destroyed() || b.task().taskId !== taskId) return undefined;
       const redactors = b.guardedRedactors();
       // Every delegated mutation passes the unified boundary first: the
       // current task and request are validated, every data-carrying operation
@@ -43,7 +45,7 @@ export const createTaskController = (b: TaskBindings): TaskController => {
         operations,
       }, redactors);
       const next = await b.transport().mutate(redactedRequest);
-      if (b.destroyed()) return undefined;
+      if (b.destroyed() || b.task().taskId !== taskId) return undefined;
       // A successful mutation updates last-seen only when the identity rule
       // accepts it; an older result can never regress the current task.
       if (isTaskIdentityNewer(taskIdentity(next), taskIdentity(b.task()))) {
@@ -56,16 +58,17 @@ export const createTaskController = (b: TaskBindings): TaskController => {
       return await attempt(b.task().taskRevision);
     } catch (error) {
       if (b.destroyed() || !(error instanceof RevisionConflictError)) throw error;
-      // Adopt the latest task, then retry the rejected mutation exactly once.
-      b.setTask(error.latestTask);
-      b.commit();
+      // A late response cannot replace a newer subscription or another task.
+      if (b.task().taskId !== taskId || error.latestTask.taskId !== taskId) throw error;
+      adoptTask(error.latestTask);
       try {
-        return await attempt(error.latestTask.taskRevision);
+        return await attempt(b.task().taskRevision);
       } catch (retryError) {
         // A second conflict also adopts the latest task, then stops.
         if (b.destroyed() || !(retryError instanceof RevisionConflictError)) throw retryError;
-        b.setTask(retryError.latestTask);
-        b.commit();
+        if (b.task().taskId === taskId && retryError.latestTask.taskId === taskId) {
+          adoptTask(retryError.latestTask);
+        }
         throw retryError;
       }
     }

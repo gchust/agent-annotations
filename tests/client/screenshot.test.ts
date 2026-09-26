@@ -1,5 +1,5 @@
 /** @vitest-environment jsdom */
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildScreenshotSvg,
@@ -9,7 +9,11 @@ import {
   inlineScreenshotStyle,
   prepareViewportSnapshot,
   renderPreparedSnapshotPng,
+  MAX_SCREENSHOT_NODES,
+  MAX_SCREENSHOT_PREPARATION_MS,
 } from "../../src/client/screenshot.js";
+
+afterEach(() => vi.restoreAllMocks());
 
 describe("best-effort screenshot evidence", () => {
   it("copies Card layout with valid kebab-case CSS properties", () => {
@@ -173,6 +177,30 @@ describe("best-effort screenshot evidence", () => {
 
   it("fails closed when the serialized snapshot exceeds its ceiling", () => {
     document.body.innerHTML = `<div>${"x".repeat(2_100_000)}</div>`;
+    const clone = vi.spyOn(document.documentElement, "cloneNode");
     expect(prepareViewportSnapshot()).toBeNull();
+    expect(clone).not.toHaveBeenCalled();
+  });
+
+  it("skips oversized DOMs before cloning or computing styles", () => {
+    document.body.innerHTML = "<i>x</i>".repeat(MAX_SCREENSHOT_NODES);
+    const clone = vi.spyOn(document.documentElement, "cloneNode");
+    const style = vi.spyOn(window, "getComputedStyle");
+    expect(prepareViewportSnapshot()).toBeNull();
+    expect(clone).not.toHaveBeenCalled();
+    expect(style).not.toHaveBeenCalled();
+  });
+
+  it("abandons style preparation when its time budget is exhausted", () => {
+    document.body.innerHTML = "<main><button>Save</button></main>";
+    let elapsed = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => elapsed);
+    const originalStyle = window.getComputedStyle.bind(window);
+    const style = vi.spyOn(window, "getComputedStyle").mockImplementation((element) => {
+      elapsed = MAX_SCREENSHOT_PREPARATION_MS + 1;
+      return originalStyle(element);
+    });
+    expect(prepareViewportSnapshot()).toBeNull();
+    expect(style).toHaveBeenCalledOnce();
   });
 });

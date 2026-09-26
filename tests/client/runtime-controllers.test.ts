@@ -114,6 +114,49 @@ describe("runtime controllers (focused factory contracts)", () => {
     expect(state.task.taskRevision).toBe(1);
   });
 
+  it.each([false, true])("does not regress state on a late conflict (second conflict: %s)", async (secondConflict) => {
+    let task = taskFixture();
+    let rejectFirst!: (error: Error) => void;
+    const commits: number[] = [];
+    const transport = { mutate: vi.fn()
+      .mockImplementationOnce(() => new Promise((_, reject) => { rejectFirst = reject; }))
+      .mockImplementationOnce(async () => {
+        controller.adoptTask(taskFixture({ taskRevision: 4 }));
+        throw secondConflict
+          ? new RevisionConflictError(taskFixture({ taskRevision: 3 }), 3, 3)
+          : new Error("network unavailable");
+      }) };
+    const controller = createTaskController({
+      task: () => task, setTask: (next) => { task = next; },
+      transport: () => transport, guardedRedactors: () => [],
+      commit: () => { commits.push(task.taskRevision); }, destroyed: () => false,
+    });
+    const pending = controller.mutate([{ op: "update", annotationId: "ann-1", comment: "new" }]);
+    controller.adoptTask(taskFixture({ taskRevision: 3 }));
+    rejectFirst(new RevisionConflictError(taskFixture({ taskRevision: 2 }), 0, 2));
+    await expect(pending).rejects.toThrow();
+    expect(transport.mutate.mock.calls[1][0].expectedRevision).toBe(3);
+    expect(commits).toEqual([3, 4]);
+    expect(task.taskRevision).toBe(4);
+  });
+
+  it("does not replay a pending mutation into a replacement task", async () => {
+    let task = taskFixture();
+    let reject!: (error: Error) => void;
+    const transport = { mutate: vi.fn(() => new Promise((_, fail) => { reject = fail; })) };
+    const controller = createTaskController({
+      task: () => task, setTask: (next) => { task = next; },
+      transport: () => transport as never, guardedRedactors: () => [],
+      commit: () => undefined, destroyed: () => false,
+    });
+    const pending = controller.mutate([{ op: "complete", annotationId: "ann-1" }]);
+    controller.adoptTask(taskFixture({ taskId: "replacement" }));
+    reject(new RevisionConflictError(taskFixture({ taskRevision: 1 }), 0, 1));
+    await expect(pending).rejects.toBeInstanceOf(RevisionConflictError);
+    expect(transport.mutate).toHaveBeenCalledTimes(1);
+    expect(task.taskId).toBe("replacement");
+  });
+
   it("host controller disposes the system theme listener and clears route capture state", async () => {
     const removals = vi.fn();
     vi.stubGlobal("matchMedia", vi.fn(() => ({

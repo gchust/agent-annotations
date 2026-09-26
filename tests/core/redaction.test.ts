@@ -17,6 +17,8 @@ describe("generic redaction", () => {
       jwt,
       "Cookie: session=cookie-secret",
       "token=token-secret",
+      "accessToken=access-secret",
+      "refresh-token=refresh-secret",
       "password=password-secret",
       "input_value=input-secret",
       '<input value="input-secret">',
@@ -34,6 +36,8 @@ describe("generic redaction", () => {
         "https://example.test/callback?client_secret=client-value&ok=1"
       )
     ).not.toContain("client-value");
+    expect(redactAgentAnnotationsText("client.secret=client-value"))
+      .toBe("client.secret=[REDACTED]");
   });
 
   it("runs only the matching extension redactor and preserves namespaces", () => {

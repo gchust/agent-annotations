@@ -35,6 +35,9 @@ skips automatic capture and exposes the `Capture screenshot` action in the
 annotation editor plus `studio.commands.annotations.captureEvidence(id)`;
 `off` disables capture entirely — no entry, no page cloning. Invalid values
 throw a `TypeError` at plugin/mount time.
+Screenshot preparation is best-effort and skips pages exceeding 5,000 DOM
+nodes, a 100 ms cooperative preparation budget, or the 2 MB snapshot limit.
+Oversized pages still save annotations; only their screenshot is skipped.
 
 The package root exports the host-neutral `agent-annotations.task.v1` core and
 `mountAgentAnnotations()` browser runtime. Public contracts are also available
@@ -376,6 +379,8 @@ token, and validates Host plus Origin/Referer. Set `allowRemote: true` only on a
 trusted development network. Runtime data is stored under `.agent-annotations`;
 do not commit it. The client does not collect form values, cookies,
 Authorization headers, request bodies, or response bodies.
+The plugin blocks direct HTTP and module-import access to runtime files,
+including custom runtime directories, public-directory paths, and symlinks.
 
 Generic redaction is the final persistence boundary: every mutation path
 (browser, CLI, Vite API, and direct store calls) passes through

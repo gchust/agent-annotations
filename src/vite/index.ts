@@ -74,7 +74,7 @@ const isLoopback = (address: string | undefined): boolean =>
 
 const inside = (root: string, candidate: string): boolean => {
   const relative = path.relative(root, candidate);
-  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+  return relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
 };
 
 const requestOriginMatches = (request: Pick<IncomingMessage, "headers">): boolean => {
@@ -153,6 +153,14 @@ export default function agentAnnotations(
   let taskWatcher: FSWatcher | undefined;
   let viteBase = "/";
   let resolvedEndpoint = endpoint;
+  const isRuntimeFile = (file: string): boolean => {
+    if (inside(runtimeRoot, path.resolve(file))) return true;
+    try {
+      return inside(realpathSync.native(runtimeRoot), realpathSync.native(file));
+    } catch {
+      return false; // Missing files cannot expose runtime data.
+    }
+  };
 
   if (allowRemote) {
     console.warn(
@@ -178,6 +186,7 @@ export default function agentAnnotations(
   const serverPlugin: Plugin = {
     name: "agent-annotations",
     apply: "serve",
+    enforce: "pre",
     configResolved(config) {
       viteBase = config.base;
       resolvedEndpoint = `${viteBase.replace(/\/$/, "")}${endpoint}`;
@@ -192,6 +201,10 @@ export default function agentAnnotations(
       return id === VIRTUAL_ID ? RESOLVED_VIRTUAL_ID : undefined;
     },
     load(id) {
+      // Also guard imports (?raw/?url/JSON), before Vite's asset loaders.
+      if (path.isAbsolute(id) && isRuntimeFile(id.split(/[?#]/, 1)[0]!)) {
+        throw new Error("Agent Annotations runtime files are private");
+      }
       if (id !== RESOLVED_VIRTUAL_ID) return undefined;
       const imports = extensions
         .map((specifier, index) => `import * as extension${index} from ${JSON.stringify(specifier)};`)
@@ -318,7 +331,28 @@ export default function agentAnnotations(
         });
       }
       server.middlewares.use(async (request, response, next) => {
-        const url = new URL(request.url ?? "/", "http://agent-annotations.local");
+        let url: URL;
+        let pathname: string;
+        try {
+          url = new URL(request.url ?? "/", "http://agent-annotations.local");
+          pathname = decodeURIComponent(url.pathname).replace(/\\/g, "/");
+        } catch {
+          return json(response, 400, { error: "invalid_url" });
+        }
+        if (pathname.startsWith(viteBase)) pathname = `/${pathname.slice(viteBase.length)}`;
+        // Vite's publicDir and fs.strict=false bypass server.fs.deny. Guard
+        // physical paths here as well as module loads, including symlinks.
+        const files = pathname.startsWith("/@fs/")
+          ? [path.resolve(pathname.slice(5))]
+          : [
+              path.resolve(server.config.root, `.${pathname}`),
+              ...(server.config.publicDir ? [path.resolve(server.config.publicDir, `.${pathname}`)] : []),
+            ];
+        const alias = server.config.resolve.alias.find(({ find }) =>
+          typeof find === "string" ? pathname.startsWith(find) : find.test(pathname)
+        );
+        if (alias) files.push(path.resolve(pathname.replace(alias.find, alias.replacement)));
+        if (files.some(isRuntimeFile)) return json(response, 404, { error: "not_found" });
         if (!url.pathname.startsWith(`${resolvedEndpoint}/`) && url.pathname !== resolvedEndpoint) return next();
         if (!isAgentAnnotationsRequestAllowed(
           request.socket.remoteAddress,

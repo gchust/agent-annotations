@@ -21,6 +21,21 @@ const redactors: AgentAnnotationsExtensionRedactor[] = [
 ];
 
 describe("redactAgentAnnotationsMutationRequest", () => {
+  it.each(["accessToken", "refreshToken", "clientSecret", "access_token", "refresh-token", "client.secret"])("redacts %s before delegation and persistence", (key) => {
+    const task = taskFixture();
+    const data = { [key]: "UNIQUE_SECRET_SENTINEL", keep: "visible" };
+    const request = redactAgentAnnotationsMutationRequest(task, {
+      taskId: task.taskId, expectedRevision: task.taskRevision,
+      operations: [{ op: "setExtension", annotationId: "ann-1", extensionId: "auth.context", data }],
+    });
+    expect(request.operations[0]).toMatchObject({ data: { keep: "visible" } });
+    expect(JSON.stringify(request)).not.toContain("UNIQUE_SECRET_SENTINEL");
+    const persisted = prepareAgentAnnotationsTaskForPersistence(taskFixture({
+      annotations: [annotationFixture({ extensions: { "auth.context": { nested: data } } })],
+    }));
+    expect(persisted.annotations[0].extensions["auth.context"]).toEqual({ nested: { keep: "visible" } });
+  });
+
   it("redacts add annotation text, html, style, attributes, and extension data", () => {
     const task = taskFixture();
     const operation = {

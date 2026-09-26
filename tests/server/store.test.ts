@@ -457,6 +457,9 @@ describe("file task store", () => {
         extensionId: "demo.extension",
         data: {
           token: "Bearer UNIQUE_SECRET_SENTINEL_set",
+          accessToken: "UNIQUE_SECRET_SENTINEL_access",
+          refreshToken: "UNIQUE_SECRET_SENTINEL_refresh",
+          clientSecret: "UNIQUE_SECRET_SENTINEL_client",
           keep: "Bearer UNIQUE_SECRET_SENTINEL_keep",
         },
       }],
@@ -465,6 +468,7 @@ describe("file task store", () => {
     expect(extensions).not.toHaveProperty("token");
     expect(JSON.stringify(extensions)).not.toContain("UNIQUE_SECRET_SENTINEL");
     expect(JSON.stringify(store.read())).not.toContain("UNIQUE_SECRET_SENTINEL");
+    expect(readFileSync(store.taskPath, "utf8")).not.toContain("UNIQUE_SECRET_SENTINEL");
   });
 
   it("keeps the final persistence redaction idempotent across repeated mutations", async () => {
