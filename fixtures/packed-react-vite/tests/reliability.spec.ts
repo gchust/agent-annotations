@@ -79,6 +79,26 @@ test("screenshot keeps style, media geometry, scroll, large viewport and aligned
   console.log(`overlay-pixels inside=${JSON.stringify(samples.inside)} outside=${JSON.stringify(samples.outside)}`);
 });
 
+test("oversized pages still save annotations without preparing a screenshot", async ({ page }) => {
+  await page.goto("/");
+  await expect(shadow(page, ".aa-dock")).toBeVisible();
+  await page.evaluate(() => {
+    const oversized = document.createElement("section");
+    oversized.innerHTML = "<span>large page</span>".repeat(10_000);
+    document.body.append(oversized);
+  });
+  await save(page, page.locator("#screenshot-card"), "Oversized page evidence");
+  await expect(shadow(page, '[role="status"]')).toHaveText("Annotation saved");
+  await expect(shadow(page, ".aa-composer")).toHaveCount(0);
+  const diagnostics = path.join(runtimeRoot, "diagnostics.json");
+  await expect.poll(() => existsSync(diagnostics) &&
+    readFileSync(diagnostics, "utf8").includes("snapshot preparation failed")
+  ).toBe(true);
+  const annotation = JSON.parse(readFileSync(taskPath, "utf8")).annotations.at(-1);
+  expect(annotation.comment).toBe("Oversized page evidence");
+  expect(annotation.evidence ?? []).toHaveLength(0);
+});
+
 test("automatic evidence preserves frozen popover state without blocking saved UI", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.goto("/");
